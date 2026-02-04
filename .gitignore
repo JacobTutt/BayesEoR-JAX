@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info
+*.egg
+*.log
+*.ipynb
+.ipynb_checkpoints/
+.coverage*
+.pytest_cache/
+.mypy_cache/
+
+# virtual environments
+.venv/
+venv/
+env/
+.env
+
+# build artifacts
+build/
+dist/
+.eggs/
+
+# editor cruft
+.idea/
+.vscode/
+.DS_Store
+
+# Others
+*.xlsx
