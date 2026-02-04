@@ -16,8 +16,8 @@ env/
 .env
 
 # build artifacts
-build/
-dist/
+/build/
+/dist/
 .eggs/
 
 # editor cruft
