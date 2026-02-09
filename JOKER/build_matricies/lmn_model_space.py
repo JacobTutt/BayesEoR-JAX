@@ -1,9 +1,9 @@
 """
-HEALPix-based image-domain model for constructing (l, m, n) coordinates over time.
+HEALPix-based image-domain model for constructing (l, m, n) and (az, za) over time.
 
-For wide-field interferometric data, sky pixels must be mapped into direction
-cosines for each time step. This module builds HEALPix pixel centers, applies
-field-of-view masks, and computes (l, m, n) for EoR and foreground domains.
+For wide-field interferometric data, sky pixels are mapped into direction cosines
+for each time step. This module selects HEALPix pixels within EoR/FG fields of view,
+then computes (l, m, n) and (az, za) for those fixed pixel sets across time.
 """
 
 import jax
@@ -22,7 +22,7 @@ import jax_healpy as jhp
 
 class LMN_ModelSpace:
     """
-    HEALPix image-domain model used to define (l, m, n) grids for a given FoV.
+    HEALPix image-domain model used to define (l, m, n) and (az, za) grids for a given FoV.
 
     Parameters
     ----------
@@ -112,7 +112,14 @@ class LMN_ModelSpace:
 
     def _construct_time_array(self, jd_start: float, n_t: int, d_t: float) -> Tuple[np.ndarray, float]:
         """
-        Create Julian Date time stamps from start time, count, and cadence.
+        Create Julian Date time stamps and return the center time.
+
+        Returns
+        -------
+        jd_array : np.ndarray
+            Time stamps in JD with shape (n_t,).
+        jd_center : float
+            Center time (middle value if odd, midpoint if even).
         """
         # If only one time step is requested, return an array with the single start time.
         if n_t == 1:
@@ -137,6 +144,11 @@ class LMN_ModelSpace:
     def _observation_field_center(self, jd: float) -> Tuple[float, float]:
         """
         Compute the RA and Dec of the observation pointing center for a given time step.
+
+        Returns
+        -------
+        ra_dec : tuple
+            (ra_deg, dec_deg) in degrees.
         """
         t = Time(jd, scale="utc", format="jd")
         altaz = AltAz(obstime=t, location=self.telescope_location)
@@ -146,8 +158,23 @@ class LMN_ModelSpace:
 
     def _healpix_pixels_fov(self, field_center: Tuple[float, float], fov_deg: Tuple[float, float]) -> jnp.ndarray:
         """
-        Return HEALPix pixel indices within a the circular FoVs for the EoR and FG models, respectively, centered
-        around a given field center (RA, Dec) in degrees and with a given diameter in degrees.
+        Return HEALPix pixel indices within the EoR and FG circular FoVs.
+
+        Parameters
+        ----------
+        field_center : tuple
+            (ra_deg, dec_deg) center of the FoV.
+        fov_deg : tuple
+            (fov_eor_deg, fov_fg_deg) full diameters in degrees.
+
+        Returns
+        -------
+        pix_indices_eor : jnp.ndarray
+            HEALPix indices for EoR FoV.
+        pix_indices_fg : jnp.ndarray
+            HEALPix indices for FG FoV.
+        eor_fg_shared_axis : jnp.ndarray
+            Boolean mask over FG pixels indicating which are also in EoR FoV.
         """
         # Convert the field center from (RA, Dec) to a unit vector in Cartesian coordinates.
         ra_rad = jnp.radians(field_center[0])
@@ -179,7 +206,7 @@ class LMN_ModelSpace:
         self, jds: np.ndarray
     ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
-        Return (l, m, n) arrays for the preselected EoR/FG HEALPix pixels over time.
+        Return (l, m, n) and (az, za) arrays for the preselected pixels over time.
 
         Returns
         -------
