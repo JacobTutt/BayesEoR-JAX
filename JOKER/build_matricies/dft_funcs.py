@@ -60,15 +60,17 @@ def build_nudft_matrix(
     return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
 
 
+
 def inverse_udft_1d_rect(
-        n_freq: int,
-        n_eta: int,
-        n_modes: int = 0,
-        n_powerlaws: Optional[int] = None,
-        beta: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
-        f0_mhz: Optional[float] = None,
-        df_mhz: Optional[float] = None,
-        include_eta0: bool = True) -> jnp.ndarray:
+    n_freq: int,
+    n_eta: int,
+    n_modes: int = 0,
+    n_powerlaws: Optional[int] = None,
+    beta: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
+    f0_mhz: Optional[float] = None,
+    df_mhz: Optional[float] = None,
+    include_eta0: bool = True
+) -> jnp.ndarray:
     """
     Generate a 1D Uniform DFT matrix transforming delay to frequency space as well as
     optional large spectral scale model (LSSM) basis vectors.
@@ -104,30 +106,28 @@ def inverse_udft_1d_rect(
     -------
     idft_array : jnp.ndarray of complex floats
         1D DFT matrix with shape `(n_freq, n_eta - (not include_eta0))`.
-
     """
-    # As this is a Uniform DFT, the Fourier modes are simply integer 
-    # multiples and thus the grid is defined by the integer indices.
-    index_f = (jnp.arange(n_freq) - n_freq // 2).reshape(-1, 1)   # (n_freq, 1)
-    index_eta = (jnp.arange(n_eta) - n_eta // 2).reshape(1, -1)   # (1, n_eta)
-    # Optionally exclude the eta=0 mode if not fitting for it.
-    # This represents the constant offset in frequency space 
-    # It is included in the foreground model but not the EoR model.
+    # 1. Define coordinate grids as 2D arrays (N_axes=1, N_points)
+    # Frequency channel indices (the "output" space for an IDFT)
+    index_f = (jnp.arange(n_freq, dtype=jnp.float64) - (n_freq // 2))
+    index_eta = (jnp.arange(n_eta, dtype=jnp.float64) - (n_eta // 2))
+
+    # Optionally exclude the DC (eta=0) mode
     if not include_eta0:
-        mask = (index_eta != 0)          # (1, n_eta) boolean
-        index_eta = index_eta[:, mask[0]]  # (1, n_eta-1)
+        index_eta = index_eta[index_eta != 0.0]
+
+
+
 
     # Define the 1D IDFT matrix for the Fourier modes. 
     # As different normalisations are applied to the:
-    # LSSM basis vectors, the full eta grid and the central eta=0 mode.
-    # These are applied downstream 
-    phase = (index_eta * index_f / n_freq).astype(jnp.float64)
-    idft_array = jnp.exp((-2.0 * jnp.pi * 1j) * phase).astype(jnp.complex128)
+    # LSSM, full eta grid and central eta=0 mode - these are applied downstream 
+    phase = (index_f[:, jnp.newaxis] @ index_eta[jnp.newaxis, :]) / float(n_freq)
     
-    # If fitting for large spectral scale structure, construct
-    # the LSSM basis vectors and append them to the DFT matrix.
+    # Sign is -1 for an Inverse Transform (Delay -> Frequency)
+    idft_array = jnp.exp(-2j * jnp.pi * phase).astype(jnp.complex128)
 
-    # Only done for the FG Model 
+    # Handle Large Spectral Scale Model (LSSM)
     if n_modes > 0:
         n_powerlaws = 0 if n_powerlaws is None else n_powerlaws
         lssm_basis_vectors = build_lssm_basis(
@@ -137,12 +137,11 @@ def inverse_udft_1d_rect(
             f0_mhz=f0_mhz,
             df_mhz=df_mhz,
             beta=beta,
-        )
-        # Save the LSSM basis vectors in the same array as the DFT matrix
+        ).astype(jnp.complex128)
+        # Combine the Fourier basis and LSSM basis
         idft_array = jnp.hstack((idft_array, lssm_basis_vectors))
 
     return idft_array
-
 
 
 
