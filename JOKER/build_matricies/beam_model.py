@@ -116,14 +116,11 @@ class Beam_Model:
     def get_beam_vals(self, coords: jnp.ndarray, freqs: jnp.ndarray) -> jnp.ndarray:
         """
         Get an array of beam values from (az, za) coordinates.
-        
-        If `self.beam_type` is 'gaussian', this function assumes that the
-        beam width is symmetric along the l and m axes.
 
         Parameters
         ----------
         coords : jnp.ndarray
-            Shape (n_t, n_pix, 2) containing [az, za] in radians.
+            Shape (n_t, 2, n_pix) containing [az, za] in radians.
         freqs : jnp.ndarray
             Shape (n_freq,) in Hz.
 
@@ -132,8 +129,8 @@ class Beam_Model:
         beam_vals : jnp.ndarray
             Shape (n_freq, n_t, n_pix).
         """
-        az = coords[..., 0]  # (n_t, n_pix)
-        za = coords[..., 1]  # (n_t, n_pix)
+        az = coords[:, 0, :]  # (n_t, n_pix)
+        za = coords[:, 1, :]  # (n_t, n_pix)
 
         # Reshape freqs for broadcasting: (n_freq, 1, 1)
         f = freqs[:, jnp.newaxis, jnp.newaxis]

@@ -79,6 +79,7 @@ class LMN_ModelSpace:
         # Store the HEALPix resolution and telescope location parameters.
         self.nside = nside
         self.npix = 12 * nside**2
+        self.pixel_area_sr = jhp.nside2pixarea(nside)
         self.telescope_latlonalt = telescope_latlonalt
 
         # Store the time parameters for constructing the time array and pointing centers.

@@ -100,4 +100,4 @@ class UV_ModelSpace:
                 logging.info("No (u, v) = (0, 0) monopole found to remove as n_u and n_v are even")
 
 
-        return jnp.stack([u_vec, v_vec], axis=0)
+        return jnp.stack([u_vec, v_vec], axis=0) # Shape (2, N_uv)
