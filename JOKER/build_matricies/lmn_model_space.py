@@ -47,12 +47,8 @@ class LMN_ModelSpace:
     ----------
     times_jd : np.ndarray
         Observation times in Julian Date with shape (n_t,).
-    lmn_eor : jnp.ndarray
-        (l, m, n) array for EoR pixels with shape (n_t, n_pix_eor, 3).
     lmn_fg : jnp.ndarray
         (l, m, n) array for FG pixels with shape (n_t, n_pix_fg, 3).
-    az_za_eor : jnp.ndarray
-        (az, za) array for EoR pixels with shape (n_t, n_pix_eor, 2).
     az_za_fg : jnp.ndarray
         (az, za) array for FG pixels with shape (n_t, n_pix_fg, 2).
     eor_fg_shared_axis : jnp.ndarray
@@ -104,8 +100,8 @@ class LMN_ModelSpace:
         self.n_pix_eor = len(self.pix_indices_eor)
         self.n_pix_fg = len(self.pix_indices_fg)
 
-        # Compute the (l, m, n) coordinates and (az, za) for pixels within the EoR/FG FoVs.
-        self.lmn_eor, self.lmn_fg, self.az_za_eor, self.az_za_fg = self._lmn_in_fov(self.times_jd)
+        # Compute the (l, m, n) coordinates and (az, za) for FG pixels.
+        self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
 
 
 
@@ -196,70 +192,41 @@ class LMN_ModelSpace:
 
     def _lmn_in_fov(
         self, jds: np.ndarray
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
         Return (l, m, n) and (az, za) arrays for the preselected pixels over time.
 
         Returns
         -------
-        lmn_eor : jnp.ndarray
-            Array with shape (n_t, n_pix_eor, 3) containing (l, m, n) for the EoR pixels.
         lmn_fg : jnp.ndarray
-            Array with shape (n_t, n_pix_fg, 3) containing (l, m, n) for the foreground pixels.
-        az_za_eor : jnp.ndarray
-            Array with shape (n_t, n_pix_eor, 2) containing (az, za) for the EoR pixels.
+            Array with shape (n_t, 3, n_pix_fg) containing (l, m, n) for the foreground pixels.
         az_za_fg : jnp.ndarray
-            Array with shape (n_t, n_pix_fg, 2) containing (az, za) for the foreground pixels.
+            Array with shape (n_t, 2, n_pix_fg) containing (az, za) for the foreground pixels.
         """
-        # Get the RA and Dec coordinates for the preselected HEALPix pixel indices.
-        ra_eor_deg, dec_eor_deg = jhp.pix2ang(self.nside, self.pix_indices_eor, lonlat=True)
+        # Get the RA and Dec coordinates for the preselected FG HEALPix pixel indices.
         ra_fg_deg, dec_fg_deg = jhp.pix2ang(self.nside, self.pix_indices_fg, lonlat=True)
 
-        # Create SkyCoord objects for the EoR and foreground pixels in the ICRS frame.
-        skycoord_eor = SkyCoord(np.array(ra_eor_deg) * u.deg, np.array(dec_eor_deg) * u.deg, frame="icrs")
-        if self.fovs_match:
-            skycoord_fg = skycoord_eor
-        else:
-            skycoord_fg = SkyCoord(np.array(ra_fg_deg) * u.deg, np.array(dec_fg_deg) * u.deg, frame="icrs")
+        # Create SkyCoord objects for the foreground pixels in the ICRS frame.
+        skycoord_fg = SkyCoord(np.array(ra_fg_deg) * u.deg, np.array(dec_fg_deg) * u.deg, frame="icrs")
 
         # Initialize arrays to hold the (l, m, n) coordinates for each time step and pixel.
         n_t = len(jds)
-        lmn_eor = jnp.zeros((n_t, self.n_pix_eor, 3), dtype=jnp.float64)
-        lmn_fg = jnp.zeros((n_t, self.n_pix_fg, 3), dtype=jnp.float64)
-        az_za_eor = jnp.zeros((n_t, self.n_pix_eor, 2), dtype=jnp.float64)
-        az_za_fg = jnp.zeros((n_t, self.n_pix_fg, 2), dtype=jnp.float64)
+        lmn_fg = jnp.zeros((n_t, 3, self.n_pix_fg), dtype=jnp.float64) # Shape (n_t, 3, n_pix_fg)
+        az_za_fg = jnp.zeros((n_t, 2, self.n_pix_fg), dtype=jnp.float64) # Shape (n_t, 2, n_pix_fg)
 
         for i_t, jd in enumerate(jds):
             # Compute the AltAz coordinates for the given time step and telescope location.
             t = Time(jd, scale="utc", format="jd")
-            # First for the EoR 
-            altaz_eor = skycoord_eor.transform_to(AltAz(obstime=t, location=self.telescope_location))
-            # Extract azimuth and zenith angle for the selected pixels.
-            az_eor = jnp.array(altaz_eor.az.rad)
-            za_eor = jnp.pi / 2 - jnp.array(altaz_eor.alt.rad)
-            # Convert from (az, za) to (l, m, n) for the EoR and foreground pixels, respectively.
-            l_eor = jnp.sin(za_eor) * jnp.sin(az_eor)
-            m_eor = jnp.sin(za_eor) * jnp.cos(az_eor)
-            n_eor = jnp.cos(za_eor)
+            # Foreground pixels only.
+            altaz_fg = skycoord_fg.transform_to(AltAz(obstime=t, location=self.telescope_location))
+            az_fg = jnp.array(altaz_fg.az.rad)
+            za_fg = jnp.pi / 2 - jnp.array(altaz_fg.alt.rad)
+            # Convert from (az, za) to (l, m, n) for the foreground pixels.
+            l_fg = jnp.sin(za_fg) * jnp.sin(az_fg)
+            m_fg = jnp.sin(za_fg) * jnp.cos(az_fg)
+            n_fg = jnp.cos(za_fg)
             # Insert the (l, m, n) and (az, za) coordinates for this time step.
-            lmn_eor = lmn_eor.at[i_t].set(jnp.stack([l_eor, m_eor, n_eor], axis=-1))
-            az_za_eor = az_za_eor.at[i_t].set(jnp.stack([az_eor, za_eor], axis=-1))
+            lmn_fg = lmn_fg.at[i_t].set(jnp.stack([l_fg, m_fg, n_fg], axis=0)) 
+            az_za_fg = az_za_fg.at[i_t].set(jnp.stack([az_fg, za_fg], axis=0))
 
-            # If FoVs match, we can reuse the EoR (l, m, n) coordinates for the foreground model. 
-            if self.fovs_match:
-                lmn_fg = lmn_fg.at[i_t].set(jnp.stack([l_eor, m_eor, n_eor], axis=-1))
-                az_za_fg = az_za_fg.at[i_t].set(jnp.stack([az_eor, za_eor], axis=-1))
-            # Otherwise, we need to compute the (l, m, n) coordinates separately for the foreground pixels.
-            else:
-                altaz_fg = skycoord_fg.transform_to(AltAz(obstime=t, location=self.telescope_location))
-                az_fg = jnp.array(altaz_fg.az.rad)
-                za_fg = jnp.pi / 2 - jnp.array(altaz_fg.alt.rad)
-                # Convert from (az, za) to (l, m, n) for the foreground pixels.
-                l_fg = jnp.sin(za_fg) * jnp.sin(az_fg)
-                m_fg = jnp.sin(za_fg) * jnp.cos(az_fg)
-                n_fg = jnp.cos(za_fg)
-                # Insert the (l, m, n) coordinates for this time step into the corresponding array.
-                lmn_fg = lmn_fg.at[i_t].set(jnp.stack([l_fg, m_fg, n_fg], axis=-1))
-                az_za_fg = az_za_fg.at[i_t].set(jnp.stack([az_fg, za_fg], axis=-1))
-
-        return lmn_eor, lmn_fg, az_za_eor, az_za_fg
+        return lmn_fg, az_za_fg
