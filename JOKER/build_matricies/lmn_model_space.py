@@ -211,13 +211,13 @@ class LMN_ModelSpace:
         Returns
         -------
         lmn_eor : jnp.ndarray
-            Array with shape (n_t, n_pix_eor, 3).
+            Array with shape (n_t, n_pix_eor, 3) containing (l, m, n) for the EoR pixels.
         lmn_fg : jnp.ndarray
-            Array with shape (n_t, n_pix_fg, 3).
+            Array with shape (n_t, n_pix_fg, 3) containing (l, m, n) for the foreground pixels.
         az_za_eor : jnp.ndarray
-            Array with shape (n_t, n_pix_eor, 2) containing (az, za).
+            Array with shape (n_t, n_pix_eor, 2) containing (az, za) for the EoR pixels.
         az_za_fg : jnp.ndarray
-            Array with shape (n_t, n_pix_fg, 2) containing (az, za).
+            Array with shape (n_t, n_pix_fg, 2) containing (az, za) for the foreground pixels.
         """
         # Get the RA and Dec coordinates for the preselected HEALPix pixel indices.
         ra_eor_deg, dec_eor_deg = jhp.pix2ang(self.nside, self.pix_indices_eor, lonlat=True)
