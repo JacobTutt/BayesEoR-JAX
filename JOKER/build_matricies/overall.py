@@ -1,6 +1,7 @@
 """
 """
 
+from turtle import Shape
 import jax
 jax.config.update("jax_enable_x64", True)
 
@@ -60,36 +61,6 @@ class BuildMatrices:
         [2.63], or multiple spectral indices, e.g. [2.63, 2.82]. Defaults to
         [2.63, 2.82].
 
-    
-    SubHarmonic Grid (SHG) parameters:
-    use_shg : bool, optional
-        Use the SubHarmonic Grid (SHG) in the model uv-plane. Defaults to
-        False.
-    n_u_sh : int, optional
-        Number of pixels on a side for the u-axis in the subharmonic model
-        uv-plane. Defaults to None.
-    du_sh : float, optional
-        Fourier mode spacing along the u axis in inverse radians of the
-        subharmonic model uv-plane. Defaults to None.
-    n_v_sh : int, optional
-        Number of pixels on a side for the v-axis in the subharmonic model
-        uv-plane. Defaults to None.
-    dv_sh : float, optional
-        Fourier mode spacing along the v axis in inverse radians of the
-        subharmonic model uv-plane. Defaults to None.
-    n_modes_sh : int, optional
-        Number of large spectral scale modes for each pixel in the subharmonic
-        grid. Defaults to None.
-    n_powerlaws_sh : int, optional
-        Number of power law coefficients used in the large spectral scale model
-        for each pixel in the subharmonic grid. Defaults to None.
-    beta_sh : list of float, optional
-        Brightness temperature power law spectral index/indices used in the
-        large spectral scale model. Defaults to [2.63, 2.82].
-    fit_for_sh_amps : bool, optional
-        If True, fit per-frequency SHG amplitudes (full eta spectrum, includes eta=0).
-        If False, fit only smooth spectral terms (eta collapsed to zero mode only).
-        Defaults to False.
     
     # Frequency and line of sight Fourier mode parameters:
     n_freq : int
@@ -162,12 +133,6 @@ class BuildMatrices:
         Array containing the number of redundant baselines at each
         (u(t), v(t), w(t)) in the instrument model with shape (nt, nbls, 1).
         Defaults to None.
-    phasor : numpy.ndarray, optional
-        Array with shape (ndata,) that contains the phasor term used to phase
-        visibilities after performing the nuDFT from HEALPix (l, m, f) to
-        instrumentally sampled, unphased (u, v, f).  Defaults to None, i.e.
-        modelling unphased visibilities. Defaults to None.
-
     """
 
 
@@ -184,15 +149,6 @@ class BuildMatrices:
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
-        use_shg: bool = False,
-        n_u_sh: Optional[int] = None,
-        du_sh: Optional[float] = None,
-        n_v_sh: Optional[int] = None,
-        dv_sh: Optional[float] = None,
-        n_modes_sh: Optional[int] = None,
-        n_powerlaws_sh: Optional[int] = None,
-        beta_sh: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
-        fit_for_sh_amps: bool = False,
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
@@ -217,7 +173,6 @@ class BuildMatrices:
         freq_interp_kind: str = 'cubic',
         uvw_array_m: Optional[jnp.ndarray] = None,
         bl_red_array: Optional[jnp.ndarray] = None,
-        phasor: Optional[jnp.ndarray] = None,
     ) -> None:
         
         # Store the input parameters as attributes of the class instance.
@@ -243,22 +198,6 @@ class BuildMatrices:
         # Overall No. of UV space samples in the foreground model (accounting for optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
-        
-        # Store the SubHarmonic Grid (SHG) parameters.
-        self.use_shg = use_shg
-        self.n_u_sh = n_u_sh
-        self.du_sh = du_sh
-        self.n_v_sh = n_v_sh
-        self.dv_sh = dv_sh
-        # LSSM parameters for the subharmonic grid
-        self.n_modes_sh = n_modes_sh
-        self.n_powerlaws_sh = n_powerlaws_sh
-        self.fit_for_sh_amps = fit_for_sh_amps
-        self.beta_sh = beta_sh if beta_sh is not None else [2.63, 2.82]
-        # Overall No. of UV space samples in the subharmonic grid (accounting for monopole exclusion).
-        # The monopole of the SHG is always excluded
-        self.n_uv_sh = (n_u_sh * n_v_sh) - 1
-
         # Store the frequency and line of sight Fourier mode parameters.
         self.n_freq = n_freq
         self.f0_mhz = f0_mhz
@@ -277,6 +216,7 @@ class BuildMatrices:
         self.n_t = n_t
         self.d_t = d_t
 
+
         # Store the beam model parameters.
         self.beam_type = beam_type
         self.peak_amp = peak_amp
@@ -289,11 +229,18 @@ class BuildMatrices:
         self.freq_interp_kind = freq_interp_kind
 
         # Store the data products and parameters.
-        self.uvw_array_m = jnp.array(uvw_array_m) # Shape (nt, nbls, 3)
-        self.inst_uvw_irad = self.uvw_array_m[jnp.newaxis, :, :, :]/ (float(c.to("m/s").value) / self.freq_hz[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]) # Shape (nf, nt, nbls, 3)
-        self.inst_uvw_irad = jnp.swapaxes(self.inst_uvw_irad, -2, -1) # Shape (nf, nt, 3, nbls)
+        uvw_array_m = jnp.array(uvw_array_m) # Shape (nt, nbls, 3)
+        # Convert from units: meters to inverse radians by
+        # dividing by the wavelength (c / freq_hz) and adding a new axis for frequency.
+        # Shape (nf, nt, nbls, 3)
+        inst_uvw_irad = uvw_array_m[jnp.newaxis, :, :, :]/ (float(c.to("m/s").value) / self.freq_hz[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]) 
+        # Swap axis ready for import into nudft functions. Shape (nf, nt, 3, nbls)
+        inst_uvw_irad = jnp.swapaxes(inst_uvw_irad, -2, -1)
+        # Only select the first time step for the (u, v, w) coordinates 
+        # The scan is done through rotation of the beam and constant sky and instrument (u, v, w) coordinates.
+        self.inst_uvw_irad = inst_uvw_irad[:, 0, :, :]
+
         self.bl_red_array = bl_red_array
-        self.phasor = phasor
 
 
         # Initialised the UV_model space, LMN_ModelSpace and BeamModel classes as attributes of the BuildMatrices class.
@@ -302,16 +249,10 @@ class BuildMatrices:
             n_v_eor=self.n_v_eor,
             n_u_fg=self.n_u_fg,
             n_v_fg=self.n_v_fg,
-            n_u_sh=self.n_u_sh,
-            n_v_sh=self.n_v_sh,
             du_eor=self.du_eor,
             dv_eor=self.dv_eor,
             du_fg=self.du_fg,
             dv_fg=self.dv_fg,
-            du_sh=self.du_sh if self.du_sh is not None else 1.0,
-            dv_sh=self.dv_sh if self.dv_sh is not None else 1.0,
-            use_shg=self.use_shg,
-            sh_spacing= "linear",
             exclude_monopole=not self.fit_for_monopole,
         )
 
@@ -320,7 +261,7 @@ class BuildMatrices:
             fov_fg=self.fov_fg,
             nside=self.nside,
             telescope_latlonalt=self.telescope_latlonalt,
-            jd_start=self.jd_start,
+            jd_center=self.jd_start,
             n_t=self.n_t,
             d_t=self.d_t,
         )
@@ -354,11 +295,9 @@ class BuildMatrices:
 
         sampled_uv_vectors_eor = self.uv_model_space.uv_eor # Shape (2, N_uv_eor)
         sampled_uv_vectors_fg = self.uv_model_space.uv_fg # Shape (2, N_uv_fg)
-        # Not currently supporting Subharmonicn Grid (SHG) uv-plane components in the matrix construction. 
-
 
         # Frequency-dependent (u, v, w) sampled by the instrument in units of inverse radians
-        inst_uvws_irad = self.inst_uvw_irad # Shape (nf, nt, 3, nbls)
+        inst_uvws_irad = self.inst_uvw_irad # Shape (nf, 3, nbls)
 
         # Construct the dense NUIDFT matrices in Fprime relating the model
         # uv-plane (u, v, f) to the image space (l, m, f) coordinates.
@@ -434,12 +373,7 @@ class BuildMatrices:
                 self.nf*nuv_eor + i_f*nuv_fg,
                 self.nf*nuv_eor + (i_f + 1)*nuv_fg
             )
-            # FIXME: add support for the SHG uv-plane (issue #50)
-            # if self.use_shg:
-            #     uv_Fprime_inds_shg = slice(
-            #         self.nf*(nuv_eor + nuv_fg) + i_f*?,
-            #         self.nf*(nuv_eor + nuv_fg) + (i_f + 1)*?
-            #     )
+           
             for i_t in range(self.nt):
                 vis_inds = slice(
                     i_t*self.nf*self.nbls + i_f*self.nbls,
@@ -501,9 +435,6 @@ class BuildMatrices:
     
 
         
-
-
-
 
 
 
