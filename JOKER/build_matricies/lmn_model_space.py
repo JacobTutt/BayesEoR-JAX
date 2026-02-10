@@ -35,8 +35,8 @@ class LMN_ModelSpace:
         HEALPix Nside resolution. Defaults to 256.
     telescope_latlonalt : tuple, optional
         (lat_deg, lon_deg, alt_m). Defaults to HERA location.
-    jd_start : float
-        Start time step of the observation in JD units.
+    jd_center : float
+        Central time step of the observation in JD units.
         Defaults to 2461040.5 (2026-01-01 00:00:00 UTC).
     n_t : int, optional
         Number of time integrations. Defaults to 1.
@@ -68,7 +68,7 @@ class LMN_ModelSpace:
         fov_fg: Optional[float] = None,
         nside: int = 256,
         telescope_latlonalt: Tuple[float, float, float] = hera_location,
-        jd_start: float = 2461040.5,
+        jd_center: float = 2461040.5,
         n_t: int = 1,
         d_t: float = 60,
     ) -> None:
@@ -86,11 +86,11 @@ class LMN_ModelSpace:
         self.telescope_latlonalt = telescope_latlonalt
 
         # Store the time parameters for constructing the time array and pointing centers.
-        self.jd_start = jd_start
+        self.jd_center = jd_center
         self.n_t = n_t
         self.d_t = d_t
         # Construct the array of observation time stamps in Julian Date (JD).
-        self.times_jd, self.jd_center = self._construct_time_array(jd_start, n_t, d_t)
+        self.times_jd, self.time_ind_center = self._construct_time_array(jd_center, n_t, d_t)
 
         # Telescope location in ICRS transforms.
         lat, lon, alt = telescope_latlonalt
@@ -110,36 +110,28 @@ class LMN_ModelSpace:
 
 
 
-    def _construct_time_array(self, jd_start: float, n_t: int, d_t: float) -> Tuple[np.ndarray, float]:
+    def _construct_time_array(self, jd_center: float, n_t: int, d_t: float) -> Tuple[np.ndarray, np.ndarray, int]:
         """
-        Create Julian Date time stamps and return the center time.
+        Create Julian Date time stamps centered on the supplied JD.
 
         Returns
         -------
         jd_array : np.ndarray
             Time stamps in JD with shape (n_t,).
-        jd_center : float
-            Center time (middle value if odd, midpoint if even).
         """
-        # If only one time step is requested, return an array with the single start time.
-        if n_t == 1:
-            jd_array = np.array([jd_start], dtype=float)
-        # If multiple time steps are requested, compute the array of time stamps.
+        # Construct time indices centered on zero (left-of-center when even).
+        if n_t % 2:
+            time_inds = np.arange(-(n_t // 2), n_t // 2 + 1)
         else:
-            # Convert integration time from seconds to days and construct the array of Julian Dates.
-            dt_days = d_t / (24 * 60 * 60)
-            jd_array = jd_start + np.arange(n_t, dtype=float) * dt_days
+            time_inds = np.arange(-(n_t // 2), n_t // 2)
 
-        # Compute the center of the time array.
-        # If odd: middle element is the center
-        if jd_array.size % 2 == 1:
-            jd_center = jd_array[jd_array.size // 2]
-        # If even: average of two middle elements is the center.
-        else:
-            mid = jd_array.size // 2
-            jd_center = 0.5 * (jd_array[mid - 1] + jd_array[mid])
+        dt_days = d_t / (24 * 60 * 60)
+        jd_array = jd_center + time_inds * dt_days
 
-        return jd_array, float(jd_center)
+        # Index of the center time (where time_inds == 0).
+        center_idx = n_t // 2
+
+        return jd_array, center_idx
 
     def _observation_field_center(self, jd: float) -> Tuple[float, float]:
         """
