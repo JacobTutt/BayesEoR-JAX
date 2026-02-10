@@ -116,9 +116,6 @@ def inverse_udft_1d_rect(
     if not include_eta0:
         index_eta = index_eta[index_eta != 0.0]
 
-
-
-
     # Define the 1D IDFT matrix for the Fourier modes. 
     # As different normalisations are applied to the:
     # LSSM, full eta grid and central eta=0 mode - these are applied downstream 
