@@ -1,28 +1,41 @@
 """
-"""
+High-level orchestration for constructing model matrices and associated kernels.
 
-from turtle import Shape
+This module wires together UV/LMN model spaces, beam evaluation, and NUDFT
+operators to build the dense Finv/Fprime blocks used downstream.
+"""
 import jax
 jax.config.update("jax_enable_x64", True)
 
 from typing import Optional, Sequence, Tuple, Union
-from jax.experimental import sparse
+
 import jax.numpy as jnp
+from jax import lax
+from jax.experimental import sparse
+from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from functools import partial
 
 from astropy import constants as c
 
-from .dft_funcs import inverse_udft_1d_rect, inverse_udft_1d_sub, build_nudft_array
+from .dft_funcs import inverse_udft_1d_rect, build_nudft_array
 from .uv_model_space import UV_ModelSpace
 from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
+from .jax_grid import MeshManager
 
 class BuildMatrices:
     """
-    Class for handling matrix construction and arithmetic.
+    Orchestrate model-space construction and build NUDFT-based matrices.
+
+    This class centralizes:
+    - UV model grids for EoR/FG.
+    - LMN image-domain coordinates across time.
+    - Beam evaluation across time/frequency.
+    - NUDFT kernels and the Finv/Fprime blocks.
 
     Parameters
     ----------
-    EoR model uv-plane parameters:
+    EoR model uv-plane parameters
     n_u_eor : int
         Number of pixels on a side for the u axis in the model uv-plane
         of the EoR model. Defaults to None.
@@ -36,7 +49,7 @@ class BuildMatrices:
         Fourier mode spacing along the v axis in inverse radians of the
         EoR model uv-plane. Defaults to None.
 
-    Foreground model uv-plane parameters:
+    Foreground model uv-plane parameters
     n_u_fg : int
         Number of pixels on a side for the u-axis in the FG model uv-plane.
         Defaults to None.
@@ -61,8 +74,7 @@ class BuildMatrices:
         [2.63], or multiple spectral indices, e.g. [2.63, 2.82]. Defaults to
         [2.63, 2.82].
 
-    
-    # Frequency and line of sight Fourier mode parameters:
+    Frequency and line of sight Fourier mode parameters
     n_freq : int
         Number of frequency channels. Defaults to None.
     f0_mhz : float
@@ -75,17 +87,17 @@ class BuildMatrices:
         Fourier mode spacing along the eta (line of sight, frequency) axis in
         inverse Hz. Defaults to None.
 
-    # Model parameters:
+    Model parameters
     fit_for_monopole : bool, optional
         Fit for (u, v) = (0, 0) (True) or exclude it from the fit (False).
         Defaults to False.
 
-    Healpix image-domain model parameters:
+    HEALPix image-domain model parameters
     telescope_latlonalt : tuple, optional
         The latitude, longitude, and altitude of the telescope in degrees,
         degrees, and meters, respectively. Defaults to HERA location.
     jd_start : float
-        Start time step of the observation in JD units.
+        Central time of the observation in JD units.
         Defaults to 2461040.5 (2026-01-01 00:00:00 UTC).
     nside : int
         HEALPix nside parameter. Defaults to None.
@@ -98,7 +110,7 @@ class BuildMatrices:
     d_t : float, optional
         Integration time in seconds. Required if ``n_t > 1``.
     
-    # Beam model parameters:
+    Beam model parameters
     beam_type : str, optional
         Can be either a path to a pyuvdata-compatible beam file or one of
         'uniform', 'gaussian', 'airy', 'gausscosine', 'taperairy', or 'tanhairy'.
@@ -125,7 +137,7 @@ class BuildMatrices:
         Frequency interpolation kind from scipy.interpolate.interp1d. 
         Defaults to 'cubic'.
 
-    # Data parameters:
+    Data parameters
     uvw_array_m : numpy.ndarray
         Array containing the (u(t), v(t), w(t)) coordinates of the instrument
         model with shape (nt, nbls, 3). Defaults to None.
@@ -175,39 +187,37 @@ class BuildMatrices:
         bl_red_array: Optional[jnp.ndarray] = None,
     ) -> None:
         
-        # Store the input parameters as attributes of the class instance.
-        # The Models UV-plane parameters for the EoR model.
+        # Store EoR UV-plane parameters.
         self.n_u_eor = n_u_eor
         self.du_eor = du_eor
         self.n_v_eor = n_v_eor
         self.dv_eor = dv_eor
-        # Overall No. of UV space samples in the EoR model (accounting for monopole exclusion).
-        # The monopole of the EoR model is always excluded
+        # Total EoR uv modes (monopole always excluded).
         self.n_uv_eor = (n_u_eor * n_v_eor) - 1
 
-        # Store the foreground uv-plane parameters.
+        # Store foreground UV-plane parameters and LSSM settings.
         self.n_u_fg = n_u_fg
         self.du_fg = du_fg
         self.n_v_fg = n_v_fg
         self.dv_fg = dv_fg
-        # LSSM parameters for the foreground model
         self.n_modes_fg = n_modes_fg
         self.n_powerlaws_fg = n_powerlaws_fg
         self.beta_fg = beta_fg if beta_fg is not None else [2.63, 2.82]
         self.fit_for_monopole = fit_for_monopole
-        # Overall No. of UV space samples in the foreground model (accounting for optional monopole exclusion).
+        # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
-        # Store the frequency and line of sight Fourier mode parameters.
+        # Store frequency/eta grid parameters.
         self.n_freq = n_freq
         self.f0_mhz = f0_mhz
         self.df_mhz = df_mhz    
         self.n_eta = n_eta
         self.d_eta = d_eta
-        # Construct the frequency array in Hz (from MHz)
+        # Frequency array in Hz (from MHz).
         self.freq_hz = (f0_mhz + df_mhz * jnp.arange(n_freq, dtype=jnp.float64)) * 1e6 
+        c_ms = float(c.to("m/s").value)
 
-        # Store the Healpix image-domain model parameters.
+        # Store HEALPix image-domain parameters.
         self.nside = nside
         self.fov_eor = fov_eor
         self.fov_fg = fov_fg
@@ -217,7 +227,7 @@ class BuildMatrices:
         self.d_t = d_t
 
 
-        # Store the beam model parameters.
+        # Store beam model parameters.
         self.beam_type = beam_type
         self.peak_amp = peak_amp
         self.fwhm_deg = fwhm_deg
@@ -228,22 +238,17 @@ class BuildMatrices:
         self.pol = pol
         self.freq_interp_kind = freq_interp_kind
 
-        # Store the data products and parameters.
-        uvw_array_m = jnp.array(uvw_array_m) # Shape (nt, nbls, 3)
-        # Convert from units: meters to inverse radians by
-        # dividing by the wavelength (c / freq_hz) and adding a new axis for frequency.
-        # Shape (nf, nt, nbls, 3)
-        inst_uvw_irad = uvw_array_m[jnp.newaxis, :, :, :]/ (float(c.to("m/s").value) / self.freq_hz[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]) 
-        # Swap axis ready for import into nudft functions. Shape (nf, nt, 3, nbls)
-        inst_uvw_irad = jnp.swapaxes(inst_uvw_irad, -2, -1)
-        # Only select the first time step for the (u, v, w) coordinates 
-        # The scan is done through rotation of the beam and constant sky and instrument (u, v, w) coordinates.
-        self.inst_uvw_irad = inst_uvw_irad[:, 0, :, :]
+        # Instrument data: convert uvw from meters to inverse radians for each frequency.
+        uvw_array_m = jnp.array(uvw_array_m)  # (n_t, n_bls, 3)
+        # Only the first time-step uvw is used; time dependence is handled by beam rotation.
+        uvw_array_m = uvw_array_m[0].T  # (3, n_bls)
+        # Convert meters -> inverse radians by dividing by wavelength per frequency.
+        wavelengths = c_ms / self.freq_hz
+        self.inst_uvw_irad = uvw_array_m[jnp.newaxis, :, :] / wavelengths[:, jnp.newaxis, jnp.newaxis]
 
         self.bl_red_array = bl_red_array
 
-
-        # Initialised the UV_model space, LMN_ModelSpace and BeamModel classes as attributes of the BuildMatrices class.
+        # UV model space (EoR + FG rectilinear grids).
         self.uv_model_space = UV_ModelSpace(
             n_u_eor=self.n_u_eor,
             n_v_eor=self.n_v_eor,
@@ -256,6 +261,7 @@ class BuildMatrices:
             exclude_monopole=not self.fit_for_monopole,
         )
 
+        # LMN model space: FG pixel set and shared EoR mask (computed at init).
         self.lmn_model_space = LMN_ModelSpace(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
@@ -265,7 +271,8 @@ class BuildMatrices:
             n_t=self.n_t,
             d_t=self.d_t,
         )
-        
+
+        # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
             self.beam_type, 
             self.peak_amp, 
@@ -277,165 +284,129 @@ class BuildMatrices:
             self.pol, 
             self.freq_interp_kind,
         )
+        self.beam_response = self.beam_model.get_beam_vals(
+            self.lmn_model_space.lmn_fg, self.freq_hz
+            )  # Shape (n_freq, n_t, n_pix_fg)
 
-        self.beam_response = self.beam_model.get_beam_vals(self.lmn_model_space.lmn_fg, self.freq_hz) # Shape (n_freq, npix_fg)
+        # Initialize sharding utilities.
+        self.mm = MeshManager()
+        self.sharding_pix_uv = self.mm.get_sharding(shard_uv=True)
 
 
-    def build_Finv_Fprime(self):
-        r"""
-        Build the matrix product :math:`\mathbf{F}^{-1}\mathbf{F}'`.
+    @partial(jax.jit, static_argnums=(0,))
+    def build_Finv_Fprime_dense(self):
         """
+        Build Finv/Fprime blocks across frequency and time.
 
-        # Jax Array of the time dependent model lmn coordinates for the EoR and FG models.
-        n_pix_fg = self.lmn_model_space.n_pix_fg # Shape (npix_fg,)
-        n_pix_eor = self.lmn_model_space.n_pix_eor # Shape (npix_eor,)
-        model_lmn_fg_rad = self.lmn_model_space.lmn_eor # Shape (n_t, 3, n_pix_eor)
-        model_lmn_eor_rad = self.lmn_model_space.lmn_fg # Shape (n_t, 3, n_pix_fg)
-        eor_fg_shared_axis = self.lmn_model_space.eor_fg_shared_axis # Shape (n_pix_fg,)
+        Uses sharded NUDFT kernels and nested scans to reduce memory usage.
 
-        sampled_uv_vectors_eor = self.uv_model_space.uv_eor # Shape (2, N_uv_eor)
-        sampled_uv_vectors_fg = self.uv_model_space.uv_fg # Shape (2, N_uv_fg)
+        Returns
+        -------
+        full_eor : jnp.ndarray
+            Shape (n_freq, n_t, n_uv_eor, n_bls).
+        full_fg : jnp.ndarray
+            Shape (n_freq, n_t, n_uv_fg, n_bls).
+        """
+        # Precompute NUDFT kernels (UV -> LM) and shard across devices.
+        nuidft_uv_to_lm_eor = jax.device_put(self._uv_to_lm_eor(), self.sharding_pix_uv)
+        nuidft_uv_to_lm_fg = jax.device_put(self._uv_to_lm_fg(), self.sharding_pix_uv)
 
-        # Frequency-dependent (u, v, w) sampled by the instrument in units of inverse radians
-        inst_uvws_irad = self.inst_uvw_irad # Shape (nf, 3, nbls)
-
-        # Construct the dense NUIDFT matrices in Fprime relating the model
-        # uv-plane (u, v, f) to the image space (l, m, f) coordinates.
-        # EoR model uv-plane components and matrix:
-        # Flattened vectors of (u, v) in the EoR model uv-plane
-        nuidft_uv_to_lm_eor = build_nudft_array(
-            sampled_uv_vectors_eor,
-            model_lmn_fg_rad[self.nt//2, :, self.lmn_model_space.eor_fg_shared_axis].T,
-            sign=-1
-        )
-        # FIXME: Fprime normalization no longer needs to include nu*nv norm
-        # when using the build_nudft_array function.  The nuidft_matrix_2d
-        # function follows the numpy approach and uses 1/Npix for the inverse
-        # transform which is why the nu*nv normalization is currently
-        # included in self.Fprime_normalization_eor.
-        nuidft_uv_to_lm_eor *= (
-            self.Fprime_normalization_eor / (self.nu * self.nv)
-        )
-        
-        # eta=0 / FG model uv-plane components and matrix
-        model_us_fg_irad, model_vs_fg_irad = sampled_uv_vectors(
-            self.nu_fg,
-            self.nv_fg,
-            du=self.du_fg,
-            dv=self.dv_fg,
-            exclude_mean=(not self.fit_for_monopole)
-        )
-        model_uv_fg_irad = np.vstack((model_us_fg_irad, model_vs_fg_irad))
-        nuidft_uv_to_lm_fg = build_nudft_array(
-            model_uv_fg_irad,
-            model_lmnazza_rad[self.nt//2, :2],
-            sign=-1
-        )
-        # FIXME: Fprime normalization no longer needs to include nu*nv norm
-        # when using the build_nudft_array function.  The nuidft_matrix_2d
-        # function follows the numpy approach and uses 1/Npix for the
-        # inverse transform which is why the nu*nv normalization is
-        # currently included in self.Fprime_normalization_fg.
-        nuidft_uv_to_lm_fg *= (
-            self.Fprime_normalization_fg / (self.nu_fg * self.nv_fg)
-        )
-        # Move the (u, v) = (0, 0) pixel to the rightmost column in
-        # nuidft_uv_to_lm_fg so that the LSSM components are all clustered
-        # together in the model vector (recall that (u, v) = (0, 0) acts
-        # like the constant term in the LSSM).
-        mp_column = nuidft_uv_to_lm_fg[:, nuv_fg//2].copy()
-        mp_ind = nuv_fg//2
-        nuidft_uv_to_lm_fg[:, mp_ind:-1] = nuidft_uv_to_lm_fg[:, mp_ind+1:]
-        nuidft_uv_to_lm_fg[:, -1] = mp_column
-
-        # FIXME: add support for the SHG uv-plane (issue #50)
-        # if self.use_shg:
-        #     nuidft_uv_to_lm_shg = ?
-
-        # Instantiate empty containers for matrices
-        Finv_Fprime = sparse.lil_matrix(Finv_Fprime_shape, dtype=complex)
-        
-        matrix_name = "Finv_Fprime"
-        # For now, there are no prerequisites for this matrix.  But,
-        # this might change in the future if we add a kwarg for writing out
-        # intermediate matrices to disk (e.g. the dense blocks that comprise
-        # Fprime).
-        pmd = self.load_prerequisites(matrix_name)
-        if self.verbose:
-            start = time.time()
-            print("Performing matrix algebra")
-        
-        for i_f in range(self.nf):
-            uv_Fprime_inds_eor = slice(
-                i_f*nuv_eor, (i_f + 1)*nuv_eor
-            )
-            uv_Fprime_inds_fg = slice(
-                self.nf*nuv_eor + i_f*nuv_fg,
-                self.nf*nuv_eor + (i_f + 1)*nuv_fg
-            )
-           
-            for i_t in range(self.nt):
-                vis_inds = slice(
-                    i_t*self.nf*self.nbls + i_f*self.nbls,
-                    i_t*self.nf*self.nbls + (i_f + 1)*self.nbls
+        # Nested scans: loop over frequency, then time, to build blocks.
+        def frequency_loop(carry, i_f):
+            def time_loop(t_carry, i_t):
+                block_eor, block_fg = self._build_Finv_Fprime_block(
+                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
                 )
+                return t_carry, (block_eor, block_fg)
+            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
+            return carry, (e_blocks, f_blocks)
 
-                if self.drift_scan:
-                    # For a drift scan observation, the beam drifts across the
-                    # modelled patch of sky, so the (l, m, n) coordinates for
-                    # a given HEALPix pixel change with time.
-                    lmn_rad = model_lmnazza_rad[i_t, :3]
-                    az_rad = model_lmnazza_rad[i_t, 3]
-                    za_rad = model_lmnazza_rad[i_t, 4]
-                else:
-                    # For modelling phased observations, the beam is always
-                    # phased to the center of the model FoV.  The (l, m, n)
-                    # coordinates in this case are independent of time.
-                    lmn_rad = model_lmnazza_rad[self.nt//2, :3]
-                    az_rad = model_lmnazza_rad[self.nt//2, 3]
-                    za_rad = model_lmnazza_rad[self.nt//2, 4]
-
-                # NUDFT matrix for image space (l, m, n) to measurement
-                # space (u, v, w) sampled by the instrument
-                nudft_lmn_to_vis = build_nudft_array(
-                    lmn_rad,
-                    inst_uvw_irad[i_f, 0],
-                    sign=+1
-                )
-                nudft_lmn_to_vis *= self.Finv_normalisation
-                # Beam amplitude at each (l, m, n)
-                beam_vals = self.hpx.get_beam_vals(
-                    az_rad, za_rad, freq=self.freqs_hertz[i_f]
-                )
-                # Equivalent to np.dot(nudft_lmn_to_vis, np.diag(beam_vals))
-                Finv_block = nudft_lmn_to_vis * beam_vals[None, :]
-
-                # FIXME: add support for modelling phased visibilities via
-                # the phasor vector.
-
-                Finv_Fprime[vis_inds, uv_Fprime_inds_eor] = np.dot(
-                    Finv_block[:, self.hpx.eor_to_fg_pix],
-                    nuidft_uv_to_lm_eor
-                )
-                Finv_Fprime[vis_inds, uv_Fprime_inds_fg] = np.dot(
-                    Finv_block,
-                    nuidft_uv_to_lm_fg
-                )
-                # FIXME: add support for the SHG uv-plane (issue #50)
-                # if self.use_shg:
-                #     Finv_Fprime[vis_inds, uv_Fprime_inds_shg] = ?
-
-        if self.verbose:
-            print(f"Time taken: {time.time() - start}")
-        self.output_data(Finv_Fprime, matrix_name)
-
-
-
-
+        # Execute full scan across frequencies.
+        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
+        return full_eor, full_fg
     
 
-        
+    def _build_Finv_Fprime_block(self, nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t):
+        """
+        Build the (i_f, i_t) block of Finv/Fprime.
 
+        This maps model uv coordinates at frequency i_f into LM space at time i_t,
+        applies the beam, and projects back into the model uv grids.
+        """
+        # LMN coordinates for time step i_t (FG pixel set).
+        lmn_fg_it = self.lmn_model_space.lmn_fg[i_t, :, :]  # (3, n_pix_fg)
+        # UVW coordinates for frequency i_f.
+        uvw_irad_if = self.inst_uvw_irad[i_f, :, :]  # (3, n_bls)
+        # NUDFT: LMN -> UVW at this (i_f, i_t).
+        nudft_lmn_to_uvw = build_nudft_array(
+            lmn_fg_it,  # (3, n_pix_fg)
+            uvw_irad_if,  # (3, n_bls)
+            sign=+1,
+        )
+        # Pixel area normalization in image domain.
+        nudft_lmn_to_uvw *= self.lmn_model_space.pixel_area_sr  # (n_bls, n_pix_fg)
+
+        # Beam response for this time/frequency.
+        beam_it = self.beam_response[i_f, i_t, :]  # (n_pix_fg,)
+
+        # Apply beam weighting in LMN.
+        beam_nudft_lmn_to_uvw = nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]  # (n_bls, n_pix_fg)
+
+        # Project into FG and EoR uv grids.
+        Finv_Fprime_block_fg = jnp.dot(beam_nudft_lmn_to_uvw, nuidft_uv_to_lm_fg)  # (n_bls, n_uv_fg)
+        Finv_Fprime_block_eor = jnp.dot(
+            beam_nudft_lmn_to_uvw[:, self.lmn_model_space.eor_fg_shared_axis],
+            nuidft_uv_to_lm_eor,
+        )  # (n_bls, n_uv_eor)
+
+        return Finv_Fprime_block_eor, Finv_Fprime_block_fg
+
+
+
+    def _uv_to_lm_eor(self):
+        """
+        Construct the EoR NUDFT kernel (model UV -> image LM).
+        """
+        # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
+        nuidft_uv_to_lm_eor = build_nudft_array(
+            self.uv_model_space.uv_eor,  # (2, n_uv_eor)
+            self.lmn_model_space.lmn_fg[
+                self.lmn_model_space.time_ind_center, :2, self.lmn_model_space.eor_fg_shared_axis
+            ],  # (2, n_pix_eor)
+            sign=-1
+        )  # (n_pix_eor, n_uv_eor)
+        # Pixel area normalization in UV.
+        nuidft_uv_to_lm_eor *= (self.du_eor * self.dv_eor)
+
+        return nuidft_uv_to_lm_eor
+
+    def _uv_to_lm_fg(self):
+        """
+        Construct the FG NUDFT kernel (model UV -> image LM).
+
+        If monopole is included, the (u, v) = (0, 0) column is moved to the
+        rightmost position to keep it adjacent to LSSM modes downstream.
+        """
+        # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
+        nuidft_uv_to_lm_fg = build_nudft_array(
+            self.uv_model_space.uv_fg,  # (2, n_uv_fg)
+            self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2],  # (2, n_pix_fg)
+            sign=-1
+        )  # (n_pix_fg, n_uv_fg)
+
+        # Pixel area normalization in UV.
+        nuidft_uv_to_lm_fg *= (self.du_fg * self.dv_fg)
+        
+        # If the monopole is included, move it to the rightmost column.
+        if self.fit_for_monopole:
+            mid = self.n_uv_fg // 2
+            mp_col = nuidft_uv_to_lm_fg[:, mid:mid+1]
+            nuidft_uv_to_lm_fg = jnp.concatenate([nuidft_uv_to_lm_fg[:, :mid], nuidft_uv_to_lm_fg[:, mid+1:], mp_col], axis=1)
+        return nuidft_uv_to_lm_fg
+
+
+
+        
 
 
 
