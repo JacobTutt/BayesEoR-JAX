@@ -96,7 +96,7 @@ class BuildMatrices:
     telescope_latlonalt : tuple, optional
         The latitude, longitude, and altitude of the telescope in degrees,
         degrees, and meters, respectively. Defaults to HERA location.
-    jd_start : float
+    jd_center : float
         Central time of the observation in JD units.
         Defaults to 2461040.5 (2026-01-01 00:00:00 UTC).
     nside : int
@@ -385,7 +385,8 @@ class BuildMatrices:
         Construct the FG NUDFT kernel (model UV -> image LM).
 
         If monopole is included, the (u, v) = (0, 0) column is moved to the
-        rightmost position to keep it adjacent to LSSM modes downstream.
+        rightmost position to keep it adjacent to LSSM modes downstream in the
+        `UV_ModelSpace` ordering.
         """
         # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
         nuidft_uv_to_lm_fg = build_nudft_array(
@@ -397,17 +398,11 @@ class BuildMatrices:
         # Pixel area normalization in UV.
         nuidft_uv_to_lm_fg *= (self.du_fg * self.dv_fg)
         
-        # If the monopole is included, move it to the rightmost column.
-        if self.fit_for_monopole:
-            mid = self.n_uv_fg // 2
-            mp_col = nuidft_uv_to_lm_fg[:, mid:mid+1]
-            nuidft_uv_to_lm_fg = jnp.concatenate([nuidft_uv_to_lm_fg[:, :mid], nuidft_uv_to_lm_fg[:, mid+1:], mp_col], axis=1)
         return nuidft_uv_to_lm_fg
 
 
 
         
-
 
 
 

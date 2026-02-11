@@ -88,16 +88,23 @@ class UV_ModelSpace:
         u_vec = (du * us).ravel()
         v_vec = (dv * vs).ravel()
 
-        # Optionally exclude the monopole mode as U,V = 0 is not present in interferometric data
-        if exclude_monopole:
-            # Drop the (0, 0) mode if it exists in the flattened arrays
-            is_monopole = (u_vec == 0) & (v_vec == 0)
-            non_monopole = ~is_monopole
-            u_vec = u_vec[non_monopole]
-            v_vec = v_vec[non_monopole]
-            # Warn if no monopole was found to remove (simple if n_u and n_v are even)
-            if not bool(jnp.any(is_monopole)):
-                logging.info("No (u, v) = (0, 0) monopole found to remove as n_u and n_v are even")
+        # Identify the monopole (0, 0) entry if present.
+        is_monopole = (u_vec == 0) & (v_vec == 0)
+        has_monopole = bool(jnp.any(is_monopole))
 
+        # Optionally exclude the monopole mode (not present in interferometric data).
+        if exclude_monopole:
+            u_vec = u_vec[~is_monopole]
+            v_vec = v_vec[~is_monopole]
+            if not has_monopole:
+                logging.info("No (u, v) = (0, 0) monopole found to remove as n_u and n_v are even")
+        else:
+            # If keeping the monopole, move it to the rightmost column so it is adjacent 
+            # to LSSM modes downstream in the UV_ModelSpace ordering.
+            if has_monopole:
+                u_mp = u_vec[is_monopole]
+                v_mp = v_vec[is_monopole]
+                u_vec = jnp.concatenate([u_vec[~is_monopole], u_mp], axis=0)
+                v_vec = jnp.concatenate([v_vec[~is_monopole], v_mp], axis=0)
 
         return jnp.stack([u_vec, v_vec], axis=0) # Shape (2, N_uv)
