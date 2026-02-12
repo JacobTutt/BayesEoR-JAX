@@ -66,24 +66,33 @@ class MeshManager:
         device_grid = np.array(self.devices).reshape(shape)
         return Mesh(device_grid, axis_names=names), names
 
-    def get_sharding(self, shard_uv=False):
+    def get_sharding(self, rank: int = 2, shard_uv: bool = False) -> NamedSharding:
         """
-        Return a NamedSharding based on the requested layout.
+        Return a NamedSharding matching the requested array rank.
 
         Parameters
         ----------
+        rank : int, optional
+            Rank (number of dimensions) of the array to shard. Defaults to 2.
         shard_uv : bool, optional
-            If True and the mesh has a 'uv_modes' axis, shard columns by uv_modes.
-            Otherwise shard only by pixels. Defaults to False.
+            If True and the mesh has a 'uv_modes' axis, shard the second axis
+            by uv_modes. Otherwise only shard the first axis. Defaults to False.
 
         Returns
         -------
         sharding : NamedSharding
-            Sharding spec for 2D arrays with (pixels, uv_modes) semantics.
+            Sharding spec compatible with the requested rank.
         """
-        if "uv_modes" in self.axis_names and shard_uv:
-            # 2D case: shard rows by 'pixels' and columns by 'uv_modes'.
-            return NamedSharding(self.mesh, P("pixels", "uv_modes"))
-        else:
-            # 1D case or 2D where we only want to shard pixels.
-            return NamedSharding(self.mesh, P("pixels", None))
+        has_uv = "uv_modes" in self.axis_names and shard_uv
+
+        if rank == 1:
+            return NamedSharding(self.mesh, P("pixels"))
+        if rank == 2:
+            return NamedSharding(self.mesh, P("pixels", "uv_modes" if has_uv else None))
+        if rank == 3:
+            return NamedSharding(self.mesh, P("pixels", None, None))
+        if rank == 4:
+            return NamedSharding(self.mesh, P("pixels", None, None, None))
+
+        # Fallback: shard the leading axis only, leave others unsharded.
+        return NamedSharding(self.mesh, P("pixels", *([None] * (rank - 1))))

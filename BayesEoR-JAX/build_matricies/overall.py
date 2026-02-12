@@ -290,42 +290,47 @@ class BuildMatrices:
 
         # Initialize sharding utilities.
         self.mm = MeshManager()
-        self.sharding_pix_uv = self.mm.get_sharding(shard_uv=True)
-
-
-    @partial(jax.jit, static_argnums=(0,))
-    def build_Finv_Fprime_dense(self):
-        """
-        Build Finv/Fprime blocks across frequency and time.
-
-        Uses sharded NUDFT kernels and nested scans to reduce memory usage.
-
-        Returns
-        -------
-        full_eor : jnp.ndarray
-            Shape (n_freq, n_t, n_uv_eor, n_bls).
-        full_fg : jnp.ndarray
-            Shape (n_freq, n_t, n_uv_fg, n_bls).
-        """
-        # Precompute NUDFT kernels (UV -> LM) and shard across devices.
-        nuidft_uv_to_lm_eor = jax.device_put(self._uv_to_lm_eor(), self.sharding_pix_uv)
-        nuidft_uv_to_lm_fg = jax.device_put(self._uv_to_lm_fg(), self.sharding_pix_uv)
-
-        # Nested scans: loop over frequency, then time, to build blocks.
-        def frequency_loop(carry, i_f):
-            def time_loop(t_carry, i_t):
-                block_eor, block_fg = self._build_Finv_Fprime_block(
-                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
-                )
-                return t_carry, (block_eor, block_fg)
-            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
-            return carry, (e_blocks, f_blocks)
-
-        # Execute full scan across frequencies.
-        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
-        return full_eor, full_fg
+        self.sharding_grid = self.mm.get_sharding(rank=4, shard_uv=True)
+        self.sharding_vec = self.mm.get_sharding(rank=1)
+        self.sharding_mat = self.mm.get_sharding(rank=2)
     
+    def _uv_to_lm_eor(self):
+        """
+        Construct the EoR NUDFT kernel (model UV -> image LM/RaDec).
+        """
+        # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
+        nuidft_uv_to_lm_eor = build_nudft_array(
+            self.uv_model_space.uv_eor,  # (2, n_uv_eor)
+            self.lmn_model_space.lmn_fg[
+                self.lmn_model_space.time_ind_center, :2, self.lmn_model_space.eor_fg_shared_axis
+            ],  # (2, n_pix_eor)
+            sign=-1
+        )  # (n_pix_eor, n_uv_eor)
+        # Pixel area normalization in UV.
+        nuidft_uv_to_lm_eor *= (self.du_eor * self.dv_eor)
 
+        return nuidft_uv_to_lm_eor
+
+    def _uv_to_lm_fg(self):
+        """
+        Construct the FG NUDFT kernel (model UV -> image LM/RaDec).
+
+        If monopole is included, the (u, v) = (0, 0) column is moved to the
+        rightmost position to keep it adjacent to LSSM modes downstream in the
+        `UV_ModelSpace` ordering.
+        """
+        # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
+        nuidft_uv_to_lm_fg = build_nudft_array(
+            self.uv_model_space.uv_fg,  # (2, n_uv_fg)
+            self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2],  # (2, n_pix_fg)
+            sign=-1
+        )  # (n_pix_fg, n_uv_fg)
+
+        # Pixel area normalization in UV.
+        nuidft_uv_to_lm_fg *= (self.du_fg * self.dv_fg)
+        
+        return nuidft_uv_to_lm_fg
+    
     def _build_Finv_Fprime_block(self, nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t):
         """
         Build the (i_f, i_t) block of Finv/Fprime.
@@ -362,51 +367,82 @@ class BuildMatrices:
         return Finv_Fprime_block_eor, Finv_Fprime_block_fg
 
 
-
-    def _uv_to_lm_eor(self):
+    @partial(jax.jit, static_argnums=(0,))
+    def build_Finv_Fprime(self):
         """
-        Construct the EoR NUDFT kernel (model UV -> image LM).
+        Build Finv/Fprime blocks across frequency and time.
+
+        Uses sharded NUDFT kernels and nested scans to reduce memory usage.
+
+        Returns
+        -------
+        finv_fprime : sparse.BCOO
+            Sparse matrix with shape (n_vis, n_params), where
+            n_vis = n_freq * n_t * n_bls and
+            n_params = n_freq * (n_uv_eor + n_uv_fg).
         """
-        # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
-        nuidft_uv_to_lm_eor = build_nudft_array(
-            self.uv_model_space.uv_eor,  # (2, n_uv_eor)
-            self.lmn_model_space.lmn_fg[
-                self.lmn_model_space.time_ind_center, :2, self.lmn_model_space.eor_fg_shared_axis
-            ],  # (2, n_pix_eor)
-            sign=-1
-        )  # (n_pix_eor, n_uv_eor)
-        # Pixel area normalization in UV.
-        nuidft_uv_to_lm_eor *= (self.du_eor * self.dv_eor)
+        # Precompute NUDFT kernels (UV -> LM) inside the JIT, then constrain sharding.
+        nuidft_uv_to_lm_eor = jax.lax.with_sharding_constraint(self._uv_to_lm_eor(), self.sharding_mat)
+        nuidft_uv_to_lm_fg  = jax.lax.with_sharding_constraint(self._uv_to_lm_fg(),  self.sharding_mat)
 
-        return nuidft_uv_to_lm_eor
 
-    def _uv_to_lm_fg(self):
-        """
-        Construct the FG NUDFT kernel (model UV -> image LM).
+        # Nested scans: loop over frequency, then time, to build blocks.
+        def frequency_loop(carry, i_f):
+            def time_loop(t_carry, i_t):
+                block_eor, block_fg = self._build_Finv_Fprime_block(
+                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
+                )
+                return t_carry, (block_eor, block_fg)
+            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
+            return carry, (e_blocks, f_blocks)
 
-        If monopole is included, the (u, v) = (0, 0) column is moved to the
-        rightmost position to keep it adjacent to LSSM modes downstream in the
-        `UV_ModelSpace` ordering.
-        """
-        # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
-        nuidft_uv_to_lm_fg = build_nudft_array(
-            self.uv_model_space.uv_fg,  # (2, n_uv_fg)
-            self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2],  # (2, n_pix_fg)
-            sign=-1
-        )  # (n_pix_fg, n_uv_fg)
+        # Execute full scan across frequencies.
+        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
 
-        # Pixel area normalization in UV.
-        nuidft_uv_to_lm_fg *= (self.du_fg * self.dv_fg)
+        # Shapes: 
+        # full_eor (n_freq, n_t, n_bls, n_uv_eor)
+        # full_fg (n_freq, n_t, n_bls, n_uv_fg)
+
+        # Constrain sharding of the dense blocks to avoid host/device reshuffles.
+        full_eor = jax.lax.with_sharding_constraint(full_eor, self.sharding_grid)
+        full_fg = jax.lax.with_sharding_constraint(full_fg, self.sharding_grid)
+
+        # Build a final BCOO matrix by constructing global row/col indices.
+        n_vis = self.n_freq * self.n_t * self.nbls
+        n_params = self.n_freq * (self.n_uv_eor + self.n_uv_fg)
+
+        f = jnp.arange(self.n_freq, dtype=jnp.int32)[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
+        t = jnp.arange(self.n_t, dtype=jnp.int32)[jnp.newaxis, :, jnp.newaxis, jnp.newaxis]
+        b = jnp.arange(self.nbls, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, :, jnp.newaxis]
+
+        # Shared base rows: (n_freq, n_t, n_bls, 1)
+        # Match legacy ordering: time is the slowest axis, then frequency, then baseline.
+        base_rows = ((t * self.n_freq + f) * self.nbls + b)
+
+        # EoR block indices
+        uv_eor = jnp.arange(self.n_uv_eor, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
+        cols_eor = (f * self.n_uv_eor + uv_eor)
+        data_eor = full_eor.reshape(-1)
+        rows_eor_flat = jnp.broadcast_to(base_rows, full_eor.shape).reshape(-1)
+        cols_eor_flat = jnp.broadcast_to(cols_eor, full_eor.shape).reshape(-1)
+        indices_eor = jnp.stack([rows_eor_flat, cols_eor_flat], axis=1)
+
+        # FG block indices (column offset after all EoR params)
+        uv_fg = jnp.arange(self.n_uv_fg, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
+        cols_fg = (self.n_freq * self.n_uv_eor) + (f * self.n_uv_fg + uv_fg)
+        data_fg = full_fg.reshape(-1)
+        rows_fg_flat = jnp.broadcast_to(base_rows, full_fg.shape).reshape(-1)
+        cols_fg_flat = jnp.broadcast_to(cols_fg, full_fg.shape).reshape(-1)
+        indices_fg = jnp.stack([rows_fg_flat, cols_fg_flat], axis=1)
+
+        data = jnp.concatenate([data_eor, data_fg], axis=0)
+        indices = jnp.concatenate([indices_eor, indices_fg], axis=0)
+
+        # Constrain sharding of the BCOO payload as well.
+        data = jax.lax.with_sharding_constraint(data, self.sharding_vec)
+        indices = jax.lax.with_sharding_constraint(indices, self.sharding_mat)
+
+        return sparse.BCOO((data, indices), shape=(n_vis, n_params), unique_indices=True)
+
+
         
-        return nuidft_uv_to_lm_fg
-
-
-
-        
-
-
-
-
-
-
-
