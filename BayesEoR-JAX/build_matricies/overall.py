@@ -328,11 +328,11 @@ class BuildMatrices:
         Construct the EoR NUDFT kernel (model UV -> image LM/RaDec).
         """
         # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
+        lmn_center = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
+        lmn_center = lmn_center[:, self.lmn_model_space.eor_fg_shared_axis]
         nuidft_uv_to_lm_eor = build_nudft_array(
             self.uv_model_space.uv_eor,  # (2, n_uv_eor)
-            self.lmn_model_space.lmn_fg[
-                self.lmn_model_space.time_ind_center, :2, self.lmn_model_space.eor_fg_shared_axis
-            ],  # (2, n_pix_eor)
+            lmn_center,  # (2, n_pix_eor)
             sign=-1
         )  # (n_pix_eor, n_uv_eor)
         # Pixel area normalization in UV.
