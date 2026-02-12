@@ -720,9 +720,16 @@ class BuildMatrices:
     # Build T^H N^{-1} T for the quadratic estimator
     # ----------------------------------------------
 
-    def build_T_Ninv_T(self) -> jnp.ndarray:
+    def build_T_Ninv_T(self, T: sparse.BCOO, Ninv: sparse.BCOO) -> jnp.ndarray:
         r"""
         Build T^H N^{-1} T.
+
+        Parameters
+        ----------
+        T : sparse.BCOO
+            Forward operator with shape (n_vis, n_params_eta).
+        Ninv : sparse.BCOO
+            Inverse noise covariance with shape (n_vis, n_vis).
 
         Returns
         -------
@@ -730,9 +737,7 @@ class BuildMatrices:
             Dense matrix with shape (n_params_eta, n_params_eta), where 
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
-        Ninv = self.build_Ninv()
-        T = self.build_T()
-
+        
         # N^{-1} T
         Ninv_T = sparse.bcoo_dot_general(
             Ninv,
