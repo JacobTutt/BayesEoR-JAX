@@ -1,7 +1,8 @@
 import jax
-jax.config.update("jax_enable_x128", True)
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
+from jax.experimental import sparse
 
 from typing import Optional, Sequence, Union
 
@@ -71,7 +72,7 @@ def reorder_fuv_to_uvf(
     arranged by frequency blocks:
 
     Vis-ordered (UV-major):
-        [ (u0,v0,f0..fN), (u1,v1,f0..fN), ... ]
+        [ (u0,v0, all f), (u1,v1, all f), ... ]
 
     Chan-ordered (Freq-major):
         [ (f0, all uv), (f1, all uv), ... ]
@@ -103,6 +104,77 @@ def reorder_fuv_to_uvf(
     matrix_dims = (n_uv * n_freq, n_uv * n_freq)
     return jnp.zeros(matrix_dims, dtype=jnp.float32).at[rows, cols].set(1.0)
 
+
+def sparse_block_diag_repeat(block: jnp.ndarray, n_repeats: int) -> sparse.BCOO:
+    """
+    Build a sparse block-diagonal matrix by repeating a dense 2D block.
+
+    Parameters
+    ----------
+    block : jnp.ndarray
+        Dense 2D block of shape (n_rows, n_cols).
+    n_repeats : int
+        Number of times to repeat the block along the diagonal.
+
+    Returns
+    -------
+    block_diag : sparse.BCOO
+        Sparse block-diagonal matrix of shape
+        (n_repeats * n_rows, n_repeats * n_cols).
+    """
+    n_rows, n_cols = block.shape
+    k = jnp.arange(n_repeats, dtype=jnp.int32)
+
+    # Base indices for a single block.
+    r0 = jnp.arange(n_rows, dtype=jnp.int32)[:, jnp.newaxis]
+    c0 = jnp.arange(n_cols, dtype=jnp.int32)[jnp.newaxis, :]
+    r0 = jnp.broadcast_to(r0, (n_rows, n_cols)).reshape(-1)
+    c0 = jnp.broadcast_to(c0, (n_rows, n_cols)).reshape(-1)
+
+    # Offsets for each block along the diagonal.
+    row_offsets = (k * n_rows)[:, jnp.newaxis]
+    col_offsets = (k * n_cols)[:, jnp.newaxis]
+
+    rows = (row_offsets + r0[jnp.newaxis, :]).reshape(-1)
+    cols = (col_offsets + c0[jnp.newaxis, :]).reshape(-1)
+
+    data = jnp.tile(block.reshape(-1), n_repeats)
+    indices = jnp.stack([rows, cols], axis=1)
+    shape = (n_repeats * n_rows, n_repeats * n_cols)
+
+    return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+
+
+def sparse_block_diag_two(a: sparse.BCOO, b: sparse.BCOO) -> sparse.BCOO:
+    """
+    Build a sparse block-diagonal matrix from two BCOO matrices.
+
+    Parameters
+    ----------
+    a, b : sparse.BCOO
+        2D sparse matrices to place on the block diagonal.
+
+    Returns
+    -------
+    block_diag : sparse.BCOO
+        Sparse block-diagonal matrix of shape
+        (a.rows + b.rows, a.cols + b.cols).
+    """
+
+    a_rows, a_cols = a.shape
+    b_rows, b_cols = b.shape
+
+    # Offsets for the second block.
+    offset = jnp.array([a_rows, a_cols], dtype=jnp.int32)
+
+    data = jnp.concatenate([a.data, b.data], axis=0)
+    indices = jnp.concatenate([a.indices, b.indices + offset], axis=0)
+    shape = (a_rows + b_rows, a_cols + b_cols)
+
+    return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+
+
+    
 
 
 def inverse_udft_1d_rect(
