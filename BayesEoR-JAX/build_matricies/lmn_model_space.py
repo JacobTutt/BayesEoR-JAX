@@ -105,8 +105,6 @@ class LMN_ModelSpace:
         self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
 
 
-
-
     def _construct_time_array(self, jd_center: float, n_t: int, d_t: float) -> Tuple[np.ndarray, np.ndarray, int]:
         """
         Create Julian Date time stamps centered on the supplied JD.

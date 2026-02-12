@@ -17,7 +17,14 @@ from functools import partial
 
 from astropy import constants as c
 
-from .dft_funcs import inverse_udft_1d_rect, build_nudft_array
+from .dft_funcs import (
+    inverse_udft_1d_rect,
+    build_nudft_array,
+    reorder_fuv_to_uvf,
+    sparse_block_diag_repeat,
+    sparse_block_diag_two,
+)
+from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
 from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
@@ -293,7 +300,11 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4, shard_uv=True)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
-    
+
+
+    # ---------------------------
+    # Construction of Finv/Fprime
+    # ---------------------------
     def _uv_to_lm_eor(self):
         """
         Construct the EoR NUDFT kernel (model UV -> image LM/RaDec).
@@ -444,5 +455,123 @@ class BuildMatrices:
 
         return sparse.BCOO((data, indices), shape=(n_vis, n_params), unique_indices=True)
 
+
+    # ----------------------------
+    # Construction of Fz (eta -> f)
+    # ----------------------------
+    def build_eta_to_freq_idft_eor(self):
+        r"""
+        Build the EoR IDFT block for eta -> frequency.
+
+        Returns a block-diagonal matrix with one IDFT block per (u, v) pixel.
+        Excludes eta=0 (belongs to the FG model).
+        """
+        idft_array_1d = inverse_udft_1d_rect(
+            self.n_freq,
+            self.n_eta,
+            include_eta0=False
+        )
+        # Normalise by eta spacing.
+        idft_array_1d *= self.d_eta
+
+        multi_vis_idft_array_1d = sparse_block_diag_repeat(idft_array_1d, self.n_uv_eor)
+
+        return multi_vis_idft_array_1d
+
+    def build_eta_to_freq_idft_fg(self):
+        r"""
+        Build the FG IDFT block for eta -> frequency.
+
+        Includes eta=0 terms, optional LSSM modes, and an optional monopole block.
+        """
+
+        # eta=0 column mapped into frequency space.
+        eta0_to_frequency = jnp.ones((self.n_freq, 1), dtype=jnp.complex128) * self.d_eta * self.n_eta
+
+        # One eta=0 block per FG (u, v), excluding monopole if fitted separately.
+        neta0_blocks = self.n_uv_fg - int(self.fit_for_monopole)
+
+        idft_array_1d_fg = sparse_block_diag_repeat(eta0_to_frequency, neta0_blocks)
+
+        if self.n_modes_fg > 0:
+            lssm_basis_vecs = build_lssm_basis(
+                self.n_freq, nq=self.n_modes_fg, npl=self.n_powerlaws_fg, f_min=self.f0_mhz,
+                df=self.df_mhz, beta=self.beta_fg
+            )
+            # Normalise LSSM basis.
+            lssm_basis_vecs *= self.d_eta * self.n_eta
+
+            # Repeat for each non-monopole FG (u, v).
+            lssm_array = sparse_block_diag_repeat(lssm_basis_vecs, neta0_blocks)
+            idft_array_1d_fg = sparse.bcoo_concatenate(
+                [idft_array_1d_fg, lssm_array], dimension=1
+            )
+            
+        if self.fit_for_monopole:
+            idft_array_1d_mp = inverse_udft_1d_rect(
+                self.n_freq, self.n_eta, nq=self.n_modes_fg, npl=self.n_powerlaws_fg,
+                f_min=self.f0_mhz, df=self.df_mhz, beta=self.beta_fg
+            )
+            # Monopole block includes eta=0 and all LSSM modes.
+            idft_array_1d_mp *= self.d_eta
+            idft_array_1d_mp[:, self.n_eta//2] *= self.n_eta
+            idft_array_1d_mp[:, self.n_eta:] *= self.n_eta
+            idft_array_1d_fg = sparse_block_diag_two(idft_array_1d_fg, idft_array_1d_mp)
+
+        return idft_array_1d_fg
+
+    def reorder_fuv_to_uvf_eor(self):
+        r"""
+        Build the vis-ordered -> chan-ordered gridding matrix for EoR.
+
+        This maps UV-major ordering to frequency-major ordering.
+        """
+        gridding_matrix = reorder_fuv_to_uvf(self.n_uv_eor, self.n_freq)
+
+        return gridding_matrix
+
+    
+    def reorder_fuv_to_uvf_fg(self):
+        r"""
+        Build the vis-ordered -> chan-ordered gridding matrix for FG.
+
+        This maps UV-major ordering to frequency-major ordering.
+        """
+
+        gridding_matrix = reorder_fuv_to_uvf(self.n_uv_fg, self.n_freq)
+
+        return gridding_matrix      
+
+    def build_Fz(self):
+        r"""
+        Build the full Fz operator (EoR + FG).
+
+        Fz is a block-diagonal operator that maps eta-space vectors
+        (vis-ordered) to frequency-space vectors (chan-ordered). The
+        returned operator is stored as a sparse BCOO matrix.
+        """
+        # Build EoR/FG IDFT blocks and gridding matrices directly, then
+        # map from vis-ordered eta space to chan-ordered frequency space.
+        idft_eor = self.build_eta_to_freq_idft_eor()
+        idft_fg = self.build_eta_to_freq_idft_fg()
+        grid_eor = self.reorder_fuv_to_uvf_eor()
+        grid_fg = self.reorder_fuv_to_uvf_fg()
+
+        # Use sparse matmul in JAX.
+        grid_eor = sparse.BCOO.fromdense(grid_eor)
+        grid_fg = sparse.BCOO.fromdense(grid_fg)
+        Fz_eor = sparse.bcoo_dot_general(
+            grid_eor,
+            idft_eor,
+            dimension_numbers=(((1,), (0,)), ((), ()))
+        )
+        Fz_fg = sparse.bcoo_dot_general(
+            grid_fg,
+            idft_fg,
+            dimension_numbers=(((1,), (0,)), ((), ()))
+        )
+        Fz = sparse_block_diag_two(Fz_eor, Fz_fg)
+
+        return Fz
 
         
