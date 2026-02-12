@@ -475,6 +475,12 @@ class BuildMatrices:
 
         Returns a block-diagonal matrix with one IDFT block per (u, v) pixel.
         Excludes eta=0 (belongs to the FG model).
+
+        Returns
+        -------
+        idft_eor : sparse.BCOO
+            Block-diagonal sparse matrix of shape
+            (n_uv_eor * n_freq, n_uv_eor * (n_eta - 1)).
         """
         idft_array_1d = inverse_udft_1d_rect(
             self.n_freq,
@@ -493,6 +499,15 @@ class BuildMatrices:
         Build the FG IDFT block for eta -> frequency.
 
         Includes eta=0 terms, optional LSSM modes, and an optional monopole block.
+
+        Returns
+        -------
+        idft_fg : sparse.BCOO
+            Block-diagonal sparse matrix for the FG model with shape
+            (n_uv_fg * n_freq, n_eta0 + n_lssm + n_mp), where:
+            n_eta0 = (n_uv_fg - int(fit_for_monopole)) * 1
+            n_lssm = (n_uv_fg - int(fit_for_monopole)) * n_modes_fg
+            n_mp = fit_for_monopole * (n_eta + n_modes_fg)
         """
 
         # eta=0 column mapped into frequency space.
@@ -535,6 +550,11 @@ class BuildMatrices:
         Build the vis-ordered -> chan-ordered gridding matrix for EoR.
 
         This maps UV-major ordering to frequency-major ordering.
+
+        Returns
+        -------
+        gridding_matrix : jnp.ndarray
+            Dense permutation matrix of shape (n_uv_eor * n_freq, n_uv_eor * n_freq).
         """
         gridding_matrix = reorder_fuv_to_uvf(self.n_uv_eor, self.n_freq)
 
@@ -546,6 +566,11 @@ class BuildMatrices:
         Build the vis-ordered -> chan-ordered gridding matrix for FG.
 
         This maps UV-major ordering to frequency-major ordering.
+
+        Returns
+        -------
+        gridding_matrix : jnp.ndarray
+            Dense permutation matrix of shape (n_uv_fg * n_freq, n_uv_fg * n_freq).
         """
 
         gridding_matrix = reorder_fuv_to_uvf(self.n_uv_fg, self.n_freq)
@@ -559,6 +584,12 @@ class BuildMatrices:
         Fz is a block-diagonal operator that maps eta-space vectors
         (vis-ordered) to frequency-space vectors (chan-ordered). The
         returned operator is stored as a sparse BCOO matrix.
+
+        Returns
+        -------
+        Fz : sparse.BCOO
+            Sparse matrix of shape (n_freq * (n_uv_eor + n_uv_fg), n_params_eta),
+            where n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         # Build EoR/FG IDFT blocks and gridding matrices directly, then
         # map from vis-ordered eta space to chan-ordered frequency space.
@@ -606,9 +637,9 @@ class BuildMatrices:
         -------
         T : sparse.BCOO
             Sparse matrix with shape
-            (ndata, (nu*nv - 1)*(neta - 1)
-             + (nq + 1)*(nu_fg*nv_fg - 1)
-             + fit_for_monopole*(neta + nq)).
+            (n_vis, n_params_eta), where
+            n_vis = n_freq * n_t * n_bls and
+            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         Finv_Fprime = self.build_Finv_Fprime()
         Fz = self.build_Fz()
