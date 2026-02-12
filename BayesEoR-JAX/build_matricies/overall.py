@@ -10,6 +10,8 @@ jax.config.update("jax_enable_x64", True)
 from typing import Optional, Sequence, Tuple, Union
 
 import jax.numpy as jnp
+import numpy as np
+from pathlib import Path
 from jax import lax
 from jax.experimental import sparse
 from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
@@ -158,6 +160,9 @@ class BuildMatrices:
     effective_noise : numpy.ndarray, optional
         Optional array of per-visibility noise standard deviations. If
         provided, it overrides `sigma` and redundancy weighting.
+    array_save_directory : str, optional
+        Path to the directory where sparse matrices will be saved.
+        Defaults to './matrices/'.
     """
 
 
@@ -200,6 +205,7 @@ class BuildMatrices:
         bl_red_array: Optional[jnp.ndarray] = None,
         sigma: Optional[float] = None,
         effective_noise: Optional[jnp.ndarray] = None,
+        array_save_directory: str = "./matrices/",
     ) -> None:
         
         # Store EoR UV-plane parameters.
@@ -264,6 +270,8 @@ class BuildMatrices:
         self.bl_red_array = bl_red_array
         self.sigma = sigma
         self.effective_noise = effective_noise
+        self.array_save_directory = Path(array_save_directory)
+        self.array_save_directory.mkdir(parents=True, exist_ok=True)
 
         # UV model space (EoR + FG rectilinear grids).
         self.uv_model_space = UV_ModelSpace(
@@ -754,5 +762,103 @@ class BuildMatrices:
 
         # Convert to dense for downstream linear algebra.
         return T_Ninv_T.todense()
+
+    # --------------------
+    # Matrix save/load API
+    # --------------------
+    def _matrix_path(self, matrix_name: str) -> Path:
+        """Return the .npz path for a stored sparse matrix."""
+        return self.array_save_directory / f"{matrix_name}.npz"
+
+    def _dense_matrix_path(self, matrix_name: str) -> Path:
+        """Return the .npy path for a stored dense matrix."""
+        return self.array_save_directory / f"{matrix_name}.npy"
+
+    def check_if_matrix_exists(self, matrix_name: str) -> bool:
+        """Return True if a saved matrix exists on disk."""
+        return self._matrix_path(matrix_name).exists() or self._dense_matrix_path(matrix_name).exists()
+
+    def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
+        """Save a BCOO matrix to disk as data/indices/shape npz."""
+        path = self._matrix_path(matrix_name)
+        np.savez(
+            path,
+            data=np.array(matrix.data),
+            indices=np.array(matrix.indices),
+            shape=np.array(matrix.shape, dtype=np.int64),
+        )
+
+    def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
+        """Save a dense matrix to disk as .npy."""
+        path = self._dense_matrix_path(matrix_name)
+        np.save(path, np.array(matrix))
+
+    def save_matrix(self, matrix_name: str, matrix) -> None:
+        """Save a matrix, sparse as .npz or dense as .npy."""
+        if isinstance(matrix, sparse.BCOO):
+            self.save_sparse_matrix(matrix_name, matrix)
+        else:
+            self.save_dense_matrix(matrix_name, matrix)
+
+    def load_sparse_matrix(self, matrix_name: str) -> sparse.BCOO:
+        """Load a BCOO matrix from disk."""
+        path = self._matrix_path(matrix_name)
+        with np.load(path) as npz:
+            data = jnp.array(npz["data"])
+            indices = jnp.array(npz["indices"])
+            shape = tuple(npz["shape"].tolist())
+        return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+
+    def load_dense_matrix(self, matrix_name: str) -> jnp.ndarray:
+        """Load a dense matrix from disk."""
+        path = self._dense_matrix_path(matrix_name)
+        return jnp.array(np.load(path))
+
+    def load_matrix(self, matrix_name: str):
+        """Load a matrix (sparse or dense) from disk."""
+        if self._matrix_path(matrix_name).exists():
+            return self.load_sparse_matrix(matrix_name)
+        if self._dense_matrix_path(matrix_name).exists():
+            return self.load_dense_matrix(matrix_name)
+        raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
+
+    def build_matrix_if_not_here(self, matrix_name: str) -> None:
+        r"""
+        Build and save a matrix if it does not already exist on disk.
+
+        Parameters
+        ----------
+        matrix_name : str
+            Name of the matrix to build and save.
+        """
+        if self.check_if_matrix_exists(matrix_name):
+            return
+        build_fn = self.matrix_methods[matrix_name]
+        matrix = build_fn()
+        self.save_matrix(matrix_name, matrix)
+
+    def build_minimum_matrix_stack(self) -> None:
+        """
+        Build and save T, Ninv, then T_Ninv_T in that order.
+        """
+        # T
+        if self.check_if_matrix_exists("T"):
+            T = self.load_matrix("T")
+        else:
+            T = self.build_T()
+            self.save_matrix("T", T)
+
+        # Ninv
+        if self.check_if_matrix_exists("Ninv"):
+            Ninv = self.load_matrix("Ninv")
+        else:
+            Ninv = self.build_Ninv()
+            self.save_matrix("Ninv", Ninv)
+
+        # T_Ninv_T (dense)
+        if self.check_if_matrix_exists("T_Ninv_T"):
+            return
+        T_Ninv_T = self.build_T_Ninv_T(T, Ninv)
+        self.save_matrix("T_Ninv_T", T_Ninv_T)
     
     
