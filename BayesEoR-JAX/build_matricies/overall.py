@@ -574,4 +574,41 @@ class BuildMatrices:
 
         return Fz
 
-        
+    def build_T(self):
+        r"""
+        Build the full T operator for EoR + FG.
+
+        T = (F^{-1} F') @ Fz
+
+        Components
+        ----------
+        F^{-1} (Finv):
+            Maps image-space (l, m, n) to measured visibilities (u, v, w)
+            for each time/frequency.
+        F' (Fprime):
+            Maps model UV parameters to image-space (l, m) at the
+            reference time step.
+        Fz:
+            Maps eta-space vectors (vis-ordered) to frequency-space
+            vectors (chan-ordered).
+
+        Returns
+        -------
+        T : sparse.BCOO
+            Sparse matrix with shape
+            (ndata, (nu*nv - 1)*(neta - 1)
+             + (nq + 1)*(nu_fg*nv_fg - 1)
+             + fit_for_monopole*(neta + nq)).
+        """
+        Finv_Fprime = self.build_Finv_Fprime()
+        Fz = self.build_Fz()
+
+        # Sparse matmul in JAX: (n_vis, n_params) @ (n_params, n_params_eta)
+        T = sparse.bcoo_dot_general(
+            Finv_Fprime,
+            Fz,
+            dimension_numbers=(((1,), (0,)), ((), ()))
+        )
+
+        return T
+    
