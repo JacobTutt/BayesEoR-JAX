@@ -152,6 +152,12 @@ class BuildMatrices:
         Array containing the number of redundant baselines at each
         (u(t), v(t), w(t)) in the instrument model with shape (nt, nbls, 1).
         Defaults to None.
+    sigma : float, optional
+        RMS noise per visibility before redundancy weighting. Required if
+        `effective_noise` is None.
+    effective_noise : numpy.ndarray, optional
+        Optional array of per-visibility noise standard deviations. If
+        provided, it overrides `sigma` and redundancy weighting.
     """
 
 
@@ -192,6 +198,8 @@ class BuildMatrices:
         freq_interp_kind: str = 'cubic',
         uvw_array_m: Optional[jnp.ndarray] = None,
         bl_red_array: Optional[jnp.ndarray] = None,
+        sigma: Optional[float] = None,
+        effective_noise: Optional[jnp.ndarray] = None,
     ) -> None:
         
         # Store EoR UV-plane parameters.
@@ -254,6 +262,8 @@ class BuildMatrices:
         self.inst_uvw_irad = uvw_array_m[jnp.newaxis, :, :] / wavelengths[:, jnp.newaxis, jnp.newaxis]
 
         self.bl_red_array = bl_red_array
+        self.sigma = sigma
+        self.effective_noise = effective_noise
 
         # UV model space (EoR + FG rectilinear grids).
         self.uv_model_space = UV_ModelSpace(
@@ -611,4 +621,64 @@ class BuildMatrices:
         )
 
         return T
+
+    # ------------------------
+    # Noise covariance matrices
+    # ------------------------
+    def _diag_bcoo(self, diag: jnp.ndarray) -> sparse.BCOO:
+        """Build a BCOO diagonal matrix from a 1D vector."""
+        n = diag.shape[0]
+        idx = jnp.arange(n, dtype=jnp.int32)
+        indices = jnp.stack([idx, idx], axis=1)
+        return sparse.BCOO((diag, indices), shape=(n, n), unique_indices=True)
+
+    def _sigma_squared_array(self) -> jnp.ndarray:
+        """
+        Build the per-visibility noise variance vector for the current settings.
+
+        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
+        """
+        if self.effective_noise is not None:
+            return jnp.abs(self.effective_noise) ** 2
+
+        if self.sigma is None:
+            raise ValueError("sigma must be provided when effective_noise is None.")
+
+        # Expect bl_red_array shaped (n_t, n_bls) or (n_t, n_bls, 1).
+        red = jnp.asarray(self.bl_red_array)
+        if red.ndim == 3 and red.shape[-1] == 1:
+            red = red[..., 0]
+        if red.shape[0] != self.n_t or red.shape[1] != self.nbls:
+            raise ValueError("bl_red_array must have shape (n_t, n_bls) or (n_t, n_bls, 1).")
+
+        # Expand redundancy over frequency: (n_t, n_freq, n_bls) then flatten.
+        red_tf = jnp.repeat(red[:, jnp.newaxis, :], self.n_freq, axis=1)
+        red_tf = red_tf.reshape(-1)
+
+        sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
+        return (sigma_redundancy ** 2).astype(jnp.complex128)
+
+    def build_Ninv(self) -> sparse.BCOO:
+        """
+        Build the inverse noise covariance matrix N^{-1}.
+
+        Returns
+        -------
+        Ninv : sparse.BCOO
+            Diagonal BCOO matrix of shape (n_vis, n_vis).
+        """
+        sigma_sq = self._sigma_squared_array()
+        return self._diag_bcoo(1.0 / sigma_sq)
+
+    def build_N(self) -> sparse.BCOO:
+        """
+        Build the noise covariance matrix N.
+
+        Returns
+        -------
+        N : sparse.BCOO
+            Diagonal BCOO matrix of shape (n_vis, n_vis).
+        """
+        sigma_sq = self._sigma_squared_array()
+        return self._diag_bcoo(sigma_sq)
     
