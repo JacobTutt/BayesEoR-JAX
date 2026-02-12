@@ -389,7 +389,7 @@ class BuildMatrices:
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def build_Finv_Fprime(self):
+    def build_Finv_Fprime(self) -> sparse.BCOO:
         """
         Build Finv/Fprime blocks across frequency and time.
 
@@ -469,7 +469,7 @@ class BuildMatrices:
     # ----------------------------
     # Construction of Fz (eta -> f)
     # ----------------------------
-    def build_eta_to_freq_idft_eor(self):
+    def build_eta_to_freq_idft_eor(self) -> sparse.BCOO:
         r"""
         Build the EoR IDFT block for eta -> frequency.
 
@@ -494,7 +494,7 @@ class BuildMatrices:
 
         return multi_vis_idft_array_1d
 
-    def build_eta_to_freq_idft_fg(self):
+    def build_eta_to_freq_idft_fg(self) -> sparse.BCOO:
         r"""
         Build the FG IDFT block for eta -> frequency.
 
@@ -545,7 +545,7 @@ class BuildMatrices:
 
         return idft_array_1d_fg
 
-    def reorder_fuv_to_uvf_eor(self):
+    def reorder_fuv_to_uvf_eor(self) -> jnp.ndarray:
         r"""
         Build the vis-ordered -> chan-ordered gridding matrix for EoR.
 
@@ -561,7 +561,7 @@ class BuildMatrices:
         return gridding_matrix
 
     
-    def reorder_fuv_to_uvf_fg(self):
+    def reorder_fuv_to_uvf_fg(self) -> jnp.ndarray:
         r"""
         Build the vis-ordered -> chan-ordered gridding matrix for FG.
 
@@ -577,7 +577,7 @@ class BuildMatrices:
 
         return gridding_matrix      
 
-    def build_Fz(self):
+    def build_Fz(self) -> sparse.BCOO:
         r"""
         Build the full Fz operator (EoR + FG).
 
@@ -615,7 +615,7 @@ class BuildMatrices:
 
         return Fz
 
-    def build_T(self):
+    def build_T(self) -> sparse.BCOO:
         r"""
         Build the full T operator for EoR + FG.
 
