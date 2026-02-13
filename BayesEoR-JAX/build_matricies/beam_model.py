@@ -146,7 +146,9 @@ class Beam_Model:
             if self.fwhm_deg is not None:
                 # FWHM-based Gaussian is usually frequency-independent in this model
                 # unless fwhm_deg is passed as an array.
-                stddev_rad = jnp.deg2rad(self._fwhm_to_stddev(self.fwhm_deg))
+                stddev_scalar = jnp.deg2rad(self._fwhm_to_stddev(self.fwhm_deg))
+                # Keep frequency axis so output is always (n_freq, n_t, n_pix).
+                stddev_rad = jnp.ones_like(f) * stddev_scalar
             else:
                 stddev_rad = self._diam_to_stddev(self.diam, f)  # (n_freq, 1, 1)
 
