@@ -311,7 +311,7 @@ class BuildMatrices:
             self.freq_interp_kind,
         )
         self.beam_response = self.beam_model.get_beam_vals(
-            self.lmn_model_space.lmn_fg, self.freq_hz
+            self.lmn_model_space.az_za_fg, self.freq_hz
             )  # Shape (n_freq, n_t, n_pix_fg)
 
         # Initialize sharding utilities.
