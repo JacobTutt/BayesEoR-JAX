@@ -176,14 +176,22 @@ class LMN_ModelSpace:
         radius_rad_fg = jnp.radians(fov_deg[1] / 2)
 
         # Use healpy to query the pixel indices within the specified radius of the field center.
-        pix_indices_eor = jhp.query_disc(nside=self.nside, vec=vec_center, radius=radius_rad_eor, inclusive=False)
+        pix_indices_eor = jhp.query_disc(
+            nside=self.nside, vec=vec_center, radius=radius_rad_eor, inclusive=False
+        )
+        # jax_healpy pads query_disc output with the sentinel index `npix`.
+        # Keep only valid HEALPix pixel indices.
+        pix_indices_eor = pix_indices_eor[pix_indices_eor < self.npix]
         # If the EoR and foreground FoVs are the same, we can skip the second query and just reuse the pixel indices.
         # Also determine a boolean mask over the foreground pixels indicating which are also in the EoR FoV (i.e., shared axis).
         if self.fovs_match:
             pix_indices_fg = pix_indices_eor
             eor_fg_shared_axis = jnp.ones_like(pix_indices_fg, dtype=bool)
         else: 
-            pix_indices_fg = jhp.query_disc(nside=self.nside, vec=vec_center, radius=radius_rad_fg, inclusive=False)
+            pix_indices_fg = jhp.query_disc(
+                nside=self.nside, vec=vec_center, radius=radius_rad_fg, inclusive=False
+            )
+            pix_indices_fg = pix_indices_fg[pix_indices_fg < self.npix]
             eor_fg_shared_axis = jnp.isin(pix_indices_fg, pix_indices_eor)
 
         return pix_indices_eor, pix_indices_fg, eor_fg_shared_axis

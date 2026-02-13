@@ -17,7 +17,7 @@ from jax.experimental import sparse
 from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from functools import partial
 
-from astropy import constants as c
+from astropy.constants import c
 
 from .dft_funcs import (
     inverse_udft_1d_rect,
@@ -261,6 +261,7 @@ class BuildMatrices:
 
         # Instrument data: convert uvw from meters to inverse radians for each frequency.
         uvw_array_m = jnp.array(uvw_array_m)  # (n_t, n_bls, 3)
+        self.nbls = int(uvw_array_m.shape[1])
         # Only the first time-step uvw is used; time dependence is handled by beam rotation.
         uvw_array_m = uvw_array_m[0].T  # (3, n_bls)
         # Convert meters -> inverse radians by dividing by wavelength per frequency.
@@ -528,8 +529,12 @@ class BuildMatrices:
 
         if self.n_modes_fg > 0:
             lssm_basis_vecs = build_lssm_basis(
-                self.n_freq, nq=self.n_modes_fg, npl=self.n_powerlaws_fg, f_min=self.f0_mhz,
-                df=self.df_mhz, beta=self.beta_fg
+                n_freq=self.n_freq,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
             )
             # Normalise LSSM basis.
             lssm_basis_vecs *= self.d_eta * self.n_eta
@@ -542,13 +547,19 @@ class BuildMatrices:
             
         if self.fit_for_monopole:
             idft_array_1d_mp = inverse_udft_1d_rect(
-                self.n_freq, self.n_eta, nq=self.n_modes_fg, npl=self.n_powerlaws_fg,
-                f_min=self.f0_mhz, df=self.df_mhz, beta=self.beta_fg
+                n_freq=self.n_freq,
+                n_eta=self.n_eta,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
             )
             # Monopole block includes eta=0 and all LSSM modes.
             idft_array_1d_mp *= self.d_eta
-            idft_array_1d_mp[:, self.n_eta//2] *= self.n_eta
-            idft_array_1d_mp[:, self.n_eta:] *= self.n_eta
+            idft_array_1d_mp = idft_array_1d_mp.at[:, self.n_eta // 2].multiply(self.n_eta)
+            idft_array_1d_mp = idft_array_1d_mp.at[:, self.n_eta:].multiply(self.n_eta)
+            idft_array_1d_mp = sparse.BCOO.fromdense(idft_array_1d_mp)
             idft_array_1d_fg = sparse_block_diag_two(idft_array_1d_fg, idft_array_1d_mp)
 
         return idft_array_1d_fg
