@@ -8,7 +8,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 from astropy.constants import c
-from jax.scipy.special import j1
+from scipy.special import j1
 from pyuvdata import UVBeam
 from pyuvdata import utils as uvutils
 from pathlib import Path

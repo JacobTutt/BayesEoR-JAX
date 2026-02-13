@@ -21,7 +21,7 @@ from astropy import constants as c
 
 from .dft_funcs import (
     inverse_udft_1d_rect,
-    build_nudft_array,
+    build_nudft_matrix,
     reorder_fuv_to_uvf,
     sparse_block_diag_repeat,
     sparse_block_diag_two,
@@ -330,7 +330,7 @@ class BuildMatrices:
         # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
         lmn_center = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
         lmn_center = lmn_center[:, self.lmn_model_space.eor_fg_shared_axis]
-        nuidft_uv_to_lm_eor = build_nudft_array(
+        nuidft_uv_to_lm_eor = build_nudft_matrix(
             self.uv_model_space.uv_eor,  # (2, n_uv_eor)
             lmn_center,  # (2, n_pix_eor)
             sign=-1
@@ -349,7 +349,7 @@ class BuildMatrices:
         `UV_ModelSpace` ordering.
         """
         # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
-        nuidft_uv_to_lm_fg = build_nudft_array(
+        nuidft_uv_to_lm_fg = build_nudft_matrix(
             self.uv_model_space.uv_fg,  # (2, n_uv_fg)
             self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2],  # (2, n_pix_fg)
             sign=-1
@@ -372,7 +372,7 @@ class BuildMatrices:
         # UVW coordinates for frequency i_f.
         uvw_irad_if = self.inst_uvw_irad[i_f, :, :]  # (3, n_bls)
         # NUDFT: LMN -> UVW at this (i_f, i_t).
-        nudft_lmn_to_uvw = build_nudft_array(
+        nudft_lmn_to_uvw = build_nudft_matrix(
             lmn_fg_it,  # (3, n_pix_fg)
             uvw_irad_if,  # (3, n_bls)
             sign=+1,

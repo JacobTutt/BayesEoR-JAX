@@ -60,7 +60,6 @@ def build_nudft_matrix(
     # 2j * pi * phase converts the geometric distance into a phase angle.
     return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
 
-
 def reorder_fuv_to_uvf(
     n_uv: int,
     n_freq: int,
