@@ -827,11 +827,14 @@ class BuildMatrices:
 
     def load_matrix(self, matrix_name: str):
         """Load a matrix (sparse or dense) from disk."""
+        matrix = None
         if self._matrix_path(matrix_name).exists():
-            return self.load_sparse_matrix(matrix_name)
-        if self._dense_matrix_path(matrix_name).exists():
-            return self.load_dense_matrix(matrix_name)
-        raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
+            matrix = self.load_sparse_matrix(matrix_name)
+        elif self._dense_matrix_path(matrix_name).exists():
+            matrix = self.load_dense_matrix(matrix_name)
+        else:
+            raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
+        return matrix
 
     def build_matrix_if_not_here(self, matrix_name: str) -> None:
         r"""
@@ -842,34 +845,53 @@ class BuildMatrices:
         matrix_name : str
             Name of the matrix to build and save.
         """
-        if self.check_if_matrix_exists(matrix_name):
-            return
-        build_fn = self.matrix_methods[matrix_name]
-        matrix = build_fn()
-        self.save_matrix(matrix_name, matrix)
+        if not self.check_if_matrix_exists(matrix_name):
+            matrix = self._build_matrix_by_name(matrix_name)
+            self.save_matrix(matrix_name, matrix)
+
+    def _build_matrix_by_name(self, matrix_name: str):
+        """Build a supported matrix by name."""
+        matrix = None
+        if matrix_name == "Fz":
+            matrix = self.build_Fz()
+        elif matrix_name == "Finv_Fprime":
+            matrix = self.build_Finv_Fprime()
+        elif matrix_name == "T":
+            matrix = self.build_T()
+        elif matrix_name == "Ninv":
+            matrix = self.build_Ninv()
+        elif matrix_name == "N":
+            matrix = self.build_N()
+        elif matrix_name == "T_Ninv_T":
+            T = self.load_matrix("T")
+            Ninv = self.load_matrix("Ninv")
+            try:
+                matrix = self.build_T_Ninv_T(T, Ninv)
+            finally:
+                # Drop large intermediates as soon as possible.
+                del T
+                del Ninv
+        else:
+            raise ValueError(f"Unsupported matrix name '{matrix_name}'.")
+        return matrix
 
     def build_minimum_matrix_stack(self) -> None:
         """
         Build and save T, Ninv, then T_Ninv_T in that order.
+
+        This uses a disk-first workflow to avoid keeping large matrices in
+        memory longer than required.
         """
-        # T
-        if self.check_if_matrix_exists("T"):
-            T = self.load_matrix("T")
-        else:
-            T = self.build_T()
-            self.save_matrix("T", T)
+        # Ensure prerequisites exist on disk.
+        self.build_matrix_if_not_here("T")
+        self.build_matrix_if_not_here("Ninv")
 
-        # Ninv
-        if self.check_if_matrix_exists("Ninv"):
-            Ninv = self.load_matrix("Ninv")
-        else:
-            Ninv = self.build_Ninv()
-            self.save_matrix("Ninv", Ninv)
-
-        # T_Ninv_T (dense)
-        if self.check_if_matrix_exists("T_Ninv_T"):
-            return
-        T_Ninv_T = self.build_T_Ninv_T(T, Ninv)
-        self.save_matrix("T_Ninv_T", T_Ninv_T)
+        # Build dense T_Ninv_T only if absent.
+        if not self.check_if_matrix_exists("T_Ninv_T"):
+            T_Ninv_T = self._build_matrix_by_name("T_Ninv_T")
+            try:
+                self.save_matrix("T_Ninv_T", T_Ninv_T)
+            finally:
+                del T_Ninv_T
     
     
