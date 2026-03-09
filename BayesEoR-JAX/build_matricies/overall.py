@@ -186,7 +186,7 @@ class BuildMatrices:
         d_eta: float = 0.0,
         fit_for_monopole: bool = False,
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        jd_start: float = 2461040.5,
+        jd_center: float = 2461040.5,
         nside: Optional[int] = None,
         fov_eor: Optional[float] = None,
         fov_fg: Optional[float] = None,
@@ -243,7 +243,7 @@ class BuildMatrices:
         self.fov_eor = fov_eor
         self.fov_fg = fov_fg
         self.telescope_latlonalt = telescope_latlonalt
-        self.jd_start = jd_start
+        self.jd_center = jd_center
         self.n_t = n_t
         self.d_t = d_t
 
@@ -293,7 +293,7 @@ class BuildMatrices:
             fov_fg=self.fov_fg,
             nside=self.nside,
             telescope_latlonalt=self.telescope_latlonalt,
-            jd_center=self.jd_start,
+            jd_center=self.jd_center,
             n_t=self.n_t,
             d_t=self.d_t,
         )
