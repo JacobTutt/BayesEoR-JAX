@@ -279,6 +279,58 @@ def calc_mean_binned_k_vals(
     return jnp.where(counts > 0.0, sums / counts, jnp.nan)
 
 
+def compress_to_nonempty_k_bins(
+    k_vals_full: jnp.ndarray,
+    counts: jnp.ndarray,
+    bin_id_per_k_mode: jnp.ndarray,
+    valid_mask: jnp.ndarray,
+):
+    """
+    Drop empty spherical bins and remap voxel bin IDs to compact indices.
+
+    Parameters
+    ----------
+    k_vals_full : jnp.ndarray
+        Shape ``(num_k_bins,)`` mean ``|k|`` values, including empty bins.
+    counts : jnp.ndarray
+        Shape ``(num_k_bins,)`` k-mode counts per bin.
+    bin_id_per_k_mode : jnp.ndarray
+        Shape ``(n_k_modes,)`` original bin IDs with invalid entries as ``-1``.
+    valid_mask : jnp.ndarray
+        Shape ``(n_k_modes,)`` validity mask for original bin assignments.
+
+    Returns
+    -------
+    k_vals : jnp.ndarray
+        Mean ``|k|`` values for non-empty bins only.
+    compact_bid : jnp.ndarray
+        Shape ``(n_k_modes,)`` remapped bin IDs in ``[0, n_nonempty)`` and
+        ``-1`` for invalid/empty-bin assignments.
+    compact_valid : jnp.ndarray
+        Shape ``(n_k_modes,)`` mask for valid remapped assignments.
+    """
+    # Keep only bins that actually contain at least one k-mode.
+    keep_bins = counts > 0
+    k_vals = k_vals_full[keep_bins]
+
+    # Build old-id -> new-id map, assigning -1 to empty bins.
+    n_bins = int(k_vals_full.shape[0])
+    old_to_new = -jnp.ones((n_bins,), dtype=jnp.int32)
+    kept_old_ids = jnp.where(keep_bins)[0]
+    old_to_new = old_to_new.at[kept_old_ids].set(
+        jnp.arange(kept_old_ids.shape[0], dtype=jnp.int32)
+    )
+
+    bid = jnp.asarray(bin_id_per_k_mode, dtype=jnp.int32)
+    valid = jnp.asarray(valid_mask, dtype=bool)
+    bid_clip = jnp.clip(bid, 0, n_bins - 1)
+    mapped = old_to_new[bid_clip]
+    compact_valid = valid & (mapped >= 0)
+    compact_bid = jnp.where(compact_valid, mapped, -1).astype(jnp.int32)
+
+    return k_vals, compact_bid, compact_valid
+
+
 def generate_k_cube_model_cylindrical_binning(
     mod_k_masked: jnp.ndarray,
     k_z_masked: jnp.ndarray,

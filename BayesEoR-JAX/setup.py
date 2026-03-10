@@ -12,17 +12,18 @@ import numpy as np
 from astropy.time import Time
 
 from .build_matricies import BuildMatrices
-from .likelihood import LikelihoodConfig
+from .inference.likelihood import Likelihood
+from .inference.prior import PhiInverseConfig, Prior
 from .model.cosmology_transforms import Cosmology
 from .model.instrument import InstrumentModel
 from .model.k_cube import (
     calc_mean_binned_k_vals,
+    compress_to_nonempty_k_bins,
     generate_k_cube_in_physical_coordinates,
     generate_k_cube_model_spherical_binning,
     mask_k_cube,
 )
 from .model.noise import generate_gaussian_noise
-from .prior import PhiInverseConfig, PriorConfig
 from .utils import load_numpy_dict, parse_uprior_inds
 from .vis import preprocess_uvdata
 
@@ -34,8 +35,8 @@ class SetupResult:
 
     def __init__(
         self,
-        likelihood_cfg: LikelihoodConfig,
-        prior_cfg: PriorConfig,
+        likelihood_cfg: Likelihood,
+        prior_cfg: Prior,
         phi_cfg: PhiInverseConfig,
         bm: BuildMatrices,
         vis_dict: dict[str, Any],
@@ -57,45 +58,6 @@ class SetupResult:
         self.ps_box_size_ra_mpc = ps_box_size_ra_mpc
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
-
-
-def _sparse_matvec(matrix: sparse.BCOO, vector: jax.Array) -> jax.Array:
-    """Multiply sparse matrix by dense vector in JAX."""
-    return sparse.bcoo_dot_general(
-        matrix,
-        vector,
-        dimension_numbers=(((1,), (0,)), ((), ())),
-    )
-
-
-def _compress_to_nonempty_k_bins(
-    k_vals_full: jax.Array,
-    counts: jax.Array,
-    bin_id_per_k_mode: jax.Array,
-    valid_mask: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """
-    Drop empty spherical bins and remap voxel bin IDs to a compact index range.
-    """
-    keep_bins = counts > 0
-    k_vals = k_vals_full[keep_bins]
-
-    # Old-id -> new-id map, with -1 for empty bins.
-    n_bins = int(k_vals_full.shape[0])
-    old_to_new = -jnp.ones((n_bins,), dtype=jnp.int32)
-    kept_old_ids = jnp.where(keep_bins)[0]
-    old_to_new = old_to_new.at[kept_old_ids].set(
-        jnp.arange(kept_old_ids.shape[0], dtype=jnp.int32)
-    )
-
-    bid = jnp.asarray(bin_id_per_k_mode, dtype=jnp.int32)
-    valid = jnp.asarray(valid_mask, dtype=bool)
-    bid_clip = jnp.clip(bid, 0, n_bins - 1)
-    mapped = old_to_new[bid_clip]
-    compact_valid = valid & (mapped >= 0)
-    compact_bid = jnp.where(compact_valid, mapped, -1).astype(jnp.int32)
-
-    return k_vals, compact_bid, compact_valid
 
 
 def _get_freqs_from_uvd(uvd: Any) -> np.ndarray:
@@ -149,6 +111,7 @@ def get_vis_data(
     1. Raw pyuvdata file (`.uvh5`, `.uvfits`, `.ms`) via `preprocess_uvdata`.
     2. Preprocessed `.npy` visibility vector plus an instrument-model directory.
     """
+    # Normalize and validate the input data path once at the boundary.
     if not isinstance(data_path, Path):
         data_path = Path(data_path)
     if not data_path.exists():
@@ -160,6 +123,10 @@ def get_vis_data(
     uvd = None
 
     if data_path.suffix in {".uvh5", ".uvfits", ".ms"}:
+        # Raw-file mode:
+        # - select frequencies/times/baselines in vis.preprocess_uvdata
+        # - build Hermitian-expanded data vector + instrument arrays
+        # - optionally estimate empirical noise from even/odd differencing
         out = preprocess_uvdata(
             filepath=data_path,
             antenna_selection=antenna_selection,
@@ -190,6 +157,7 @@ def get_vis_data(
         redundancy = jnp.asarray(red_np)
         noise_est = None if noise_np is None else jnp.asarray(noise_np, dtype=jnp.complex128)
 
+        # Extract frequency/time metadata directly from the selected UVData.
         freqs_hz = _get_freqs_from_uvd(uvd)
         jds = np.unique(uvd.time_array)
         if jds.size > 1:
@@ -197,6 +165,10 @@ def get_vis_data(
         else:
             dt = float(d_t) if d_t is not None else 0.0
     elif data_path.suffix == ".npy":
+        # Preprocessed-vector mode:
+        # - load visibilities from disk
+        # - load instrument model from an instrument directory
+        # - construct frequency/time axes from parser inputs
         if inst_model is None:
             raise ValueError("inst_model is required when loading a preprocessed .npy vector")
         if n_freq is None or f0_mhz is None or df_mhz is None or n_t is None or d_t is None:
@@ -211,6 +183,7 @@ def get_vis_data(
         antpairs = inst.antpairs
         noise_est = None
 
+        # In this mode, `n_freq/f0/df` define the analysis band explicitly.
         freqs_hz = (float(f0_mhz) + float(df_mhz) * np.arange(int(n_freq), dtype=float)) * 1e6
         if jd_center is None:
             raise ValueError("jd_center is required for preprocessed .npy inputs")
@@ -224,15 +197,17 @@ def get_vis_data(
 
     # Optional external noise vector.
     if noise_data_path is not None:
+        # If a noise vector is supplied, treat input visibilities as already noisy.
         noise = jnp.asarray(load_numpy_dict(noise_data_path, as_jax=True), dtype=jnp.complex128).reshape(-1)
         vis_noisy = vis
         bl_conj_pairs_map: dict[int, int] = {}
     elif noise_est is not None:
-        # Raw-data empirical noise estimate from even/odd differencing path.
+        # Reuse empirical noise estimated during raw UVData preprocessing.
         noise = noise_est
         vis_noisy = vis
         bl_conj_pairs_map = {}
     else:
+        # Otherwise inject synthetic Gaussian noise using the instrument redundancy model.
         if sigma is None:
             raise ValueError("sigma is required when no noise vector is supplied/estimated")
         vis_noisy, noise, bl_conj_pairs_map = generate_gaussian_noise(
@@ -340,9 +315,9 @@ def run_setup(
     The returned object contains:
     - compressed data products (`vis_noisy`, `dbar`, `T_Ninv_T`, ...)
     - k-binning metadata
-    - instantiated `PriorConfig`, `PhiInverseConfig`, `LikelihoodConfig`.
+    - instantiated `Prior`, `PhiInverseConfig`, `Likelihood`.
     """
-    # Resolve defaults mirroring parser behavior.
+    # Resolve parser-like defaults once so downstream uses a fully-specified config.
     if n_v_eor is None:
         n_v_eor = n_u_eor
     if n_u_fg is None:
@@ -393,7 +368,9 @@ def run_setup(
         clobber=clobber,
     )
 
-    # Data-driven values overwrite nominal inputs when reading raw uvdata.
+    # Data-driven values overwrite nominal values in raw-file mode.
+    # This ensures matrix dimensions and cosmology transforms follow the actual
+    # selected data product.
     freqs_hz = vis_dict["freqs_hz"]
     n_freq = int(freqs_hz.size)
     f0_mhz = float(freqs_hz[0] / 1e6)
@@ -408,6 +385,8 @@ def run_setup(
         n_eta = n_freq
 
     # Cosmology-derived physical cube dimensions.
+    # These map the instrumental coordinate extents to comoving Mpc scales and
+    # are required for k-bin definitions and power normalization.
     cosmo = Cosmology()
     z = float(cosmo.f2z(jnp.mean(freqs_hz)))
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
@@ -415,7 +394,11 @@ def run_setup(
     ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
     ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
 
-    # Build k-cube and spherical bin assignments.
+    # Build the EoR k-cube model:
+    # 1) generate physical k coordinates
+    # 2) mask LOS-DC and uv-monopole modes
+    # 3) assign spherical bins
+    # 4) drop empty bins and remap voxel->bin IDs to compact contiguous labels
     mod_k, *_ = generate_k_cube_in_physical_coordinates(
         int(n_u_eor),
         int(n_v_eor),
@@ -435,14 +418,17 @@ def run_setup(
         valid_mask=valid_full,
         num_k_bins=int(counts.size),
     )
-    k_vals, bid_compact, valid_compact = _compress_to_nonempty_k_bins(
+    k_vals, bid_compact, valid_compact = compress_to_nonempty_k_bins(
         k_vals_full=k_vals_full,
         counts=counts,
         bin_id_per_k_mode=bid_full,
         valid_mask=valid_full,
     )
 
-    # Matrix construction and compression terms.
+    # Build minimum sufficient matrix stack for likelihood compression:
+    # - T   : forward operator from latent coefficients to data space
+    # - Ninv: inverse noise covariance
+    # - T_Ninv_T: dense normal matrix used in marginalized Gaussian objective
     bm = BuildMatrices(
         n_u_eor=int(n_u_eor),
         du_eor=float(du_eor),
@@ -485,16 +471,30 @@ def run_setup(
     )
     bm.build_minimum_matrix_stack()
 
+    # Load compressed matrix terms and form:
+    #   dbar = T^H N^-1 d
+    #   d_Ninv_d = d^H N^-1 d
+    # using sparse matvecs upstream to avoid unnecessary dense materialization.
     T = bm.load_matrix("T")
     Ninv = bm.load_matrix("Ninv")
     T_Ninv_T = bm.load_matrix("T_Ninv_T")
 
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    Ninv_d = _sparse_matvec(Ninv, vis_noisy)
-    dbar = _sparse_matvec(T.conjugate().T, Ninv_d)
+    Ninv_d = sparse.bcoo_dot_general(
+        Ninv,
+        vis_noisy,
+        dimension_numbers=(((1,), (0,)), ((), ())),
+    )
+    dbar = sparse.bcoo_dot_general(
+        T.conjugate().T,
+        Ninv_d,
+        dimension_numbers=(((1,), (0,)), ((), ())),
+    )
     d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
 
-    # Prior and likelihood configs.
+    # Assemble sampler-space prior and latent-space precision configs.
+    # `Prior` governs sampled theta bounds/transforms.
+    # `PhiInverseConfig` maps sampled power amplitudes to latent precision diag.
     if priors is None:
         raise ValueError("priors must be provided")
     bounds = jnp.asarray(priors, dtype=jnp.float64)
@@ -506,13 +506,15 @@ def run_setup(
         )
 
     uprior_inds = parse_uprior_inds(uprior_bins, int(k_vals.shape[0]))
-    prior_cfg = PriorConfig(
+
+    prior_cfg = Prior(
         bounds=bounds,
         log_priors=bool(log_priors),
         uprior_inds=uprior_inds,
         power_param_start=0,
         n_power_params=int(k_vals.shape[0]),
     )
+
     phi_cfg = PhiInverseConfig(
         bin_id_per_k_mode=bid_compact,
         valid_mask=valid_compact,
@@ -524,7 +526,8 @@ def run_setup(
         n_par=int(T_Ninv_T.shape[0]),
         inverse_lw_power=float(inverse_lw_power),
     )
-    likelihood_cfg = LikelihoodConfig(
+    
+    likelihood_cfg = Likelihood(
         t_ninv_t=jnp.asarray(T_Ninv_T),
         dbar=jnp.asarray(dbar),
         d_ninv_d=jnp.asarray(d_ninv_d),
@@ -537,6 +540,7 @@ def run_setup(
         n_power_params=int(k_vals.shape[0]),
     )
 
+    # Return one object containing both configs and diagnostics needed by run.py.
     return SetupResult(
         likelihood_cfg=likelihood_cfg,
         prior_cfg=prior_cfg,
@@ -550,4 +554,3 @@ def run_setup(
         ps_box_size_dec_mpc=ps_box_size_dec_mpc,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
     )
-
