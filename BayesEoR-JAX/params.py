@@ -131,6 +131,32 @@ class BayesEoRParser(ArgumentParser):
 
     data_path : str, optional
         Path to visibility data.
+    antenna_selection : str, optional
+        Antenna downselect string used by pyuvdata selection.
+    bl_cutoff : float, optional
+        Baseline length cutoff in meters.
+    freq_idx_min, freq_min, freq_center : optional
+        Frequency downselect controls for raw pyuvdata ingestion.
+    n_freqs_select : int, optional
+        Number of frequency channels to keep after downselect.
+    jd_idx_min, jd_min, jd_center : optional
+        Time downselect controls for raw pyuvdata ingestion.
+    n_times_select : int, optional
+        Number of time integrations to keep after downselect.
+    form_pi : bool, optional
+        Form pseudo-Stokes I visibilities. Defaults to True.
+    pi_norm : float, optional
+        Normalization used for pseudo-Stokes I formation.
+    redundant_avg : bool, optional
+        Enable redundant averaging in preprocessing.
+    uniform_redundancy : bool, optional
+        Force uniform redundancy model when averaging.
+    calc_noise : bool, optional
+        Estimate empirical noise via even/odd differencing.
+    save_vis, save_model : bool, optional
+        Write preprocessed vis/model products to disk.
+    save_dir : str, optional
+        Output directory for saved vis/model products.
     noise_data_path : str, optional
         Path to preprocessed noise vector.
     sigma : float, optional
@@ -220,6 +246,24 @@ class BayesEoRParser(ArgumentParser):
 
         # Data / noise
         self.add_argument("--data-path", type=str, help="Path to visibility data.")
+        self.add_argument("--antenna-selection", type=str, default="cross", help="Antenna downselect string.")
+        self.add_argument("--bl-cutoff", type=float, help="Baseline length cutoff in meters.")
+        self.add_argument("--freq-idx-min", type=int, help="Minimum frequency index for downselect.")
+        self.add_argument("--freq-min", type=float, help="Minimum frequency in Hz for downselect.")
+        self.add_argument("--freq-center", type=float, help="Central frequency in Hz for downselect.")
+        self.add_argument("--n-freqs-select", type=int, help="Number of frequencies to keep.")
+        self.add_argument("--jd-idx-min", type=int, help="Minimum time index for downselect.")
+        self.add_argument("--jd-min", type=float, help="Minimum Julian date for downselect.")
+        self.add_argument("--n-times-select", type=int, help="Number of times to keep.")
+        self.add_argument("--form-pi", action="store_true", dest="form_pi", default=True, help="Form pseudo-Stokes I visibilities.")
+        self.add_argument("--no-form-pi", action="store_false", dest="form_pi", help=argparse.SUPPRESS)
+        self.add_argument("--pi-norm", type=float, default=1.0, help="Normalization for pseudo-Stokes I formation.")
+        self.add_argument("--redundant-avg", action="store_true", help="Enable redundant averaging.")
+        self.add_argument("--uniform-redundancy", action="store_true", help="Force uniform redundancy model.")
+        self.add_argument("--calc-noise", action="store_true", help="Estimate noise via even/odd differencing.")
+        self.add_argument("--save-vis", action="store_true", help="Save visibility vector to disk.")
+        self.add_argument("--save-model", action="store_true", help="Save instrument model arrays to disk.")
+        self.add_argument("--save-dir", type=str, default="./", help="Output directory for saved vis/model arrays.")
         self.add_argument("--noise-data-path", type=str, help="Path to preprocessed noise vector.")
         self.add_argument("--sigma", type=float, help="Visibility-noise standard deviation.")
         self.add_argument("--noise-seed", type=int, default=742123, help="Noise RNG seed.")
