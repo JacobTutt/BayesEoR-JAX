@@ -48,9 +48,6 @@ class Beam_Model:
         Frequency interpolation kind from scipy.interpolate.interp1d. 
         Defaults to 'cubic'.
     """
-
-    
-
     def __init__(
         self,
         beam_type: str | None = None,
