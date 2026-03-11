@@ -45,8 +45,6 @@ class BayesEoRParser(ArgumentParser):
         Uniform-prior bin selector string. Defaults to ``""``.
     inverse_lw_power : float, optional
         Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
-    use_lwm_gaussian_prior : bool, optional
-        Use Gaussian prior for FG/LSSM coefficients. Defaults to False.
     use_intrinsic_noise_fitting : bool, optional
         Fit for global intrinsic noise amplitude. Defaults to False.
     n_live_scale_factor : float, optional
@@ -66,12 +64,14 @@ class BayesEoRParser(ArgumentParser):
         Number of EoR uv pixels along u and v axes. ``n_v_eor`` defaults to
         ``n_u_eor``.
     du_eor, dv_eor : float, optional
-        EoR uv-axis spacing in inverse radians. Defaults to 1.0.
+        EoR uv-axis spacing in inverse radians. If omitted, each axis defaults
+        to ``1 / deg2rad(fov_eor)``.
     n_u_fg, n_v_fg : int, optional
         Number of FG uv pixels along u and v axes. ``n_u_fg`` defaults to
         ``n_u_eor`` and ``n_v_fg`` defaults to ``n_u_fg``.
     du_fg, dv_fg : float, optional
-        FG uv-axis spacing in inverse radians. Defaults to 1.0.
+        FG uv-axis spacing in inverse radians. If omitted, each axis defaults
+        to ``1 / deg2rad(fov_fg)``.
     fit_for_monopole : bool, optional
         Include the uv monopole mode. Defaults to False.
     n_modes_fg : int, optional
@@ -92,8 +92,6 @@ class BayesEoRParser(ArgumentParser):
         Frequency channel width in MHz.
     n_eta : int, optional
         Number of line-of-sight Fourier modes. Defaults to ``n_freq``.
-    d_eta : float, optional
-        Eta-axis Fourier spacing in inverse Hz. Defaults to 1.0.
 
     Time / Sky Geometry Parameters
 
@@ -201,7 +199,6 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--lin-priors", action="store_false", dest="log_priors", help=argparse.SUPPRESS)
         self.add_argument("--uprior-bins", type=str, default="", help="Uniform-prior bin selector.")
         self.add_argument("--inverse-lw-power", type=float, default=1e-16, help="Inverse FG prior power.")
-        self.add_argument("--use-lwm-gaussian-prior", action="store_true", help="Use Gaussian FG prior.")
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
         self.add_argument("--num-inner-scale-factor", type=float, default=12.0, help="Inner steps = factor * n_dim.")
@@ -212,12 +209,12 @@ class BayesEoRParser(ArgumentParser):
         # UV model grids
         self.add_argument("--n-u-eor", type=int, required=True, help="Number of EoR uv pixels along u.")
         self.add_argument("--n-v-eor", type=int, help="Number of EoR uv pixels along v. Defaults to n_u_eor.")
-        self.add_argument("--du-eor", type=float, default=1.0, help="EoR u spacing in inverse radians.")
-        self.add_argument("--dv-eor", type=float, default=1.0, help="EoR v spacing in inverse radians.")
+        self.add_argument("--du-eor", type=float, default=None, help="EoR u spacing in inverse radians. Defaults to 1/deg2rad(fov_eor).")
+        self.add_argument("--dv-eor", type=float, default=None, help="EoR v spacing in inverse radians. Defaults to 1/deg2rad(fov_eor).")
         self.add_argument("--n-u-fg", type=int, help="Number of FG uv pixels along u. Defaults to n_u_eor.")
         self.add_argument("--n-v-fg", type=int, help="Number of FG uv pixels along v. Defaults to n_u_fg.")
-        self.add_argument("--du-fg", type=float, default=1.0, help="FG u spacing in inverse radians.")
-        self.add_argument("--dv-fg", type=float, default=1.0, help="FG v spacing in inverse radians.")
+        self.add_argument("--du-fg", type=float, default=None, help="FG u spacing in inverse radians. Defaults to 1/deg2rad(fov_fg).")
+        self.add_argument("--dv-fg", type=float, default=None, help="FG v spacing in inverse radians. Defaults to 1/deg2rad(fov_fg).")
         self.add_argument("--fit-for-monopole", action="store_true", help="Include the uv monopole mode.")
         self.add_argument("--n-modes-fg", type=int, default=0, help="Number of FG/LSSM modes.")
         self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
@@ -228,7 +225,6 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--f0-mhz", type=float, required=True, help="Minimum frequency in MHz.")
         self.add_argument("--df-mhz", type=float, required=True, help="Channel width in MHz.")
         self.add_argument("--n-eta", type=int, help="Number of line-of-sight Fourier modes. Defaults to n_freq.")
-        self.add_argument("--d-eta", type=float, default=1.0, help="Eta-axis Fourier spacing in inverse Hz.")
 
         # Time / sky geometry
         self.add_argument("--n-t", type=int, default=1, help="Number of time integrations.")
@@ -237,12 +233,7 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--nside", type=int, required=True, help="HEALPix nside.")
         self.add_argument("--fov-eor", type=float, required=True, help="Circular EoR FoV in degrees.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")
-        self.add_argument(
-            "--telescope-latlonalt",
-            type=list[float],
-            required=True,
-            help="Telescope location [lat_deg, lon_deg, alt_m].",
-        )
+        self.add_argument("--telescope-latlonalt", type=list[float], required=True, help="Telescope location [lat_deg, lon_deg, alt_m].")
 
         # Beam / instrument
         self.add_argument("--beam-type", type=str, default="uniform", help="Beam model name or UVBeam file path.")

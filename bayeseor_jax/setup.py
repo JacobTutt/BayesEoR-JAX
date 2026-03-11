@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import warnings
 
 import jax
 import jax.numpy as jnp
@@ -66,6 +67,41 @@ def _get_freqs_from_uvd(uvd: Any) -> np.ndarray:
     if len(freqs.shape) > 1:
         freqs = freqs[0]
     return np.asarray(freqs, dtype=float)
+
+
+def _resolve_uv_spacing(
+    *,
+    fov_deg: float,
+    du: float | None,
+    dv: float | None,
+    label: str,
+    rtol: float = 5e-2,
+) -> tuple[float, float]:
+    """Resolve uv spacings, deriving from FoV when omitted and warning on mismatch."""
+    fov_deg = float(fov_deg)
+    if fov_deg <= 0:
+        raise ValueError(f"{label}: fov must be > 0 deg, got {fov_deg}")
+
+    derived = float(1.0 / np.deg2rad(fov_deg))
+    du_val = derived if du is None else float(du)
+    dv_val = derived if dv is None else float(dv)
+
+    if du is not None and not np.isclose(du_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: du={du_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if dv is not None and not np.isclose(dv_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: dv={dv_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return du_val, dv_val
 
 
 def get_vis_data(
@@ -248,12 +284,12 @@ def run_setup(
     # UV model
     n_u_eor: int,
     n_v_eor: int | None = None,
-    du_eor: float = 1.0,
-    dv_eor: float = 1.0,
+    du_eor: float | None = None,
+    dv_eor: float | None = None,
     n_u_fg: int | None = None,
     n_v_fg: int | None = None,
-    du_fg: float = 1.0,
-    dv_fg: float = 1.0,
+    du_fg: float | None = None,
+    dv_fg: float | None = None,
     fit_for_monopole: bool = False,
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
@@ -326,6 +362,18 @@ def run_setup(
         n_v_fg = n_u_fg
     if fov_fg is None:
         fov_fg = fov_eor
+    du_eor, dv_eor = _resolve_uv_spacing(
+        fov_deg=float(fov_eor),
+        du=du_eor,
+        dv=dv_eor,
+        label="EoR uv grid spacing",
+    )
+    du_fg, dv_fg = _resolve_uv_spacing(
+        fov_deg=float(fov_fg),
+        du=du_fg,
+        dv=dv_fg,
+        label="FG uv grid spacing",
+    )
     if n_eta is None:
         if n_freq is None:
             raise ValueError("n_eta is None and n_freq is None; one must be provided")
