@@ -101,17 +101,16 @@ class MaximumAPosteriori:
             t_matrix = setup_result.bm.load_matrix("T")
             ninv = setup_result.bm.load_matrix("Ninv")
             t_ninv_t = setup_result.bm.load_matrix("T_Ninv_T")
+            if hasattr(t_matrix, "todense"):
+                t_matrix = t_matrix.todense()
+            t_matrix = jnp.asarray(t_matrix)
 
             ninv_d = sparse.bcoo_dot_general(
                 ninv,
                 vis_noisy,
                 dimension_numbers=(((1,), (0,)), ((), ())),
             )
-            dbar = sparse.bcoo_dot_general(
-                t_matrix.conj().T,
-                ninv_d,
-                dimension_numbers=(((1,), (0,)), ((), ())),
-            )
+            dbar = jnp.conj(t_matrix).T @ ninv_d
             d_ninv_d = jnp.real(jnp.vdot(vis_noisy, ninv_d))
 
             setup_result.likelihood_cfg.t_ninv_t = jnp.asarray(t_ninv_t)

@@ -634,7 +634,7 @@ class BuildMatrices:
 
         return Fz
 
-    def build_T(self) -> sparse.BCOO:
+    def build_T(self) -> jnp.ndarray:
         r"""
         Build the full T operator for EoR + FG.
 
@@ -654,8 +654,8 @@ class BuildMatrices:
 
         Returns
         -------
-        Finv_Fprime_Fz : sparse.BCOO
-            Sparse matrix with shape
+        Finv_Fprime_Fz : jnp.ndarray
+            Dense matrix with shape
             (n_vis, n_params_eta), where
             n_vis = n_freq * n_t * n_bls and
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
@@ -670,7 +670,8 @@ class BuildMatrices:
             dimension_numbers=(((1,), (0,)), ((), ()))
         )
 
-        return Finv_Fprime_Fz
+        # Match legacy BayesEoR behavior: keep T dense for downstream T^H products.
+        return jnp.asarray(Finv_Fprime_Fz.todense())
 
     # ------------------------
     # Noise covariance matrices
@@ -735,17 +736,17 @@ class BuildMatrices:
         return self._diag_bcoo(sigma_sq)
     
 
-    # ----------------------------------------------
-    # Build T^H N^{-1} T for the quadratic estimator
-    # ----------------------------------------------
+    # ------------------
+    # Build T^H N^{-1} T
+    # ------------------
 
-    def build_T_Ninv_T(self, T: sparse.BCOO, Ninv: sparse.BCOO) -> jnp.ndarray:
+    def build_T_Ninv_T(self, T, Ninv: sparse.BCOO) -> jnp.ndarray:
         r"""
         Build T^H N^{-1} T.
 
         Parameters
         ----------
-        T : sparse.BCOO
+        T : jnp.ndarray or sparse.BCOO
             Forward operator with shape (n_vis, n_params_eta).
         Ninv : sparse.BCOO
             Inverse noise covariance with shape (n_vis, n_vis).
@@ -757,6 +758,11 @@ class BuildMatrices:
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         
+        # Accept legacy cached sparse T, but perform T^H products in dense space.
+        if hasattr(T, "todense"):
+            T = T.todense()
+        T = jnp.asarray(T)
+
         # N^{-1} T
         Ninv_T = sparse.bcoo_dot_general(
             Ninv,
@@ -764,15 +770,12 @@ class BuildMatrices:
             dimension_numbers=(((1,), (0,)), ((), ()))
         )
 
-        # T^H @ (N^{-1} T)
-        T_Ninv_T = sparse.bcoo_dot_general(
-            T.conjugate().T,
-            Ninv_T,
-            dimension_numbers=(((1,), (0,)), ((), ()))
-        )
+        if hasattr(Ninv_T, "todense"):
+            Ninv_T = Ninv_T.todense()
+        Ninv_T = jnp.asarray(Ninv_T)
 
-        # Convert to dense for downstream linear algebra.
-        return T_Ninv_T.todense()
+        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
+        return jnp.conj(T).T @ Ninv_T
 
     # --------------------
     # Matrix save/load API

@@ -543,6 +543,9 @@ def run_setup(
     T = bm.load_matrix("T")
     Ninv = bm.load_matrix("Ninv")
     T_Ninv_T = bm.load_matrix("T_Ninv_T")
+    if hasattr(T, "todense"):
+        T = T.todense()
+    T = jnp.asarray(T)
 
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     Ninv_d = sparse.bcoo_dot_general(
@@ -550,11 +553,7 @@ def run_setup(
         vis_noisy,
         dimension_numbers=(((1,), (0,)), ((), ())),
     )
-    dbar = sparse.bcoo_dot_general(
-        T.conjugate().T,
-        Ninv_d,
-        dimension_numbers=(((1,), (0,)), ((), ())),
-    )
+    dbar = jnp.conj(T).T @ Ninv_d
     d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
 
     # Assemble sampler-space prior and latent-space precision configs.
