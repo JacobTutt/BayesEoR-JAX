@@ -337,6 +337,7 @@ def run_setup(
     save_model: bool = False,
     save_dir: Path | str = "./",
     clobber: bool = False,
+    effective_noise_path: Path | str | None = None,
     # Prior / likelihood
     priors: Any = None,
     log_priors: bool = True,
@@ -473,6 +474,22 @@ def run_setup(
         valid_mask=valid_full,
     )
 
+    # Optional per-visibility effective-noise model.
+    # If provided, this overrides sigma/redundancy-based covariance construction.
+    effective_noise = None
+    if effective_noise_path is not None:
+        effective_noise = jnp.asarray(
+            load_numpy_dict(effective_noise_path, as_jax=True),
+            dtype=jnp.complex128,
+        ).reshape(-1)
+        expected_n_vis = int(vis_dict["vis_noisy"].size)
+        if int(effective_noise.size) != expected_n_vis:
+            raise ValueError(
+                "effective_noise_path length mismatch: "
+                f"got {int(effective_noise.size)} values, expected {expected_n_vis} "
+                "(must match vis_noisy size = n_t * n_freq * n_bls)."
+            )
+
     # Build minimum sufficient matrix stack for likelihood compression:
     # - T   : forward operator from latent coefficients to data space
     # - Ninv: inverse noise covariance
@@ -514,7 +531,7 @@ def run_setup(
         uvw_array_m=vis_dict["uvws"],
         bl_red_array=vis_dict["redundancy"],
         sigma=sigma,
-        effective_noise=None,
+        effective_noise=effective_noise,
         array_save_directory=str(array_save_directory),
     )
     bm.build_minimum_matrix_stack()
