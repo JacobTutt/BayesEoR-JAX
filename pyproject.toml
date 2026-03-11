@@ -13,7 +13,7 @@ dependencies = [
   "scipy",
   "astropy",
   "h5py",
-  "jax",
+  "jax[cuda12]",
   "distrax",
   "jax-healpy",
   "pyuvdata",
