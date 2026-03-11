@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bayeseor-jax"
+version = "0.1.0"
+description = "JAX-accelerated BayesEoR pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "scipy",
+  "astropy",
+  "h5py",
+  "jax",
+  "distrax",
+  "jax-healpy",
+  "pyuvdata",
+  "jsonargparse",
+  "matplotlib",
+  "tqdm",
+  "anesthetic",
+  "blackjax @ git+https://github.com/handley-lab/blackjax@95e93ed93e726b95143b2f4a9582888621625f52",
+]
+
+[tool.setuptools.packages.find]
+include = ["bayeseor_jax*"]
