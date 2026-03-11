@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,25 @@ import jax.numpy as jnp
 import numpy as np
 
 jax.config.update("jax_enable_x64", True)
+LOGGER = logging.getLogger(__name__)
+
+
+def mpiprint(*args: Any, rank: int = 0, **kwargs: Any) -> None:
+    """
+    Lightweight rank-gated print helper.
+
+    Parameters
+    ----------
+    *args : Any
+        Positional arguments forwarded to logging.
+    rank : int, optional
+        Rank identifier. Output is emitted only when ``rank == 0``.
+    **kwargs : Any
+        Unused. Accepted for compatibility with legacy callsites.
+    """
+    if rank == 0:
+        message = " ".join(str(arg) for arg in args)
+        LOGGER.info(message)
 
 
 def parse_uprior_inds(upriors_str: str, nkbins: int) -> jnp.ndarray:
@@ -71,7 +91,6 @@ def write_log_files(
     args: Any,
     out_dir: Path | str = Path("./"),
     version: str | None = None,
-    verbose: bool = False,
 ) -> None:
     """
     Write run metadata files for reproducibility.
@@ -87,8 +106,6 @@ def write_log_files(
         Output directory for log files.
     version : str or None, optional
         Optional version string to write to ``version.txt``.
-    verbose : bool, optional
-        Print the output directory path after writing.
     """
     if not isinstance(out_dir, Path):
         out_dir = Path(out_dir)
@@ -106,9 +123,6 @@ def write_log_files(
         else:
             args_dict = _coerce_args_dict(args)
             args_file.write_text(json.dumps(args_dict, indent=2, default=str) + "\n")
-
-    if verbose:
-        print(f"Log files written successfully to {out_dir.resolve()}")
 
 
 def save_numpy_dict(

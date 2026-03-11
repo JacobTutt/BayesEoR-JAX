@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from pprint import pprint
+from pprint import pformat
 from typing import Any
 
 import jax.numpy as jnp
@@ -13,12 +14,12 @@ from astropy import units
 from astropy.time import Time
 from jax.experimental import sparse
 from numpy.typing import ArrayLike
-from rich.panel import Panel
 
 from ..inference.prior import build_phi_inverse
 from ..params import BayesEoRParser
 from ..setup import SetupResult, run_setup
-from ..utils import mpiprint
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MaximumAPosteriori:
@@ -37,8 +38,6 @@ class MaximumAPosteriori:
     array_dir : str, optional
         Path to a directory containing T, Ninv, and T_Ninv_T. Supersedes the
         `array_save_directory` created from the config. Defaults to None.
-    verbose : bool
-        Verbose output. Defaults to False.
     """
 
     def __init__(
@@ -47,20 +46,14 @@ class MaximumAPosteriori:
         config: Path | str,
         data_path: str | None = None,
         array_dir: str | None = None,
-        verbose: bool = False,
     ) -> None:
-        print_rank = 1 - verbose
-
         config_path = Path(config)
         if not config_path.exists():
             raise FileNotFoundError(f"{config} does not exist")
 
         parser = BayesEoRParser()
         args = parser.parse_args(["--config", str(config_path)])
-        args.verbose = verbose
-        if verbose:
-            mpiprint("\n", Panel("Parameters"))
-            pprint(args.__dict__)
+        LOGGER.info("Parameters:\n%s", pformat(args.__dict__))
 
         if data_path is not None:
             data_path_obj = Path(data_path)
@@ -71,9 +64,7 @@ class MaximumAPosteriori:
                 != Path(args.data_path).absolute().as_posix()
             )
             if data_paths_differ:
-                mpiprint("\nReplacing data_path:", style="bold", rank=print_rank)
-                mpiprint(f"{args.data_path = }", rank=print_rank)
-                mpiprint(f"{data_path      = }", rank=print_rank)
+                LOGGER.info("Replacing data_path: args.data_path=%s -> data_path=%s", args.data_path, data_path)
                 args.data_path = str(data_path_obj)
             update_linear_terms = data_paths_differ
         else:
@@ -95,14 +86,16 @@ class MaximumAPosteriori:
                 != Path(setup_result.bm.array_save_directory).absolute().as_posix()
             )
             if array_dirs_differ:
-                mpiprint("\nReplacing array_save_directory:", style="bold", rank=print_rank)
-                mpiprint(f"{setup_result.bm.array_save_directory = }", rank=print_rank)
-                mpiprint(f"{array_dir_path = }", rank=print_rank)
+                LOGGER.info(
+                    "Replacing array_save_directory: setup_result.bm.array_save_directory=%s -> array_dir_path=%s",
+                    setup_result.bm.array_save_directory,
+                    array_dir_path,
+                )
                 setup_result.bm.array_save_directory = array_dir_path
                 update_linear_terms = True
 
         if update_linear_terms:
-            mpiprint("\nCalculating dbar and d_Ninv_d...", rank=print_rank)
+            LOGGER.info("Calculating dbar and d_Ninv_d.")
             vis_noisy = setup_result.vis_dict["vis_noisy"]
 
             t_matrix = setup_result.bm.load_matrix("T")
@@ -205,8 +198,7 @@ class MaximumAPosteriori:
         log_det_prior_cov = -1 * jnp.sum(jnp.log(prior_cov)).real
         log_post = -0.5 * log_det_sigma - 0.5 * log_det_prior_cov + 0.5 * dbar_sigmai_dbar
 
-        if self.prior.uprior_inds is not None:
-            log_post += jnp.sum(jnp.log(jnp.asarray(dmps)[self.prior.uprior_inds]))
+        log_post += jnp.sum(jnp.log(jnp.asarray(dmps)[self.prior.uprior_inds]))
         log_post = log_post.real
 
         if not return_prior_cov:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,11 @@ import numpy as np
 import blackjax
 from anesthetic import NestedSamples
 from blackjax.ns.utils import finalise, log_weights
+from tqdm.auto import tqdm
 
 from .setup import SetupResult
+
+LOGGER = logging.getLogger(__name__)
 
 
 def run(
@@ -68,10 +72,12 @@ def run(
 
     dead = []
     n_iter = 0
-    while not (float(state.logZ_live - state.logZ) < stop_threshold):
-        (state, rng_key), dead_info = one_step((state, rng_key), None)
-        dead.append(dead_info)
-        n_iter += 1
+    with tqdm(desc="Dead points", unit=" dead points") as pbar:
+        while not (float(state.logZ_live - state.logZ) < stop_threshold):
+            (state, rng_key), dead_info = one_step((state, rng_key), None)
+            dead.append(dead_info)
+            n_iter += 1
+            pbar.update(num_delete)
 
     with jax.default_device(jax.devices("cpu")[0]):
         final_state = finalise(state, dead)
@@ -109,4 +115,5 @@ def run(
         "nested_sampling_results_csv": str(nested_csv_path),
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    LOGGER.info("Nested sampling summary: %s", json.dumps(summary))
     return summary
