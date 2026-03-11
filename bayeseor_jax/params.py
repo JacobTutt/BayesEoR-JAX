@@ -37,8 +37,6 @@ class BayesEoRParser(ArgumentParser):
         Directory for matrix storage. Defaults to ``"./matrices/"``.
     output_dir : str, optional
         Directory for sampler outputs. Defaults to ``"./chains/"``.
-    file_root_dir : str, optional
-        Existing output directory to resume from. Defaults to None.
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
     log_priors : bool, optional
@@ -198,7 +196,6 @@ class BayesEoRParser(ArgumentParser):
             help="Directory for matrix storage.",
         )
         self.add_argument("--output-dir", type=str, default="./chains/", help="Directory for sampler outputs.")
-        self.add_argument("--file-root-dir", type=str, help="Directory to resume an existing run.")
         self.add_argument("--priors", type=list[list[float]], help="Power-spectrum prior ranges [[min, max], ...].")
         self.add_argument("--log-priors", action="store_true", default=True, help="Use log10 priors.")
         self.add_argument("--lin-priors", action="store_false", dest="log_priors", help=argparse.SUPPRESS)
