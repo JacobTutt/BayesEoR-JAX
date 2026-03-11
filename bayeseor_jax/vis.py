@@ -70,11 +70,6 @@ def preprocess_uvdata(
     The noise is estimated by differencing visibilities at even and odd time
     steps per baseline and frequency.
 
-    Notes
-    -----
-    Compared to the original BayesEoR function, phasor-vector generation is
-    intentionally not implemented in BayesEoR-JAX.
-
     Parameters
     ----------
     filepath : Path or str

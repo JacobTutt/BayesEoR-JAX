@@ -29,6 +29,4 @@ env/
 *.xlsx
 
 # local migration tests (do not commit)
-test_new_pipeline.py
-test_kcube.py
-test_k_cube_parity.py
+docs/
