@@ -27,3 +27,7 @@ env/
 
 # Others
 *.xlsx
+
+# local migration tests (do not commit)
+test_new_pipeline.py
+test_kcube.py
