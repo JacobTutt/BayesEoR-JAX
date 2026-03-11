@@ -23,8 +23,6 @@ from .dft_funcs import (
     inverse_udft_1d_rect,
     build_nudft_matrix,
     reorder_fuv_to_uvf,
-    sparse_block_diag_repeat,
-    sparse_block_diag_two,
 )
 from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
@@ -396,9 +394,42 @@ class BuildMatrices:
 
         return Finv_Fprime_block_eor, Finv_Fprime_block_fg
 
+    def _build_finv_fprime_blocks(self):
+        """
+        Build dense per-frequency/per-time Finv_Fprime blocks.
+
+        Returns
+        -------
+        full_eor, full_fg : tuple[jnp.ndarray, jnp.ndarray]
+            Tensors with shapes:
+            - full_eor: (n_freq, n_t, n_bls, n_uv_eor)
+            - full_fg:  (n_freq, n_t, n_bls, n_uv_fg)
+        """
+        # Precompute NUDFT kernels (UV -> LM), then constrain sharding.
+        nuidft_uv_to_lm_eor = jax.lax.with_sharding_constraint(self._uv_to_lm_eor(), self.sharding_mat)
+        nuidft_uv_to_lm_fg = jax.lax.with_sharding_constraint(self._uv_to_lm_fg(), self.sharding_mat)
+
+        # Nested scans: frequency then time.
+        def frequency_loop(carry, i_f):
+            def time_loop(t_carry, i_t):
+                block_eor, block_fg = self._build_Finv_Fprime_block(
+                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
+                )
+                return t_carry, (block_eor, block_fg)
+
+            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
+            return carry, (e_blocks, f_blocks)
+
+        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
+
+        # Constrain sharding to avoid host/device reshuffles.
+        full_eor = jax.lax.with_sharding_constraint(full_eor, self.sharding_grid)
+        full_fg = jax.lax.with_sharding_constraint(full_fg, self.sharding_grid)
+        return full_eor, full_fg
+
 
     @partial(jax.jit, static_argnums=(0,))
-    def build_Finv_Fprime(self) -> sparse.BCOO:
+    def build_Finv_Fprime(self) -> jnp.ndarray:
         """
         Build Finv/Fprime blocks across frequency and time.
 
@@ -406,79 +437,153 @@ class BuildMatrices:
 
         Returns
         -------
-        finv_fprime : sparse.BCOO
-            Sparse matrix with shape (n_vis, n_params), where
+        finv_fprime : jnp.ndarray
+            Dense matrix with shape (n_vis, n_params), where
             n_vis = n_freq * n_t * n_bls and
             n_params = n_freq * (n_uv_eor + n_uv_fg).
         """
-        # Precompute NUDFT kernels (UV -> LM) inside the JIT, then constrain sharding.
-        nuidft_uv_to_lm_eor = jax.lax.with_sharding_constraint(self._uv_to_lm_eor(), self.sharding_mat)
-        nuidft_uv_to_lm_fg  = jax.lax.with_sharding_constraint(self._uv_to_lm_fg(),  self.sharding_mat)
+        full_eor, full_fg = self._build_finv_fprime_blocks()
 
+        # Preserve legacy column layout from the sparse implementation:
+        # [all EoR frequency blocks][all FG frequency blocks].
+        freq_eye = jnp.eye(self.n_freq, dtype=full_eor.dtype)[:, None, None, :, None]  # (f,1,1,f,1)
+        eor_blocked = full_eor[:, :, :, None, :] * freq_eye  # (f,t,b,f,n_uv_eor)
+        fg_blocked = full_fg[:, :, :, None, :] * freq_eye  # (f,t,b,f,n_uv_fg)
 
-        # Nested scans: loop over frequency, then time, to build blocks.
-        def frequency_loop(carry, i_f):
-            def time_loop(t_carry, i_t):
-                block_eor, block_fg = self._build_Finv_Fprime_block(
-                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
-                )
-                return t_carry, (block_eor, block_fg)
-            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
-            return carry, (e_blocks, f_blocks)
+        # Legacy row ordering: time slowest, then frequency, then baseline.
+        eor_blocked = jnp.transpose(eor_blocked, (1, 0, 2, 3, 4)).reshape(
+            self.n_t * self.n_freq * self.nbls,
+            self.n_freq * self.n_uv_eor,
+        )
+        fg_blocked = jnp.transpose(fg_blocked, (1, 0, 2, 3, 4)).reshape(
+            self.n_t * self.n_freq * self.nbls,
+            self.n_freq * self.n_uv_fg,
+        )
+        return jnp.concatenate([eor_blocked, fg_blocked], axis=1)
 
-        # Execute full scan across frequencies.
-        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
+    @partial(jax.jit, static_argnums=(0,))
+    def build_T_directly(self) -> jnp.ndarray:
+        r"""
+        Construct T directly from Finv/Fprime blocks and spectral basis matrices.
 
-        # Shapes: 
-        # full_eor (n_freq, n_t, n_bls, n_uv_eor)
-        # full_fg (n_freq, n_t, n_bls, n_uv_fg)
+        This avoids materialising the full dense Fz matrix, while still producing
+        the same dense T output as :meth:`build_T`.
 
-        # Constrain sharding of the dense blocks to avoid host/device reshuffles.
-        full_eor = jax.lax.with_sharding_constraint(full_eor, self.sharding_grid)
-        full_fg = jax.lax.with_sharding_constraint(full_fg, self.sharding_grid)
+        Components used:
+        - Finv_Fprime per-(freq,time,baseline,uv) blocks
+        - Small 1D spectral basis matrices (eta0/LSSM/IDFT)
 
-        # Build a final BCOO matrix by constructing global row/col indices.
-        n_vis = self.n_freq * self.n_t * self.nbls
-        n_params = self.n_freq * (self.n_uv_eor + self.n_uv_fg)
+        Returns
+        -------
+        T : jnp.ndarray
+            Dense matrix with shape
+            (n_vis, n_params_eta), where
+            n_vis = n_freq * n_t * n_bls and
+            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
+        """
+        full_eor, full_fg = self._build_finv_fprime_blocks()
 
-        f = jnp.arange(self.n_freq, dtype=jnp.int32)[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
-        t = jnp.arange(self.n_t, dtype=jnp.int32)[jnp.newaxis, :, jnp.newaxis, jnp.newaxis]
-        b = jnp.arange(self.nbls, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, :, jnp.newaxis]
+        # ------------------------
+        # EoR contribution to T
+        # ------------------------
+        # Basis for EoR eta modes (exclude eta=0).
+        # Build full eta basis then drop eta=0 via static slicing
+        # (jit-safe; avoids boolean indexing in inverse_udft_1d_rect).
+        eor_basis_full = inverse_udft_1d_rect(
+            self.n_freq,
+            self.n_eta,
+            include_eta0=True,
+        )
+        eor_basis_full = eor_basis_full * self.d_eta  # (n_freq, n_eta)
+        eta0_idx = self.n_eta // 2
+        eor_basis = jnp.concatenate(
+            [eor_basis_full[:, :eta0_idx], eor_basis_full[:, eta0_idx + 1 :]],
+            axis=1,
+        )  # (n_freq, n_eta-1)
 
-        # Shared base rows: (n_freq, n_t, n_bls, 1)
-        # Match legacy ordering: time is the slowest axis, then frequency, then baseline.
-        base_rows = ((t * self.n_freq + f) * self.nbls + b)
+        # (f,t,b,u_eor,eta_eor)
+        t_eor = full_eor[..., None] * eor_basis[:, None, None, None, :]
+        # Row order: time slowest, then freq, then baseline.
+        t_eor = jnp.transpose(t_eor, (1, 0, 2, 3, 4)).reshape(
+            self.n_t * self.n_freq * self.nbls,
+            self.n_uv_eor * (self.n_eta - 1),
+        )
 
-        # EoR block indices
-        uv_eor = jnp.arange(self.n_uv_eor, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
-        cols_eor = (f * self.n_uv_eor + uv_eor)
-        data_eor = full_eor.reshape(-1)
-        rows_eor_flat = jnp.broadcast_to(base_rows, full_eor.shape).reshape(-1)
-        cols_eor_flat = jnp.broadcast_to(cols_eor, full_eor.shape).reshape(-1)
-        indices_eor = jnp.stack([rows_eor_flat, cols_eor_flat], axis=1)
+        # -----------------------
+        # FG contribution to T
+        # -----------------------
+        n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
+        fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
 
-        # FG block indices (column offset after all EoR params)
-        uv_fg = jnp.arange(self.n_uv_fg, dtype=jnp.int32)[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
-        cols_fg = (self.n_freq * self.n_uv_eor) + (f * self.n_uv_fg + uv_fg)
-        data_fg = full_fg.reshape(-1)
-        rows_fg_flat = jnp.broadcast_to(base_rows, full_fg.shape).reshape(-1)
-        cols_fg_flat = jnp.broadcast_to(cols_fg, full_fg.shape).reshape(-1)
-        indices_fg = jnp.stack([rows_fg_flat, cols_fg_flat], axis=1)
+        n_rows = self.n_t * self.n_freq * self.nbls
 
-        data = jnp.concatenate([data_eor, data_fg], axis=0)
-        indices = jnp.concatenate([indices_eor, indices_fg], axis=0)
+        # eta0 column(s): one spectral basis vector per non-monopole FG uv mode.
+        eta0_basis = (
+            jnp.ones((self.n_freq, 1), dtype=full_fg.dtype)
+            * self.d_eta
+            * self.n_eta
+        )  # (n_freq, 1)
+        t_fg_eta0 = fg_non_mp * eta0_basis[:, None, None, :]
+        t_fg_eta0 = jnp.transpose(t_fg_eta0, (1, 0, 2, 3)).reshape(
+            n_rows,
+            n_non_mp,
+        )
 
-        # Constrain sharding of the BCOO payload as well.
-        data = jax.lax.with_sharding_constraint(data, self.sharding_vec)
-        indices = jax.lax.with_sharding_constraint(indices, self.sharding_mat)
+        # LSSM columns for non-monopole FG uv modes.
+        if self.n_modes_fg > 0:
+            lssm_basis = build_lssm_basis(
+                n_freq=self.n_freq,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            )
+            lssm_basis = lssm_basis * self.d_eta * self.n_eta  # (n_freq, n_modes_fg)
+            t_fg_lssm = fg_non_mp[..., None] * lssm_basis[:, None, None, None, :]
+            t_fg_lssm = jnp.transpose(t_fg_lssm, (1, 0, 2, 3, 4)).reshape(
+                n_rows,
+                n_non_mp * self.n_modes_fg,
+            )
+        else:
+            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
 
-        return sparse.BCOO((data, indices), shape=(n_vis, n_params), unique_indices=True)
+        # Monopole columns (eta + LSSM) if monopole is fitted.
+        if self.fit_for_monopole:
+            mp_basis = inverse_udft_1d_rect(
+                n_freq=self.n_freq,
+                n_eta=self.n_eta,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            )
+            mp_basis = mp_basis * self.d_eta
+            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
+            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
+
+            fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
+            t_fg_mp = fg_mp[..., None] * mp_basis[:, None, None, :]
+            t_fg_mp = jnp.transpose(t_fg_mp, (1, 0, 2, 3)).reshape(
+                n_rows,
+                mp_basis.shape[1],
+            )
+        else:
+            t_fg_mp = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
+
+        # Static-order FG columns: [eta0 | lssm | monopole].
+        t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
+
+        # Final column order matches legacy Fz block structure:
+        # [EoR columns][FG columns].
+        return jnp.concatenate([t_eor, t_fg], axis=1)
 
 
     # ----------------------------
     # Construction of Fz (eta -> f)
     # ----------------------------
-    def build_eta_to_freq_idft_eor(self) -> sparse.BCOO:
+    def build_eta_to_freq_idft_eor(self) -> jnp.ndarray:
         r"""
         Build the EoR IDFT block for eta -> frequency.
 
@@ -487,8 +592,8 @@ class BuildMatrices:
 
         Returns
         -------
-        idft_eor : sparse.BCOO
-            Block-diagonal sparse matrix of shape
+        idft_eor : jnp.ndarray
+            Block-diagonal dense matrix of shape
             (n_uv_eor * n_freq, n_uv_eor * (n_eta - 1)).
         """
         idft_array_1d = inverse_udft_1d_rect(
@@ -499,11 +604,9 @@ class BuildMatrices:
         # Normalise by eta spacing.
         idft_array_1d *= self.d_eta
 
-        multi_vis_idft_array_1d = sparse_block_diag_repeat(idft_array_1d, self.n_uv_eor)
+        return jnp.kron(jnp.eye(self.n_uv_eor, dtype=idft_array_1d.dtype), idft_array_1d)
 
-        return multi_vis_idft_array_1d
-
-    def build_eta_to_freq_idft_fg(self) -> sparse.BCOO:
+    def build_eta_to_freq_idft_fg(self) -> jnp.ndarray:
         r"""
         Build the FG IDFT block for eta -> frequency.
 
@@ -511,8 +614,8 @@ class BuildMatrices:
 
         Returns
         -------
-        idft_fg : sparse.BCOO
-            Block-diagonal sparse matrix for the FG model with shape
+        idft_fg : jnp.ndarray
+            Block-diagonal dense matrix for the FG model with shape
             (n_uv_fg * n_freq, n_eta0 + n_lssm + n_mp), where:
             n_eta0 = (n_uv_fg - int(fit_for_monopole)) * 1
             n_lssm = (n_uv_fg - int(fit_for_monopole)) * n_modes_fg
@@ -525,7 +628,10 @@ class BuildMatrices:
         # One eta=0 block per FG (u, v), excluding monopole if fitted separately.
         neta0_blocks = self.n_uv_fg - int(self.fit_for_monopole)
 
-        idft_array_1d_fg = sparse_block_diag_repeat(eta0_to_frequency, neta0_blocks)
+        idft_array_1d_fg = jnp.kron(
+            jnp.eye(neta0_blocks, dtype=eta0_to_frequency.dtype),
+            eta0_to_frequency,
+        )
 
         if self.n_modes_fg > 0:
             lssm_basis_vecs = build_lssm_basis(
@@ -540,10 +646,11 @@ class BuildMatrices:
             lssm_basis_vecs *= self.d_eta * self.n_eta
 
             # Repeat for each non-monopole FG (u, v).
-            lssm_array = sparse_block_diag_repeat(lssm_basis_vecs, neta0_blocks)
-            idft_array_1d_fg = sparse.bcoo_concatenate(
-                [idft_array_1d_fg, lssm_array], dimension=1
+            lssm_array = jnp.kron(
+                jnp.eye(neta0_blocks, dtype=lssm_basis_vecs.dtype),
+                lssm_basis_vecs,
             )
+            idft_array_1d_fg = jnp.hstack([idft_array_1d_fg, lssm_array])
             
         if self.fit_for_monopole:
             idft_array_1d_mp = inverse_udft_1d_rect(
@@ -559,8 +666,19 @@ class BuildMatrices:
             idft_array_1d_mp *= self.d_eta
             idft_array_1d_mp = idft_array_1d_mp.at[:, self.n_eta // 2].multiply(self.n_eta)
             idft_array_1d_mp = idft_array_1d_mp.at[:, self.n_eta:].multiply(self.n_eta)
-            idft_array_1d_mp = sparse.BCOO.fromdense(idft_array_1d_mp)
-            idft_array_1d_fg = sparse_block_diag_two(idft_array_1d_fg, idft_array_1d_mp)
+            top = jnp.hstack(
+                [
+                    idft_array_1d_fg,
+                    jnp.zeros((idft_array_1d_fg.shape[0], idft_array_1d_mp.shape[1]), dtype=idft_array_1d_fg.dtype),
+                ]
+            )
+            bottom = jnp.hstack(
+                [
+                    jnp.zeros((idft_array_1d_mp.shape[0], idft_array_1d_fg.shape[1]), dtype=idft_array_1d_mp.dtype),
+                    idft_array_1d_mp,
+                ]
+            )
+            idft_array_1d_fg = jnp.vstack([top, bottom])
 
         return idft_array_1d_fg
 
@@ -596,18 +714,18 @@ class BuildMatrices:
 
         return gridding_matrix      
 
-    def build_Fz(self) -> sparse.BCOO:
+    def build_Fz(self) -> jnp.ndarray:
         r"""
         Build the full Fz operator (EoR + FG).
 
         Fz is a block-diagonal operator that maps eta-space vectors
         (vis-ordered) to frequency-space vectors (chan-ordered). The
-        returned operator is stored as a sparse BCOO matrix.
+        returned operator is stored as a dense matrix.
 
         Returns
         -------
-        Fz : sparse.BCOO
-            Sparse matrix of shape (n_freq * (n_uv_eor + n_uv_fg), n_params_eta),
+        Fz : jnp.ndarray
+            Dense matrix of shape (n_freq * (n_uv_eor + n_uv_fg), n_params_eta),
             where n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         # Build EoR/FG IDFT blocks and gridding matrices directly, then
@@ -617,22 +735,21 @@ class BuildMatrices:
         grid_eor = self.reorder_fuv_to_uvf_eor()
         grid_fg = self.reorder_fuv_to_uvf_fg()
 
-        # Use sparse matmul in JAX.
-        grid_eor = sparse.BCOO.fromdense(grid_eor)
-        grid_fg = sparse.BCOO.fromdense(grid_fg)
-        Fz_eor = sparse.bcoo_dot_general(
-            grid_eor,
-            idft_eor,
-            dimension_numbers=(((1,), (0,)), ((), ()))
+        Fz_eor = grid_eor @ idft_eor
+        Fz_fg = grid_fg @ idft_fg
+        top = jnp.hstack(
+            [
+                Fz_eor,
+                jnp.zeros((Fz_eor.shape[0], Fz_fg.shape[1]), dtype=Fz_eor.dtype),
+            ]
         )
-        Fz_fg = sparse.bcoo_dot_general(
-            grid_fg,
-            idft_fg,
-            dimension_numbers=(((1,), (0,)), ((), ()))
+        bottom = jnp.hstack(
+            [
+                jnp.zeros((Fz_fg.shape[0], Fz_eor.shape[1]), dtype=Fz_fg.dtype),
+                Fz_fg,
+            ]
         )
-        Fz = sparse_block_diag_two(Fz_eor, Fz_fg)
-
-        return Fz
+        return jnp.vstack([top, bottom])
 
     def build_T(self) -> jnp.ndarray:
         r"""
@@ -663,25 +780,14 @@ class BuildMatrices:
         Finv_Fprime = self.build_Finv_Fprime()
         Fz = self.build_Fz()
 
-        # Sparse matmul in JAX: (n_vis, n_params) @ (n_params, n_params_eta)
-        Finv_Fprime_Fz = sparse.bcoo_dot_general(
-            Finv_Fprime,
-            Fz,
-            dimension_numbers=(((1,), (0,)), ((), ()))
-        )
-
-        # Match legacy BayesEoR behavior: keep T dense for downstream T^H products.
-        return jnp.asarray(Finv_Fprime_Fz.todense())
+        return Finv_Fprime @ Fz
 
     # ------------------------
     # Noise covariance matrices
     # ------------------------
-    def _diag_bcoo(self, diag: jnp.ndarray) -> sparse.BCOO:
-        """Build a BCOO diagonal matrix from a 1D vector."""
-        n = diag.shape[0]
-        idx = jnp.arange(n, dtype=jnp.int32)
-        indices = jnp.stack([idx, idx], axis=1)
-        return sparse.BCOO((diag, indices), shape=(n, n), unique_indices=True)
+    def _diag_dense(self, diag: jnp.ndarray) -> jnp.ndarray:
+        """Build a dense diagonal matrix from a 1D vector."""
+        return jnp.diag(diag)
 
     def _sigma_squared_array(self) -> jnp.ndarray:
         """
@@ -709,46 +815,46 @@ class BuildMatrices:
         sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
         return (sigma_redundancy ** 2).astype(jnp.complex128)
 
-    def build_Ninv(self) -> sparse.BCOO:
+    def build_Ninv(self) -> jnp.ndarray:
         """
         Build the inverse noise covariance matrix N^{-1}.
 
         Returns
         -------
-        Ninv : sparse.BCOO
-            Diagonal BCOO matrix of shape (n_vis, n_vis), where
+        Ninv : jnp.ndarray
+            Dense diagonal matrix of shape (n_vis, n_vis), where
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return self._diag_bcoo(1.0 / sigma_sq)
+        return self._diag_dense(1.0 / sigma_sq)
 
-    def build_N(self) -> sparse.BCOO:
+    def build_N(self) -> jnp.ndarray:
         """
         Build the noise covariance matrix N.
 
         Returns
         -------
-        N : sparse.BCOO
-            Diagonal BCOO matrix of shape (n_vis, n_vis), where
+        N : jnp.ndarray
+            Dense diagonal matrix of shape (n_vis, n_vis), where
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return self._diag_bcoo(sigma_sq)
+        return self._diag_dense(sigma_sq)
     
 
     # ------------------
     # Build T^H N^{-1} T
     # ------------------
 
-    def build_T_Ninv_T(self, T, Ninv: sparse.BCOO) -> jnp.ndarray:
+    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
         r"""
         Build T^H N^{-1} T.
 
         Parameters
         ----------
-        T : jnp.ndarray or sparse.BCOO
+        T : jnp.ndarray
             Forward operator with shape (n_vis, n_params_eta).
-        Ninv : sparse.BCOO
+        Ninv : jnp.ndarray
             Inverse noise covariance with shape (n_vis, n_vis).
 
         Returns
@@ -758,21 +864,8 @@ class BuildMatrices:
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         
-        # Accept legacy cached sparse T, but perform T^H products in dense space.
-        if hasattr(T, "todense"):
-            T = T.todense()
         T = jnp.asarray(T)
-
-        # N^{-1} T
-        Ninv_T = sparse.bcoo_dot_general(
-            Ninv,
-            T,
-            dimension_numbers=(((1,), (0,)), ((), ()))
-        )
-
-        if hasattr(Ninv_T, "todense"):
-            Ninv_T = Ninv_T.todense()
-        Ninv_T = jnp.asarray(Ninv_T)
+        Ninv_T = jnp.asarray(Ninv) @ T
 
         # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
         return jnp.conj(T).T @ Ninv_T
