@@ -4,9 +4,9 @@ from .beam_model import Beam_Model
 from .dft_funcs import (
     build_nudft_matrix,
     inverse_udft_1d_rect,
-    reorder_fuv_to_uvf,
-    sparse_block_diag_repeat,
-    sparse_block_diag_two,
+    # reorder_fuv_to_uvf,
+    # sparse_block_diag_repeat,
+    # sparse_block_diag_two,
 )
 from .jax_grid import MeshManager
 from .lmn_model_space import LMN_ModelSpace
@@ -23,7 +23,7 @@ __all__ = [
     "build_lssm_basis",
     "build_nudft_matrix",
     "inverse_udft_1d_rect",
-    "reorder_fuv_to_uvf",
-    "sparse_block_diag_repeat",
-    "sparse_block_diag_two",
+    # "reorder_fuv_to_uvf",
+    # "sparse_block_diag_repeat",
+    # "sparse_block_diag_two",
 ]
