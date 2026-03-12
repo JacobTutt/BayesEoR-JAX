@@ -313,7 +313,7 @@ class BuildMatrices:
 
         # Initialize sharding utilities.
         self.mm = MeshManager()
-        self.sharding_grid = self.mm.get_sharding(rank=4, shard_minor=True)
+        self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
         self._build_t_directly_single_device_fn = None

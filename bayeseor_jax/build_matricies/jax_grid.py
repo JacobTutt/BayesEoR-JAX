@@ -17,7 +17,6 @@ class MeshManager:
     -----
     - Mesh axis name is fixed to ``"data"``.
     - Sharding policy is intentionally simple: shard only axis 0.
-    - ``shard_minor``/``shard_uv`` are accepted for API compatibility but ignored.
     """
 
     def __init__(self) -> None:
@@ -29,22 +28,13 @@ class MeshManager:
         self.axis_names = ("data",)
         self.mesh = Mesh(np.asarray(self.devices), self.axis_names)
 
-    def get_sharding(
-        self,
-        rank: int = 2,
-        shard_minor: bool = False,
-        shard_uv: bool = False,
-    ) -> NamedSharding:
+    def get_sharding(self, rank: int = 2) -> NamedSharding:
         """Return a sharding that partitions only the leading axis.
 
         Parameters
         ----------
         rank : int, optional
             Rank of the target array.
-        shard_minor : bool, optional
-            Ignored; kept for backward compatibility.
-        shard_uv : bool, optional
-            Ignored; kept for backward compatibility.
         """
         if rank < 1:
             raise ValueError("rank must be >= 1")
