@@ -989,7 +989,7 @@ class BuildMatrices:
         elif matrix_name == "Finv_Fprime":
             matrix = self.build_Finv_Fprime()
         elif matrix_name == "T":
-            matrix = self.build_T()
+            matrix = self.build_T_directly()
         elif matrix_name == "Ninv":
             matrix = self.build_Ninv()
         elif matrix_name == "N":
