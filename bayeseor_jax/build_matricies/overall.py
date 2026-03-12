@@ -671,14 +671,26 @@ class BuildMatrices:
     @partial(jax.jit, static_argnums=(0,))
     def build_T_directly(self) -> jnp.ndarray:
         r"""
-        Construct T directly from Finv/Fprime blocks and spectral basis matrices.
+        Construct ``T = (F^{-1}F')F_z`` directly, without explicitly building ``F_z``.
 
-        This avoids materialising the full dense Fz matrix, while still producing
-        the same dense T output as :meth:`build_T`.
+        Intuition
+        ---------
+        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense UV response
+        block over ``(t, bl, uv)``:
 
-        Components used:
-        - Finv_Fprime per-(freq,time,baseline,uv) blocks
-        - Small 1D spectral basis matrices (eta0/LSSM/IDFT)
+        - ``full_eor[f, t, bl, u_eor]``
+        - ``full_fg[f,  t, bl, u_fg]``
+
+        ``F_z`` then only applies 1D spectral basis expansions per UV mode:
+
+        - EoR: eta basis with eta=0 removed
+        - FG non-monopole: ``[eta0 | LSSM]``
+        - FG monopole (optional): ``[full eta | LSSM]`` monopole block
+
+        So instead of forming huge block-diagonal/permutation matrices and
+        multiplying, we apply those basis vectors directly via broadcasted
+        products, then reshape/concatenate into the same final column ordering
+        as ``build_T``.
 
         Returns
         -------
@@ -693,24 +705,18 @@ class BuildMatrices:
         # ------------------------
         # EoR contribution to T
         # ------------------------
-        # Basis for EoR eta modes (exclude eta=0).
-        # Build full eta basis then drop eta=0 via static slicing
-        # (jit-safe; avoids boolean indexing in inverse_udft_1d_rect).
-        eor_basis_full = inverse_udft_1d_rect(
+        # Build frequency->eta basis for EoR (eta=0 excluded).
+        eor_basis = inverse_udft_1d_rect(
             self.n_freq,
             self.n_eta,
-            include_eta0=True,
+            include_eta0=False,
         )
-        eor_basis_full = eor_basis_full * self.d_eta  # (n_freq, n_eta)
-        eta0_idx = self.n_eta // 2
-        eor_basis = jnp.concatenate(
-            [eor_basis_full[:, :eta0_idx], eor_basis_full[:, eta0_idx + 1 :]],
-            axis=1,
-        )  # (n_freq, n_eta-1)
+        eor_basis = eor_basis * self.d_eta  # (n_freq, n_eta-1)
 
-        # (f,t,b,u_eor,eta_eor)
+        # Apply basis per-frequency:
+        # full_eor[f,t,bl,u] * eor_basis[f,eta] -> t_eor[f,t,bl,u,eta]
         t_eor = full_eor[..., None] * eor_basis[:, None, None, None, :]
-        # Row order: time slowest, then freq, then baseline.
+        # Flatten to legacy row order: time slowest, then frequency, then baseline.
         t_eor = jnp.transpose(t_eor, (1, 0, 2, 3, 4)).reshape(
             self.n_t * self.n_freq * self.nbls,
             self.n_uv_eor * (self.n_eta - 1),
@@ -724,7 +730,7 @@ class BuildMatrices:
 
         n_rows = self.n_t * self.n_freq * self.nbls
 
-        # eta0 column(s): one spectral basis vector per non-monopole FG uv mode.
+        # FG eta0 columns for each non-monopole UV mode.
         eta0_basis = (
             jnp.ones((self.n_freq, 1), dtype=full_fg.dtype)
             * self.d_eta
@@ -736,7 +742,7 @@ class BuildMatrices:
             n_non_mp,
         )
 
-        # LSSM columns for non-monopole FG uv modes.
+        # FG LSSM columns for each non-monopole UV mode.
         if self.n_modes_fg > 0:
             lssm_basis = build_lssm_basis(
                 n_freq=self.n_freq,
@@ -755,7 +761,7 @@ class BuildMatrices:
         else:
             t_fg_lssm = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
 
-        # Monopole columns (eta + LSSM) if monopole is fitted.
+        # FG monopole block (eta + LSSM), if enabled.
         if self.fit_for_monopole:
             mp_basis = inverse_udft_1d_rect(
                 n_freq=self.n_freq,
@@ -779,20 +785,16 @@ class BuildMatrices:
         else:
             t_fg_mp = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
 
-        # Static-order FG columns: [eta0 | lssm | monopole].
+        # Legacy FG column ordering.
         t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
 
-        # Final column order matches legacy Fz block structure:
+        # Final column ordering matches legacy Fz block layout:
         # [EoR columns][FG columns].
         return jnp.concatenate([t_eor, t_fg], axis=1)
 
     # ------------------------
     # Noise covariance matrices
     # ------------------------
-    def _diag_dense(self, diag: jnp.ndarray) -> jnp.ndarray:
-        """Build a dense diagonal matrix from a 1D vector."""
-        return jnp.diag(diag)
-
     def _sigma_squared_array(self) -> jnp.ndarray:
         """
         Build the per-visibility noise variance vector for the current settings.
@@ -830,7 +832,7 @@ class BuildMatrices:
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return self._diag_dense(1.0 / sigma_sq)
+        return jnp.diag(1.0 / sigma_sq)
 
     def build_N(self) -> jnp.ndarray:
         """
@@ -843,8 +845,7 @@ class BuildMatrices:
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return self._diag_dense(sigma_sq)
-    
+        return jnp.diag(sigma_sq)    
 
     # ------------------
     # Build T^H N^{-1} T
