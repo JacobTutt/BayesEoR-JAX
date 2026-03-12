@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
 from jax.experimental import sparse
-from jax.experimental.pjit import pjit
 from functools import partial
 
 from astropy.constants import c
@@ -804,11 +803,11 @@ class BuildMatrices:
         Build T using an automatically selected JAX executor.
 
         - single-device runs: compile/cache a ``jax.jit`` executor
-        - multi-device runs:  compile/cache a ``pjit`` executor and run in mesh context
+        - multi-device runs:  compile/cache a ``jax.jit`` executor and run in mesh context
         """
         if self.mm.n_dev > 1:
             if self._build_t_directly_multi_device_fn is None:
-                self._build_t_directly_multi_device_fn = pjit(
+                self._build_t_directly_multi_device_fn = jax.jit(
                     BuildMatrices._build_T_directly_impl,
                     out_shardings=self.sharding_mat,
                     static_argnums=(0,),
