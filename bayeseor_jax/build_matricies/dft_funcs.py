@@ -227,9 +227,11 @@ def inverse_udft_1d_rect(
     index_f = (jnp.arange(n_freq, dtype=jnp.float64) - (n_freq // 2))
     index_eta = (jnp.arange(n_eta, dtype=jnp.float64) - (n_eta // 2))
 
-    # Optionally exclude the DC (eta=0) mode
+    # Optionally exclude the DC (eta=0) mode via static slicing.
+    # With this indexing convention, eta=0 is always at n_eta//2.
     if not include_eta0:
-        index_eta = index_eta[index_eta != 0.0]
+        eta0_idx = n_eta // 2
+        index_eta = jnp.concatenate([index_eta[:eta0_idx], index_eta[eta0_idx + 1 :]])
 
     # Define the 1D IDFT matrix for the Fourier modes. 
     # As different normalisations are applied to the:
