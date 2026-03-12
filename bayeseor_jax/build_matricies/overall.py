@@ -315,8 +315,6 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
-        self._build_t_directly_single_device_fn = None
-        self._build_t_directly_multi_device_fn = None
 
 
     # ---------------------------
@@ -802,25 +800,20 @@ class BuildMatrices:
         """
         Build T using an automatically selected JAX executor.
 
-        - single-device runs: compile/cache a ``jax.jit`` executor
-        - multi-device runs:  compile/cache a ``jax.jit`` executor and run in mesh context
+        - single-device runs: use a ``jax.jit`` executor
+        - multi-device runs:  use a ``jax.jit`` executor with output sharding
+          and run in mesh context
         """
-        if self.mm.n_dev > 1:
-            if self._build_t_directly_multi_device_fn is None:
-                self._build_t_directly_multi_device_fn = jax.jit(
-                    BuildMatrices._build_T_directly_impl,
-                    out_shardings=self.sharding_mat,
-                    static_argnums=(0,),
-                )
-            with self.mm.mesh:
-                return self._build_t_directly_multi_device_fn(self)
+        multi_device = self.mm.n_dev > 1
+        jit_kwargs = {"static_argnums": (0,)}
+        if multi_device:
+            jit_kwargs["out_shardings"] = self.sharding_mat
+        build_t_fn = jax.jit(BuildMatrices._build_T_directly_impl, **jit_kwargs)
 
-        if self._build_t_directly_single_device_fn is None:
-            self._build_t_directly_single_device_fn = jax.jit(
-                BuildMatrices._build_T_directly_impl,
-                static_argnums=(0,),
-            )
-        return self._build_t_directly_single_device_fn(self)
+        if multi_device:
+            with self.mm.mesh:
+                return build_t_fn(self)
+        return build_t_fn(self)
 
     # ------------------------
     # Noise covariance matrices
