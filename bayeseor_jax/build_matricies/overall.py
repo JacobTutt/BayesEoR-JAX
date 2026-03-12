@@ -12,9 +12,8 @@ from typing import Optional, Sequence, Tuple, Union
 import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
-from jax import lax
 from jax.experimental import sparse
-from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from jax.experimental.pjit import pjit
 from functools import partial
 
 from astropy.constants import c
@@ -317,6 +316,8 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4, shard_minor=True)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
+        self._build_t_directly_single_device_fn = None
+        self._build_t_directly_multi_device_fn = None
 
 
     # ---------------------------
@@ -398,6 +399,13 @@ class BuildMatrices:
         """
         Build dense per-frequency/per-time Finv_Fprime blocks.
 
+        Notes
+        -----
+        This function is written as local vectorized batching over a flattened
+        (frequency, time) index grid. When called inside a ``pjit`` context,
+        cross-device distribution is handled by ``pjit``/mesh sharding, while
+        this ``vmap`` handles per-device batching.
+
         Returns
         -------
         full_eor, full_fg : tuple[jnp.ndarray, jnp.ndarray]
@@ -405,26 +413,26 @@ class BuildMatrices:
             - full_eor: (n_freq, n_t, n_bls, n_uv_eor)
             - full_fg:  (n_freq, n_t, n_bls, n_uv_fg)
         """
-        # Precompute NUDFT kernels (UV -> LM), then constrain sharding.
-        nuidft_uv_to_lm_eor = jax.lax.with_sharding_constraint(self._uv_to_lm_eor(), self.sharding_mat)
-        nuidft_uv_to_lm_fg = jax.lax.with_sharding_constraint(self._uv_to_lm_fg(), self.sharding_mat)
+        # Precompute NUDFT kernels (UV -> LM).
+        nuidft_uv_to_lm_eor = self._uv_to_lm_eor()
+        nuidft_uv_to_lm_fg = self._uv_to_lm_fg()
 
-        # Nested scans: frequency then time.
-        def frequency_loop(carry, i_f):
-            def time_loop(t_carry, i_t):
-                block_eor, block_fg = self._build_Finv_Fprime_block(
-                    nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
-                )
-                return t_carry, (block_eor, block_fg)
+        # Vectorized construction over a flattened (frequency, time) grid.
+        t_idx = jnp.arange(self.n_t, dtype=jnp.int32)
+        f_idx = jnp.arange(self.n_freq, dtype=jnp.int32)
+        f_grid = jnp.repeat(f_idx, self.n_t)
+        t_grid = jnp.tile(t_idx, self.n_freq)
 
-            _, (e_blocks, f_blocks) = lax.scan(time_loop, None, jnp.arange(self.n_t))
-            return carry, (e_blocks, f_blocks)
+        def block_fn(i_f, i_t):
+            return self._build_Finv_Fprime_block(
+                nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
+            )
 
-        _, (full_eor, full_fg) = lax.scan(frequency_loop, None, jnp.arange(self.n_freq))
+        flat_eor, flat_fg = jax.vmap(block_fn, in_axes=(0, 0), out_axes=(0, 0))(f_grid, t_grid)
+        
+        full_eor = flat_eor.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_eor)
+        full_fg = flat_fg.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_fg)
 
-        # Constrain sharding to avoid host/device reshuffles.
-        full_eor = jax.lax.with_sharding_constraint(full_eor, self.sharding_grid)
-        full_fg = jax.lax.with_sharding_constraint(full_fg, self.sharding_grid)
         return full_eor, full_fg
 
 
@@ -668,8 +676,7 @@ class BuildMatrices:
 
         return Finv_Fprime @ Fz
 
-    @partial(jax.jit, static_argnums=(0,))
-    def build_T_directly(self) -> jnp.ndarray:
+    def _build_T_directly_impl(self) -> jnp.ndarray:
         r"""
         Construct ``T = (F^{-1}F')F_z`` directly, without explicitly building ``F_z``.
 
@@ -791,6 +798,30 @@ class BuildMatrices:
         # Final column ordering matches legacy Fz block layout:
         # [EoR columns][FG columns].
         return jnp.concatenate([t_eor, t_fg], axis=1)
+
+    def build_T_directly(self) -> jnp.ndarray:
+        """
+        Build T using an automatically selected JAX executor.
+
+        - single-device runs: compile/cache a ``jax.jit`` executor
+        - multi-device runs:  compile/cache a ``pjit`` executor and run in mesh context
+        """
+        if self.mm.n_dev > 1:
+            if self._build_t_directly_multi_device_fn is None:
+                self._build_t_directly_multi_device_fn = pjit(
+                    BuildMatrices._build_T_directly_impl,
+                    out_shardings=self.sharding_mat,
+                    static_argnums=(0,),
+                )
+            with self.mm.mesh:
+                return self._build_t_directly_multi_device_fn(self)
+
+        if self._build_t_directly_single_device_fn is None:
+            self._build_t_directly_single_device_fn = jax.jit(
+                BuildMatrices._build_T_directly_impl,
+                static_argnums=(0,),
+            )
+        return self._build_t_directly_single_device_fn(self)
 
     # ------------------------
     # Noise covariance matrices
