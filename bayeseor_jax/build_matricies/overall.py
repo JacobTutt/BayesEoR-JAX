@@ -911,17 +911,19 @@ class BuildMatrices:
 
     def check_if_matrix_exists(self, matrix_name: str) -> bool:
         """Return True if a saved matrix exists on disk."""
-        return self._matrix_path(matrix_name).exists() or self._dense_matrix_path(matrix_name).exists()
+        # Sparse path support disabled.
+        # return self._matrix_path(matrix_name).exists() or self._dense_matrix_path(matrix_name).exists()
+        return self._dense_matrix_path(matrix_name).exists()
 
-    def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
-        """Save a BCOO matrix to disk as data/indices/shape npz."""
-        path = self._matrix_path(matrix_name)
-        np.savez(
-            path,
-            data=np.array(matrix.data),
-            indices=np.array(matrix.indices),
-            shape=np.array(matrix.shape, dtype=np.int64),
-        )
+    # def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
+    #     """Save a BCOO matrix to disk as data/indices/shape npz."""
+    #     path = self._matrix_path(matrix_name)
+    #     np.savez(
+    #         path,
+    #         data=np.array(matrix.data),
+    #         indices=np.array(matrix.indices),
+    #         shape=np.array(matrix.shape, dtype=np.int64),
+    #     )
 
     def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
         """Save a dense matrix to disk as .npy."""
@@ -930,19 +932,21 @@ class BuildMatrices:
 
     def save_matrix(self, matrix_name: str, matrix) -> None:
         """Save a matrix, sparse as .npz or dense as .npy."""
-        if isinstance(matrix, sparse.BCOO):
-            self.save_sparse_matrix(matrix_name, matrix)
-        else:
-            self.save_dense_matrix(matrix_name, matrix)
+        # Sparse path support disabled.
+        # if isinstance(matrix, sparse.BCOO):
+        #     self.save_sparse_matrix(matrix_name, matrix)
+        # else:
+        #     self.save_dense_matrix(matrix_name, matrix)
+        self.save_dense_matrix(matrix_name, matrix)
 
-    def load_sparse_matrix(self, matrix_name: str) -> sparse.BCOO:
-        """Load a BCOO matrix from disk."""
-        path = self._matrix_path(matrix_name)
-        with np.load(path) as npz:
-            data = jnp.array(npz["data"])
-            indices = jnp.array(npz["indices"])
-            shape = tuple(npz["shape"].tolist())
-        return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+    # def load_sparse_matrix(self, matrix_name: str) -> sparse.BCOO:
+    #     """Load a BCOO matrix from disk."""
+    #     path = self._matrix_path(matrix_name)
+    #     with np.load(path) as npz:
+    #         data = jnp.array(npz["data"])
+    #         indices = jnp.array(npz["indices"])
+    #         shape = tuple(npz["shape"].tolist())
+    #     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
 
     def load_dense_matrix(self, matrix_name: str) -> jnp.ndarray:
         """Load a dense matrix from disk."""
@@ -952,9 +956,11 @@ class BuildMatrices:
     def load_matrix(self, matrix_name: str):
         """Load a matrix (sparse or dense) from disk."""
         matrix = None
-        if self._matrix_path(matrix_name).exists():
-            matrix = self.load_sparse_matrix(matrix_name)
-        elif self._dense_matrix_path(matrix_name).exists():
+        # Sparse path support disabled.
+        # if self._matrix_path(matrix_name).exists():
+        #     matrix = self.load_sparse_matrix(matrix_name)
+        # elif self._dense_matrix_path(matrix_name).exists():
+        if self._dense_matrix_path(matrix_name).exists():
             matrix = self.load_dense_matrix(matrix_name)
         else:
             raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
