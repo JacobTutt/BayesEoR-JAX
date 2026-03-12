@@ -9,9 +9,9 @@ from .build_matricies import (
     build_lssm_basis,
     build_nudft_matrix,
     inverse_udft_1d_rect,
-    reorder_fuv_to_uvf,
-    sparse_block_diag_repeat,
-    sparse_block_diag_two,
+    # reorder_fuv_to_uvf,
+    # sparse_block_diag_repeat,
+    # sparse_block_diag_two,
 )
 from .analyze import (
     DataContainer,
@@ -31,8 +31,8 @@ from .model import (
     InstrumentModel,
 )
 from .params import BayesEoRParser
-from .setup import SetupResult, get_vis_data, run_setup
 from .run import run
+from .setup import SetupResult, get_vis_data, run_setup
 from .utils import (
     load_numpy_dict,
     parse_uprior_inds,
@@ -74,7 +74,7 @@ __all__ = [
     "build_lssm_basis",
     "build_nudft_matrix",
     "inverse_udft_1d_rect",
-    "reorder_fuv_to_uvf",
-    "sparse_block_diag_repeat",
-    "sparse_block_diag_two",
+    # "reorder_fuv_to_uvf",
+    # "sparse_block_diag_repeat",
+    # "sparse_block_diag_two",
 ]

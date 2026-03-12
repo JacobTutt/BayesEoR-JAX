@@ -9,7 +9,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from typing import Tuple
-import logging
 import jax.numpy as jnp
 
 
@@ -88,23 +87,20 @@ class UV_ModelSpace:
         u_vec = (du * us).ravel()
         v_vec = (dv * vs).ravel()
 
-        # Identify the monopole (0, 0) entry if present.
-        is_monopole = (u_vec == 0) & (v_vec == 0)
-        has_monopole = bool(jnp.any(is_monopole))
+        # Flat index of monopole (u=0, v=0) for indexing="xy" + C-order ravel:
+        # i0 = v_idx * n_u + u_idx, with u_idx=n_u//2 and v_idx=n_v//2.
+        i0 = (n_v // 2) * n_u + (n_u // 2)
 
         # Optionally exclude the monopole mode (not present in interferometric data).
         if exclude_monopole:
-            u_vec = u_vec[~is_monopole]
-            v_vec = v_vec[~is_monopole]
-            if not has_monopole:
-                logging.info("No (u, v) = (0, 0) monopole found to remove as n_u and n_v are even")
+            u_vec = jnp.concatenate([u_vec[:i0], u_vec[i0 + 1 :]], axis=0)
+            v_vec = jnp.concatenate([v_vec[:i0], v_vec[i0 + 1 :]], axis=0)
         else:
             # If keeping the monopole, move it to the rightmost column so it is adjacent 
             # to LSSM modes downstream in the UV_ModelSpace ordering.
-            if has_monopole:
-                u_mp = u_vec[is_monopole]
-                v_mp = v_vec[is_monopole]
-                u_vec = jnp.concatenate([u_vec[~is_monopole], u_mp], axis=0)
-                v_vec = jnp.concatenate([v_vec[~is_monopole], v_mp], axis=0)
+            u_mp = u_vec[i0 : i0 + 1]
+            v_mp = v_vec[i0 : i0 + 1]
+            u_vec = jnp.concatenate([u_vec[:i0], u_vec[i0 + 1 :], u_mp], axis=0)
+            v_vec = jnp.concatenate([v_vec[:i0], v_vec[i0 + 1 :], v_mp], axis=0)
 
         return jnp.stack([u_vec, v_vec], axis=0) # Shape (2, N_uv)

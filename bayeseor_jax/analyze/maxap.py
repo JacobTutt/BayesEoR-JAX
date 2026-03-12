@@ -12,7 +12,7 @@ import numpy as np
 import jax.scipy as jsp
 from astropy import units
 from astropy.time import Time
-from jax.experimental import sparse
+# from jax.experimental import sparse
 from numpy.typing import ArrayLike
 
 from ..inference.prior import build_phi_inverse
@@ -105,11 +105,7 @@ class MaximumAPosteriori:
                 t_matrix = t_matrix.todense()
             t_matrix = jnp.asarray(t_matrix)
 
-            ninv_d = sparse.bcoo_dot_general(
-                ninv,
-                vis_noisy,
-                dimension_numbers=(((1,), (0,)), ((), ())),
-            )
+            ninv_d = ninv @ jnp.asarray(vis_noisy)
             dbar = jnp.conj(t_matrix).T @ ninv_d
             d_ninv_d = jnp.real(jnp.vdot(vis_noisy, ninv_d))
 
@@ -188,11 +184,7 @@ class MaximumAPosteriori:
         map_coeffs, dbar_sigmai_dbar, prior_cov, log_det_sigma = (
             self._calc_sigmai_dbar_wrapper(jnp.asarray(dmps))
         )
-        map_vis = sparse.bcoo_dot_general(
-            self.T,
-            map_coeffs,
-            dimension_numbers=(((1,), (0,)), ((), ())),
-        )
+        map_vis = jnp.asarray(self.T) @ jnp.asarray(map_coeffs)
 
         log_det_prior_cov = -1 * jnp.sum(jnp.log(prior_cov)).real
         log_post = -0.5 * log_det_sigma - 0.5 * log_det_prior_cov + 0.5 * dbar_sigmai_dbar

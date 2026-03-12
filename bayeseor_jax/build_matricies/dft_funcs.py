@@ -60,117 +60,117 @@ def build_nudft_matrix(
     # 2j * pi * phase converts the geometric distance into a phase angle.
     return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
 
-def reorder_fuv_to_uvf(
-    n_uv: int,
-    n_freq: int,
-) -> jnp.ndarray:
-    """
-    Build the visibility-ordered -> channel-ordered gridding matrix.
+# def reorder_fuv_to_uvf(
+#     n_uv: int,
+#     n_freq: int,
+# ) -> jnp.ndarray:
+#     """
+#     Build the visibility-ordered -> channel-ordered gridding matrix.
 
-    This operator reorders a vector arranged by UV-pixel blocks into one
-    arranged by frequency blocks:
+#     This operator reorders a vector arranged by UV-pixel blocks into one
+#     arranged by frequency blocks:
 
-    Vis-ordered (UV-major):
-        [ (u0,v0, all f), (u1,v1, all f), ... ]
+#     Vis-ordered (UV-major):
+#         [ (u0,v0, all f), (u1,v1, all f), ... ]
 
-    Chan-ordered (Freq-major):
-        [ (f0, all uv), (f1, all uv), ... ]
+#     Chan-ordered (Freq-major):
+#         [ (f0, all uv), (f1, all uv), ... ]
 
-    In matrix terms, this is a pure permutation matrix with exactly one
-    `1` per row and column.
+#     In matrix terms, this is a pure permutation matrix with exactly one
+#     `1` per row and column.
 
-    Parameters
-    ----------
-    n_uv : int
-        Number of UV modes.
-    n_freq : int
-        Number of frequency channels.
+#     Parameters
+#     ----------
+#     n_uv : int
+#         Number of UV modes.
+#     n_freq : int
+#         Number of frequency channels.
 
-    Returns
-    -------
-    gridding_matrix : jnp.ndarray
-        Mapping matrix of shape (n_uv*n_freq, n_uv*n_freq).
-    """
-    # Row/column index construction without Python loops.
-    # Row index: (freq-major) linear index = f * n_uv + uv
-    chan = jnp.arange(n_freq, dtype=jnp.int32)[:, jnp.newaxis]  # (n_freq, 1)
-    vis = jnp.arange(n_uv, dtype=jnp.int32)[jnp.newaxis, :]     # (1, n_uv)
+#     Returns
+#     -------
+#     gridding_matrix : jnp.ndarray
+#         Mapping matrix of shape (n_uv*n_freq, n_uv*n_freq).
+#     """
+#     # Row/column index construction without Python loops.
+#     # Row index: (freq-major) linear index = f * n_uv + uv
+#     chan = jnp.arange(n_freq, dtype=jnp.int32)[:, jnp.newaxis]  # (n_freq, 1)
+#     vis = jnp.arange(n_uv, dtype=jnp.int32)[jnp.newaxis, :]     # (1, n_uv)
 
-    rows = (chan * n_uv + vis).reshape(-1)                     # (n_freq*n_uv,)
-    # Column index: (uv-major) linear index = uv * n_freq + f
-    cols = (chan + vis * n_freq).reshape(-1)                   # (n_freq*n_uv,)
+#     rows = (chan * n_uv + vis).reshape(-1)                     # (n_freq*n_uv,)
+#     # Column index: (uv-major) linear index = uv * n_freq + f
+#     cols = (chan + vis * n_freq).reshape(-1)                   # (n_freq*n_uv,)
 
-    matrix_dims = (n_uv * n_freq, n_uv * n_freq)
-    return jnp.zeros(matrix_dims, dtype=jnp.float32).at[rows, cols].set(1.0)
-
-
-def sparse_block_diag_repeat(block: jnp.ndarray, n_repeats: int) -> sparse.BCOO:
-    """
-    Build a sparse block-diagonal matrix by repeating a dense 2D block.
-
-    Parameters
-    ----------
-    block : jnp.ndarray
-        Dense 2D block of shape (n_rows, n_cols).
-    n_repeats : int
-        Number of times to repeat the block along the diagonal.
-
-    Returns
-    -------
-    block_diag : sparse.BCOO
-        Sparse block-diagonal matrix of shape
-        (n_repeats * n_rows, n_repeats * n_cols).
-    """
-    n_rows, n_cols = block.shape
-    k = jnp.arange(n_repeats, dtype=jnp.int32)
-
-    # Base indices for a single block.
-    r0 = jnp.arange(n_rows, dtype=jnp.int32)[:, jnp.newaxis]
-    c0 = jnp.arange(n_cols, dtype=jnp.int32)[jnp.newaxis, :]
-    r0 = jnp.broadcast_to(r0, (n_rows, n_cols)).reshape(-1)
-    c0 = jnp.broadcast_to(c0, (n_rows, n_cols)).reshape(-1)
-
-    # Offsets for each block along the diagonal.
-    row_offsets = (k * n_rows)[:, jnp.newaxis]
-    col_offsets = (k * n_cols)[:, jnp.newaxis]
-
-    rows = (row_offsets + r0[jnp.newaxis, :]).reshape(-1)
-    cols = (col_offsets + c0[jnp.newaxis, :]).reshape(-1)
-
-    data = jnp.tile(block.reshape(-1), n_repeats)
-    indices = jnp.stack([rows, cols], axis=1)
-    shape = (n_repeats * n_rows, n_repeats * n_cols)
-
-    return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+#     matrix_dims = (n_uv * n_freq, n_uv * n_freq)
+#     return jnp.zeros(matrix_dims, dtype=jnp.float32).at[rows, cols].set(1.0)
 
 
-def sparse_block_diag_two(a: sparse.BCOO, b: sparse.BCOO) -> sparse.BCOO:
-    """
-    Build a sparse block-diagonal matrix from two BCOO matrices.
+# def sparse_block_diag_repeat(block: jnp.ndarray, n_repeats: int) -> sparse.BCOO:
+#     """
+#     Build a sparse block-diagonal matrix by repeating a dense 2D block.
 
-    Parameters
-    ----------
-    a, b : sparse.BCOO
-        2D sparse matrices to place on the block diagonal.
+#     Parameters
+#     ----------
+#     block : jnp.ndarray
+#         Dense 2D block of shape (n_rows, n_cols).
+#     n_repeats : int
+#         Number of times to repeat the block along the diagonal.
 
-    Returns
-    -------
-    block_diag : sparse.BCOO
-        Sparse block-diagonal matrix of shape
-        (a.rows + b.rows, a.cols + b.cols).
-    """
+#     Returns
+#     -------
+#     block_diag : sparse.BCOO
+#         Sparse block-diagonal matrix of shape
+#         (n_repeats * n_rows, n_repeats * n_cols).
+#     """
+#     n_rows, n_cols = block.shape
+#     k = jnp.arange(n_repeats, dtype=jnp.int32)
 
-    a_rows, a_cols = a.shape
-    b_rows, b_cols = b.shape
+#     # Base indices for a single block.
+#     r0 = jnp.arange(n_rows, dtype=jnp.int32)[:, jnp.newaxis]
+#     c0 = jnp.arange(n_cols, dtype=jnp.int32)[jnp.newaxis, :]
+#     r0 = jnp.broadcast_to(r0, (n_rows, n_cols)).reshape(-1)
+#     c0 = jnp.broadcast_to(c0, (n_rows, n_cols)).reshape(-1)
 
-    # Offsets for the second block.
-    offset = jnp.array([a_rows, a_cols], dtype=jnp.int32)
+#     # Offsets for each block along the diagonal.
+#     row_offsets = (k * n_rows)[:, jnp.newaxis]
+#     col_offsets = (k * n_cols)[:, jnp.newaxis]
 
-    data = jnp.concatenate([a.data, b.data], axis=0)
-    indices = jnp.concatenate([a.indices, b.indices + offset], axis=0)
-    shape = (a_rows + b_rows, a_cols + b_cols)
+#     rows = (row_offsets + r0[jnp.newaxis, :]).reshape(-1)
+#     cols = (col_offsets + c0[jnp.newaxis, :]).reshape(-1)
 
-    return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+#     data = jnp.tile(block.reshape(-1), n_repeats)
+#     indices = jnp.stack([rows, cols], axis=1)
+#     shape = (n_repeats * n_rows, n_repeats * n_cols)
+
+#     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
+
+
+# def sparse_block_diag_two(a: sparse.BCOO, b: sparse.BCOO) -> sparse.BCOO:
+#     """
+#     Build a sparse block-diagonal matrix from two BCOO matrices.
+
+#     Parameters
+#     ----------
+#     a, b : sparse.BCOO
+#         2D sparse matrices to place on the block diagonal.
+
+#     Returns
+#     -------
+#     block_diag : sparse.BCOO
+#         Sparse block-diagonal matrix of shape
+#         (a.rows + b.rows, a.cols + b.cols).
+#     """
+
+#     a_rows, a_cols = a.shape
+#     b_rows, b_cols = b.shape
+
+#     # Offsets for the second block.
+#     offset = jnp.array([a_rows, a_cols], dtype=jnp.int32)
+
+#     data = jnp.concatenate([a.data, b.data], axis=0)
+#     indices = jnp.concatenate([a.indices, b.indices + offset], axis=0)
+#     shape = (a_rows + b_rows, a_cols + b_cols)
+
+#     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
 
 
     
@@ -227,9 +227,11 @@ def inverse_udft_1d_rect(
     index_f = (jnp.arange(n_freq, dtype=jnp.float64) - (n_freq // 2))
     index_eta = (jnp.arange(n_eta, dtype=jnp.float64) - (n_eta // 2))
 
-    # Optionally exclude the DC (eta=0) mode
+    # Optionally exclude the DC (eta=0) mode via static slicing.
+    # With this indexing convention, eta=0 is always at n_eta//2.
     if not include_eta0:
-        index_eta = index_eta[index_eta != 0.0]
+        eta0_idx = n_eta // 2
+        index_eta = jnp.concatenate([index_eta[:eta0_idx], index_eta[eta0_idx + 1 :]])
 
     # Define the 1D IDFT matrix for the Fourier modes. 
     # As different normalisations are applied to the:

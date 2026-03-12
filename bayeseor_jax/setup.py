@@ -8,7 +8,7 @@ import warnings
 
 import jax
 import jax.numpy as jnp
-from jax.experimental import sparse
+# from jax.experimental import sparse
 import numpy as np
 from astropy.time import Time
 
@@ -548,11 +548,7 @@ def run_setup(
     T = jnp.asarray(T)
 
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    Ninv_d = sparse.bcoo_dot_general(
-        Ninv,
-        vis_noisy,
-        dimension_numbers=(((1,), (0,)), ((), ())),
-    )
+    Ninv_d = Ninv @ vis_noisy
     dbar = jnp.conj(T).T @ Ninv_d
     d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
 
