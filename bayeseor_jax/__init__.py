@@ -30,7 +30,7 @@ from .model import (
     InstrumentModel,
 )
 from .params import BayesEoRParser
-from .run import run
+from .run_fit import run_inference
 from .setup import SetupResult, get_vis_data, run_setup
 from .utils import (
     load_numpy_dict,
@@ -60,7 +60,7 @@ __all__ = [
     "SetupResult",
     "get_vis_data",
     "run_setup",
-    "run",
+    "run_inference",
     "form_pI_vis",
     "jy_to_ksr",
     "save_numpy_dict",

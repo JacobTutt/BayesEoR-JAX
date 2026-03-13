@@ -1,4 +1,4 @@
-"""BlackJAX nested-sampling runner for BayesEoR-JAX."""
+"""Inference runner for BayesEoR-JAX using BlackJAX nested sampling."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .setup import SetupResult
 LOGGER = logging.getLogger(__name__)
 
 
-def run(
+def run_inference(
     setup_result: SetupResult,
     out_dir: Path | str,
     random_key: int = 0,
@@ -30,12 +30,30 @@ def run(
     stop_threshold: float = -3.0,
 ) -> dict[str, Any]:
     """
-    Run BlackJAX nested sampling using existing prior/likelihood calls.
+    Run posterior inference with BlackJAX nested sampling.
 
-    Notes
-    -----
-    - `logprior_fn` calls `Prior.logprior(theta)`.
-    - `loglikelihood_fn` calls `Likelihood.log_likelihood(theta)`.
+    Parameters
+    ----------
+    setup_result : SetupResult
+        Output of ``run_setup`` containing initialized prior/likelihood objects.
+    out_dir : Path | str
+        Directory where nested-sampling outputs and summary files are written.
+    random_key : int, optional
+        PRNG seed used to initialize nested sampling.
+    n_live_scale_factor : float, optional
+        Live-point count scale factor applied to the inferred parameter count.
+    num_inner_scale_factor : float, optional
+        Number of inner MCMC steps scale factor applied to parameter count.
+    delete_scale_factor : float, optional
+        Fraction of live points replaced at each nested-sampling iteration.
+    stop_threshold : float, optional
+        Termination threshold on ``logZ_live - logZ``.
+
+    Returns
+    -------
+    dict[str, Any]
+        Run summary containing dimensions, sampler settings, termination stats,
+        evidence estimates, and output file paths.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -48,12 +66,9 @@ def run(
     num_inner_steps = jnp.ceil(num_inner_scale_factor * n_dim)
     num_delete = jnp.floor(delete_scale_factor * n_live)
 
-    logprior_fn = prior_class.logprior
-    loglikelihood_fn = likelihood_class.log_likelihood
-
     ns_algo = blackjax.nss(
-        logprior_fn=logprior_fn,
-        loglikelihood_fn=loglikelihood_fn,
+        logprior_fn=prior_class.logprior,
+        loglikelihood_fn=likelihood_class.log_likelihood,
         num_delete=num_delete,
         num_inner_steps=num_inner_steps,
     )
