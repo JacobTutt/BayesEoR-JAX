@@ -347,12 +347,86 @@ def run_setup(
     **_: Any,
 ) -> SetupResult:
     """
-    Build all objects required for posterior sampling.
+    Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    The returned object contains:
-    - compressed data products (`vis_noisy`, `dbar`, `T_Ninv_T`, ...)
-    - k-binning metadata
-    - instantiated `Prior`, `PhiInverseConfig`, `Likelihood`.
+    This is the main setup entry point used by :mod:`bayeseor_jax.run`. It:
+
+    1. Loads or preprocesses visibilities/noise metadata.
+    2. Builds matrix products (`T`, `Ninv`, `T_Ninv_T`) needed by the
+       marginalized Gaussian likelihood.
+    3. Builds k-bin metadata and power-spectrum normalization inputs.
+    4. Instantiates sampler-space prior, latent-space precision config, and
+       likelihood config objects.
+
+    Parameters
+    ----------
+    data_path : pathlib.Path or str
+        Input visibility path. Supports raw pyuvdata files (``.uvh5``,
+        ``.uvfits``, ``.ms``) or preprocessed vectors (``.npy``).
+    inst_model : pathlib.Path or str, optional
+        Instrument model directory for ``.npy`` input mode.
+    noise_data_path : pathlib.Path or str, optional
+        Optional precomputed noise vector path.
+    array_save_directory : pathlib.Path or str, optional
+        Directory used to store/load matrix products.
+
+    n_u_eor, n_v_eor, du_eor, dv_eor : int/float
+        EoR model UV grid shape and spacing.
+    n_u_fg, n_v_fg, du_fg, dv_fg : int/float, optional
+        FG model UV grid shape and spacing.
+    fit_for_monopole : bool, optional
+        Whether to include a dedicated FG monopole block.
+    n_modes_fg, n_powerlaws_fg, beta_fg : optional
+        FG large spectral scale model controls.
+
+    n_freq, f0_mhz, df_mhz : optional
+        Frequency-axis setup (overridden by data-driven values in raw mode).
+    n_eta : int, optional
+        Number of line-of-sight Fourier modes. Defaults to ``n_freq``.
+    n_t, d_t, jd_center : optional
+        Time-axis controls.
+
+    nside, fov_eor, fov_fg, telescope_latlonalt : optional
+        Sky geometry controls.
+    beam_type, peak_amp, fwhm_deg, diam, cosfreq, tanh_freq, tanh_sl_red, pol,
+    freq_interp_kind : optional
+        Beam model controls.
+
+    antenna_selection, bl_cutoff, freq_idx_min, freq_min, freq_center,
+    n_freqs_select, jd_idx_min, jd_min, n_times_select, form_pi, pi_norm,
+    redundant_avg, uniform_redundancy, calc_noise, sigma, noise_seed, save_vis,
+    save_model, save_dir, clobber, effective_noise_path : optional
+        Data selection/preprocessing and noise-model controls.
+
+    priors : array-like
+        Prior bounds with shape ``(n_power_params, 2)`` in sampler space.
+    log_priors : bool, optional
+        If True (default), sampled power-spectrum parameters are interpreted as
+        ``log10`` amplitudes; otherwise linear amplitudes.
+    uprior_bins : str, optional
+        Selector string for bins to be treated as uniform-in-linear-space when
+        sampling in log space.
+    inverse_lw_power : float, optional
+        Inverse prior power assigned to FG/LSSM latent coefficients.
+    use_intrinsic_noise_fitting : bool, optional
+        Whether to include a global intrinsic noise amplitude parameter in the
+        likelihood.
+    **_ : Any
+        Catch-all for extra parser keys that are not consumed here.
+
+    Returns
+    -------
+    SetupResult
+        Container with:
+
+        - `likelihood_cfg`: configured marginalized Gaussian likelihood.
+        - `prior_cfg`: sampler-space prior object.
+        - `phi_cfg`: latent prior-precision config.
+        - `bm`: matrix builder instance.
+        - `vis_dict`: visibility/noise/instrument metadata.
+        - `k_vals`, `bin_id_per_k_mode`, `valid_mask`: k-binning metadata.
+        - `ps_box_size_ra_mpc`, `ps_box_size_dec_mpc`, `ps_box_size_para_mpc`:
+          cosmological box extents used for power normalization.
     """
     # Resolve parser-like defaults once so downstream uses a fully-specified config.
     if n_v_eor is None:
