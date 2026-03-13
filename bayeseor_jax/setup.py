@@ -14,7 +14,7 @@ from astropy.time import Time
 
 from .build_matricies import BuildMatrices
 from .inference.likelihood import Likelihood
-from .inference.prior import PhiInverseConfig, Prior
+from .inference.prior import PhiInverse, Prior
 from .model.cosmology_transforms import Cosmology
 from .model.instrument import InstrumentModel
 from .model.k_cube import (
@@ -38,7 +38,7 @@ class SetupResult:
         self,
         likelihood_cfg: Likelihood,
         prior_cfg: Prior,
-        phi_cfg: PhiInverseConfig,
+        phi_cfg: PhiInverse,
         bm: BuildMatrices,
         vis_dict: dict[str, Any],
         k_vals: jax.Array,
@@ -626,7 +626,7 @@ def run_setup(
 
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now receives log-space bounds and constructs sampler-space bounds.
-    # `PhiInverseConfig` maps sampled power amplitudes to latent precision diag.
+    # `PhiInverse` maps sampled power amplitudes to latent precision diag.
     if priors is None:
         raise ValueError("priors must be provided")
 
@@ -656,7 +656,7 @@ def run_setup(
         n_power_params=n_power_params,
     )
 
-    phi_cfg = PhiInverseConfig(
+    phi_cfg = PhiInverse(
         bin_id_per_k_mode=bid_compact,
         valid_mask=valid_compact,
         k_vals=k_vals,

@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from .prior import PhiInverseConfig, Prior, build_phi_inverse, theta_power_to_linear
+from .prior import PhiInverse, Prior, build_phi_inverse, theta_power_to_linear
 
 
 class Likelihood:
@@ -23,7 +23,7 @@ class Likelihood:
         Scalar ``d^H N^{-1} d``.
     n_data : int
         Number of data samples contributing to the noise normalization term.
-    phi_cfg : PhiInverseConfig
+    phi_cfg : PhiInverse
         Prior-precision construction settings.
     prior_cfg : Prior
         Sampler-space prior configuration used to evaluate the full log density.
@@ -45,7 +45,7 @@ class Likelihood:
         dbar: jax.Array,
         d_ninv_d: float,
         n_data: int,
-        phi_cfg: PhiInverseConfig,
+        phi_cfg: PhiInverse,
         prior_cfg: Prior,
         uniform_priors: jax.Array | None = None,
         intrinsic_noise_fitting: bool = False,

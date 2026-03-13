@@ -19,7 +19,7 @@ from .analyze import (
 )
 from .inference import (
     Likelihood,
-    PhiInverseConfig,
+    PhiInverse,
     Prior,
     build_kbin_index_per_voxel,
     build_phi_inverse,
@@ -49,7 +49,7 @@ __all__ = [
     "Cosmology",
     "InstrumentModel",
     "Likelihood",
-    "PhiInverseConfig",
+    "PhiInverse",
     "Prior",
     "build_kbin_index_per_voxel",
     "build_phi_inverse",
