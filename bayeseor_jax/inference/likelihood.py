@@ -27,8 +27,9 @@ class Likelihood:
         Prior-precision construction settings.
     prior_cfg : Prior
         Sampler-space prior configuration used to evaluate the full log density.
-    log_priors : bool, optional
-        Whether sampled power parameters are in log10 space.
+    uniform_priors : jax.Array, optional
+        Boolean mask over sampled power parameters where True entries are
+        sampled in linear space and False entries are sampled in log10 space.
     intrinsic_noise_fitting : bool, optional
         Whether the first sampled parameter is intrinsic noise amplitude
         ``alpha_prime``.
@@ -46,7 +47,7 @@ class Likelihood:
         n_data: int,
         phi_cfg: PhiInverseConfig,
         prior_cfg: Prior,
-        log_priors: bool = False,
+        uniform_priors: jax.Array | None = None,
         intrinsic_noise_fitting: bool = False,
         power_param_start: int = 0,
         n_power_params: int = 0,
@@ -63,7 +64,16 @@ class Likelihood:
         self.n_data = n_data
         self.phi_cfg = phi_cfg
         self.prior_cfg = prior_cfg
-        self.log_priors = log_priors
+        if uniform_priors is None:
+            self.uniform_priors = jnp.zeros((n_power_params,), dtype=bool)
+        else:
+            mask = jnp.asarray(uniform_priors, dtype=bool)
+            if mask.shape != (n_power_params,):
+                raise ValueError(
+                    "uniform_priors must have shape "
+                    f"({n_power_params},), got {mask.shape}"
+                )
+            self.uniform_priors = mask
         self.intrinsic_noise_fitting = intrinsic_noise_fitting
         self.power_param_start = power_param_start
         self.n_power_params = n_power_params
@@ -94,8 +104,8 @@ class Likelihood:
         alpha2 = alpha * alpha
         inv_alpha2 = 1.0 / alpha2
 
-        # Convert sampled power parameters into linear-space amplitudes when needed.
-        power_linear = theta_power_to_linear(theta_power, self.log_priors)
+        # Convert sampled power parameters into linear-space amplitudes.
+        power_linear = theta_power_to_linear(theta_power, self.uniform_priors)
         # Build diagonal prior precision Phi^{-1} for latent linear coefficients.
         phi_i = build_phi_inverse(power_linear, self.phi_cfg)
 

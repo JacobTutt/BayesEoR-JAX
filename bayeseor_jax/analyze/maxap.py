@@ -188,8 +188,6 @@ class MaximumAPosteriori:
 
         log_det_prior_cov = -1 * jnp.sum(jnp.log(prior_cov)).real
         log_post = -0.5 * log_det_sigma - 0.5 * log_det_prior_cov + 0.5 * dbar_sigmai_dbar
-
-        log_post += jnp.sum(jnp.log(jnp.asarray(dmps)[self.prior.uprior_inds]))
         log_post = log_post.real
 
         if not return_prior_cov:

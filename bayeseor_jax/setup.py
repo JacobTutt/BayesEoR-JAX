@@ -25,7 +25,7 @@ from .model.k_cube import (
     mask_k_cube,
 )
 from .model.noise import generate_gaussian_noise
-from .utils import load_numpy_dict, parse_uprior_inds
+from .utils import load_numpy_dict
 from .vis import preprocess_uvdata
 
 jax.config.update("jax_enable_x64", True)
@@ -340,8 +340,7 @@ def run_setup(
     effective_noise_path: Path | str | None = None,
     # Prior / likelihood
     priors: Any = None,
-    log_priors: bool = True,
-    uprior_bins: str = "",
+    uniform_priors: Any = None,
     inverse_lw_power: float = 1e-16,
     use_intrinsic_noise_fitting: bool = False,
     **_: Any,
@@ -399,13 +398,12 @@ def run_setup(
         Data selection/preprocessing and noise-model controls.
 
     priors : array-like
-        Prior bounds with shape ``(n_power_params, 2)`` in sampler space.
-    log_priors : bool, optional
-        If True (default), sampled power-spectrum parameters are interpreted as
-        ``log10`` amplitudes; otherwise linear amplitudes.
-    uprior_bins : str, optional
-        Selector string for bins to be treated as uniform-in-linear-space when
-        sampling in log space.
+        Power-spectrum prior bounds with shape ``(n_power_params, 2)`` in
+        log10 space.
+    uniform_priors : array-like of bool, optional
+        Boolean mask of length ``n_power_params`` where True bins are sampled
+        directly in linear power space and False bins are sampled in log10
+        space. If None, all bins are sampled in log10 space.
     inverse_lw_power : float, optional
         Inverse prior power assigned to FG/LSSM latent coefficients.
     use_intrinsic_noise_fitting : bool, optional
@@ -627,26 +625,35 @@ def run_setup(
     d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
 
     # Assemble sampler-space prior and latent-space precision configs.
-    # `Prior` governs sampled theta bounds/transforms.
+    # `Prior` now receives log-space bounds and constructs sampler-space bounds.
     # `PhiInverseConfig` maps sampled power amplitudes to latent precision diag.
     if priors is None:
         raise ValueError("priors must be provided")
-    bounds = jnp.asarray(priors, dtype=jnp.float64)
-    if bounds.ndim != 2 or bounds.shape[1] != 2:
+
+    bounds_log = jnp.asarray(priors, dtype=jnp.float64)
+    if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
         raise ValueError("priors must have shape (n_power_params, 2)")
-    if bounds.shape[0] != k_vals.shape[0]:
+    n_power_params = int(k_vals.shape[0])
+    if bounds_log.shape[0] != n_power_params:
         raise ValueError(
-            f"priors has {bounds.shape[0]} bins, but k binning produced {k_vals.shape[0]} non-empty bins"
+            f"priors has {bounds_log.shape[0]} bins, but k binning produced {n_power_params} non-empty bins"
         )
 
-    uprior_inds = parse_uprior_inds(uprior_bins, int(k_vals.shape[0]))
+    if uniform_priors is None:
+        uniform_priors_mask = jnp.zeros((n_power_params,), dtype=bool)
+    else:
+        uniform_priors_mask = jnp.asarray(uniform_priors, dtype=bool)
+        if uniform_priors_mask.shape != (n_power_params,):
+            raise ValueError(
+                "uniform_priors must have shape "
+                f"({n_power_params},), got {uniform_priors_mask.shape}"
+            )
 
     prior_cfg = Prior(
-        bounds=bounds,
-        log_priors=bool(log_priors),
-        uprior_inds=uprior_inds,
+        bounds_log=bounds_log,
+        uniform_priors=uniform_priors_mask,
         power_param_start=0,
-        n_power_params=int(k_vals.shape[0]),
+        n_power_params=n_power_params,
     )
 
     phi_cfg = PhiInverseConfig(
@@ -668,10 +675,10 @@ def run_setup(
         n_data=int(vis_noisy.size),
         phi_cfg=phi_cfg,
         prior_cfg=prior_cfg,
-        log_priors=bool(log_priors),
+        uniform_priors=uniform_priors_mask,
         intrinsic_noise_fitting=bool(use_intrinsic_noise_fitting),
         power_param_start=0,
-        n_power_params=int(k_vals.shape[0]),
+        n_power_params=n_power_params,
     )
 
     # Return one object containing both configs and diagnostics needed by run.py.

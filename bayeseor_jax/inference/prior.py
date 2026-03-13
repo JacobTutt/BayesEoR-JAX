@@ -70,13 +70,13 @@ class Prior:
 
     Parameters
     ----------
-    bounds : jax.Array
-        Parameter bounds with shape ``(n_dim, 2)`` in sampler coordinates.
-    log_priors : bool
-        If True, the power-spectrum parameters are interpreted as log10 values.
-    uprior_inds : jax.Array, optional
-        Boolean mask over power-spectrum parameters identifying bins that should
-        behave as uniform-in-linear-space under log10 sampling.
+    bounds_log : jax.Array
+        Power-spectrum parameter bounds with shape ``(n_power_params, 2)`` in
+        log10 space.
+    uniform_priors : jax.Array, optional
+        Boolean mask over power-spectrum parameters where True indicates that
+        parameter is sampled directly in linear power space. False entries are
+        sampled in ``log10`` power space.
     power_param_start : int, optional
         Start index of power-spectrum parameters within ``theta``.
     n_power_params : int
@@ -85,18 +85,55 @@ class Prior:
 
     def __init__(
         self,
-        bounds: jax.Array,
-        log_priors: bool = False,
-        uprior_inds: jax.Array | None = None,
+        bounds_log: jax.Array,
+        uniform_priors: jax.Array | None = None,
         power_param_start: int = 0,
         n_power_params: int = 0,
     ) -> None:
-        self.bounds = bounds
-        self.log_priors = log_priors
-        if uprior_inds is None:
-            self.uprior_inds = jnp.zeros((n_power_params,), dtype=bool)
+        # 1) Validate and standardize the incoming log10 prior bounds.
+        #    Expected shape is (n_power_params, 2) -> [low, high] per bin.
+        bounds_log = jnp.asarray(bounds_log, dtype=jnp.float64)
+        if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
+            raise ValueError("bounds_log must have shape (n_power_params, 2)")
+        if n_power_params <= 0:
+            n_power_params = int(bounds_log.shape[0])
+        if int(bounds_log.shape[0]) != int(n_power_params):
+            raise ValueError(
+                "bounds_log first dimension must match n_power_params: "
+                f"{bounds_log.shape[0]} != {n_power_params}"
+            )
+
+        # 2) Build/validate the per-bin mask controlling sampler coordinates:
+        #    True  -> sample this bin directly in linear power space.
+        #    False -> sample this bin in log10(power) space.
+        if uniform_priors is None:
+            self.uniform_priors = jnp.zeros((n_power_params,), dtype=bool)
         else:
-            self.uprior_inds = uprior_inds
+            mask = jnp.asarray(uniform_priors, dtype=bool)
+            if mask.shape != (n_power_params,):
+                raise ValueError(
+                    "uniform_priors must have shape "
+                    f"({n_power_params},), got {mask.shape}"
+                )
+            self.uniform_priors = mask
+
+        # 3) Convert log-space bounds to linear-space bounds (10**x), then
+        #    construct the actual sampler bounds used by logprior/sample:
+        #    - uniform_priors=True  -> use linear bounds
+        #    - uniform_priors=False -> keep log10 bounds
+        bounds_linear = jnp.power(10.0, bounds_log)
+        self.bounds_log = bounds_log
+        self.bounds = jnp.stack(
+            [
+                jnp.where(self.uniform_priors, bounds_linear[:, 0], bounds_log[:, 0]),
+                jnp.where(self.uniform_priors, bounds_linear[:, 1], bounds_log[:, 1]),
+            ],
+            axis=1,
+        )
+        self.lower = self.bounds[:, 0]
+        self.upper = self.bounds[:, 1]
+        # Cache one distrax prior object for repeated log_prob/sample calls.
+        self.uniform_prior = distrax.Uniform(self.lower, self.upper)
         self.power_param_start = power_param_start
         self.n_power_params = n_power_params
 
@@ -104,35 +141,9 @@ class Prior:
     def logprior(self, theta: jax.Array) -> jax.Array:
         """
         Evaluate sampler-space log prior density.
-
-        This uses a box prior in sampler coordinates and applies the BayesEoR
-        uniform-in-linear correction on any bins flagged by ``uprior_inds``.
         """
-        bounds = jnp.asarray(self.bounds)
-        lower = bounds[:, 0]
-        upper = bounds[:, 1]
-
-        in_support = jnp.all((theta >= lower) & (theta <= upper))
-        base = jnp.sum(distrax.Uniform(lower, upper).log_prob(theta))
-
-        theta_power = theta[
-            self.power_param_start : self.power_param_start + self.n_power_params
-        ]
-        theta_power_linear = theta_power_to_linear(theta_power, self.log_priors)
-        safe_theta_linear = jnp.maximum(
-            theta_power_linear,
-            jnp.finfo(theta_power_linear.dtype).tiny,
-        )
-        jacobian_correction = jnp.sum(
-            jnp.where(
-                jnp.asarray(self.uprior_inds, dtype=bool),
-                jnp.log(safe_theta_linear),
-                0.0,
-            )
-        )
-
-        total = base + jacobian_correction
-        return jnp.where(in_support, total, -jnp.inf)
+        log_prior = jnp.sum(self.uniform_prior.log_prob(theta))
+        return log_prior
 
     def sample_from_priors(self, rng_key: jax.Array, n_samples: int) -> jax.Array:
         """
@@ -150,15 +161,10 @@ class Prior:
         jax.Array
             Array with shape ``(n_samples, n_dim)``.
         """
-        bounds = jnp.asarray(self.bounds)
-        low = bounds[:, 0]
-        high = bounds[:, 1]
-        u = jax.random.uniform(
-            rng_key,
-            shape=(int(n_samples), int(bounds.shape[0])),
-            dtype=low.dtype,
+        return self.uniform_prior.sample(
+            seed=rng_key,
+            sample_shape=(int(n_samples),),
         )
-        return low + (high - low) * u
 
 
 def build_kbin_index_per_voxel(
@@ -197,14 +203,18 @@ def compute_power_norm_per_bin(
     return (k_vals**3 / (2.0 * jnp.pi**2)) / cosmo_volume * (inst_to_cosmo_vol**2)
 
 
-def theta_power_to_linear(theta_power: jax.Array, log_priors: bool) -> jax.Array:
-    """Convert sampled power parameters to linear scale when needed."""
-    return jax.lax.cond(
-        log_priors,
-        lambda t: jnp.power(10.0, t),
-        lambda t: t,
-        theta_power,
-    )
+def theta_power_to_linear(
+    theta_power: jax.Array,
+    uniform_priors: jax.Array,
+) -> jax.Array:
+    """
+    Convert sampled power parameters to linear scale.
+
+    ``uniform_priors=True`` entries are already linear; False entries are
+    interpreted as log10(power) and exponentiated.
+    """
+    mask = jnp.asarray(uniform_priors, dtype=bool)
+    return jnp.where(mask, theta_power, jnp.power(10.0, theta_power))
 
 
 def build_phi_inverse(theta_power_linear: jax.Array, cfg: PhiInverseConfig) -> jax.Array:
@@ -225,4 +235,3 @@ def build_phi_inverse(theta_power_linear: jax.Array, cfg: PhiInverseConfig) -> j
     n_fg = cfg.n_par - cfg.n_eor_voxels
     phi_fg = jnp.full((n_fg,), cfg.inverse_lw_power, dtype=phi_eor.dtype)
     return jnp.concatenate([phi_eor, phi_fg], axis=0)
-

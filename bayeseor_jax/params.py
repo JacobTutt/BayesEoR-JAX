@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
-
 from jsonargparse import ActionConfigFile, ArgumentParser
 
 
@@ -39,10 +37,10 @@ class BayesEoRParser(ArgumentParser):
         Directory for sampler outputs. Defaults to ``"./chains/"``.
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
-    log_priors : bool, optional
-        Use log10 priors (True) or linear priors (False). Defaults to True.
-    uprior_bins : str, optional
-        Uniform-prior bin selector string. Defaults to ``""``.
+    uniform_priors : list of bool/int, optional
+        Boolean mask over k bins where True indicates uniform prior in linear
+        power (sampled directly in linear space). False bins are sampled in
+        log10 space.
     inverse_lw_power : float, optional
         Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
     use_intrinsic_noise_fitting : bool, optional
@@ -195,9 +193,12 @@ class BayesEoRParser(ArgumentParser):
         )
         self.add_argument("--output-dir", type=str, default="./chains/", help="Directory for sampler outputs.")
         self.add_argument("--priors", type=list[list[float]], help="Power-spectrum prior ranges [[min, max], ...].")
-        self.add_argument("--log-priors", action="store_true", default=True, help="Use log10 priors.")
-        self.add_argument("--lin-priors", action="store_false", dest="log_priors", help=argparse.SUPPRESS)
-        self.add_argument("--uprior-bins", type=str, default="", help="Uniform-prior bin selector.")
+        self.add_argument(
+            "--uniform-priors",
+            type=list[int],
+            default=None,
+            help="Optional boolean/int mask over k bins (1=True uses linear-uniform sampling).",
+        )
         self.add_argument("--inverse-lw-power", type=float, default=1e-16, help="Inverse FG prior power.")
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
