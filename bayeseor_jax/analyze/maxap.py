@@ -108,18 +108,18 @@ class MaximumAPosteriori:
             dbar = jnp.conj(t_matrix).T @ ninv_d
             d_ninv_d = jnp.real(jnp.vdot(vis_noisy, ninv_d))
 
-            setup_result.likelihood_cfg.t_ninv_t = jnp.asarray(t_ninv_t)
-            setup_result.likelihood_cfg.dbar = jnp.asarray(dbar)
-            setup_result.likelihood_cfg.d_ninv_d = jnp.asarray(d_ninv_d)
+            setup_result.likelihood_class.t_ninv_t = jnp.asarray(t_ninv_t)
+            setup_result.likelihood_class.dbar = jnp.asarray(dbar)
+            setup_result.likelihood_class.d_ninv_d = jnp.asarray(d_ninv_d)
             self.T = t_matrix
         else:
             self.T = setup_result.bm.load_matrix("T")
 
         self.args = args
         self.setup_result = setup_result
-        self.likelihood = setup_result.likelihood_cfg
-        self.prior = setup_result.prior_cfg
-        self.phi_cfg = setup_result.phi_cfg
+        self.likelihood = setup_result.likelihood_class
+        self.prior = setup_result.prior_class
+        self.phi_inverse_class = setup_result.phi_inverse_class
         self.bm = setup_result.bm
         self.k_vals = np.asarray(setup_result.k_vals)
 
@@ -155,7 +155,7 @@ class MaximumAPosteriori:
         log_det_sigma : jax.Array
             Log determinant of ``Sigma``.
         """
-        phi_i = self.phi_cfg.build(jnp.asarray(dmps))
+        phi_i = self.phi_inverse_class.evaluate(jnp.asarray(dmps))
         sigma = self.likelihood.t_ninv_t + jnp.diag(phi_i)
         chol = jnp.linalg.cholesky(sigma)
         y = jsp.linalg.solve_triangular(chol, self.likelihood.dbar, lower=True)
@@ -204,7 +204,7 @@ class MaximumAPosteriori:
         if ps is None and dmps is None:
             raise ValueError("One of 'ps' or 'dmps' must not be None")
         dmps = self.calculate_dmps(ps=ps, dmps=dmps)
-        phi_i = self.phi_cfg.build(jnp.asarray(dmps))
+        phi_i = self.phi_inverse_class.evaluate(jnp.asarray(dmps))
         return np.asarray(phi_i)
 
     def calculate_dmps(

@@ -36,9 +36,9 @@ class SetupResult:
 
     def __init__(
         self,
-        likelihood_cfg: Likelihood,
-        prior_cfg: Prior,
-        phi_cfg: PhiInverse,
+        likelihood_class: Likelihood,
+        prior_class: Prior,
+        phi_inverse_class: PhiInverse,
         bm: BuildMatrices,
         vis_dict: dict[str, Any],
         k_vals: jax.Array,
@@ -48,9 +48,9 @@ class SetupResult:
         ps_box_size_dec_mpc: float,
         ps_box_size_para_mpc: float,
     ) -> None:
-        self.likelihood_cfg = likelihood_cfg
-        self.prior_cfg = prior_cfg
-        self.phi_cfg = phi_cfg
+        self.likelihood_class = likelihood_class
+        self.prior_class = prior_class
+        self.phi_inverse_class = phi_inverse_class
         self.bm = bm
         self.vis_dict = vis_dict
         self.k_vals = k_vals
@@ -417,9 +417,9 @@ def run_setup(
     SetupResult
         Container with:
 
-        - `likelihood_cfg`: configured marginalized Gaussian likelihood.
-        - `prior_cfg`: sampler-space prior object.
-        - `phi_cfg`: latent prior-precision config.
+        - `likelihood_class`: configured marginalized Gaussian likelihood.
+        - `prior_class`: sampler-space prior object.
+        - `phi_inverse_class`: latent prior-precision object.
         - `bm`: matrix builder instance.
         - `vis_dict`: visibility/noise/instrument metadata.
         - `k_vals`, `bin_id_per_k_mode`, `valid_mask`: k-binning metadata.
@@ -649,14 +649,14 @@ def run_setup(
                 f"({n_power_params},), got {uniform_priors_mask.shape}"
             )
 
-    prior_cfg = Prior(
+    prior_class = Prior(
         bounds_log=bounds_log,
         uniform_priors=uniform_priors_mask,
         power_param_start=0,
         n_power_params=n_power_params,
     )
 
-    phi_cfg = PhiInverse(
+    phi_inverse_class = PhiInverse(
         bin_id_per_k_mode=bid_compact,
         valid_mask=valid_compact,
         k_vals=k_vals,
@@ -668,13 +668,13 @@ def run_setup(
         inverse_lw_power=float(inverse_lw_power),
     )
     
-    likelihood_cfg = Likelihood(
+    likelihood_class = Likelihood(
         t_ninv_t=jnp.asarray(T_Ninv_T),
         dbar=jnp.asarray(dbar),
         d_ninv_d=jnp.asarray(d_ninv_d),
         n_data=int(vis_noisy.size),
-        phi_cfg=phi_cfg,
-        prior_cfg=prior_cfg,
+        phi_inv_class=phi_inverse_class,
+        prior_class=prior_class,
         uniform_priors=uniform_priors_mask,
         intrinsic_noise_fitting=bool(use_intrinsic_noise_fitting),
         power_param_start=0,
@@ -683,9 +683,9 @@ def run_setup(
 
     # Return one object containing both configs and diagnostics needed by run.py.
     return SetupResult(
-        likelihood_cfg=likelihood_cfg,
-        prior_cfg=prior_cfg,
-        phi_cfg=phi_cfg,
+        likelihood_class=likelihood_class,
+        prior_class=prior_class,
+        phi_inverse_class=phi_inverse_class,
         bm=bm,
         vis_dict=vis_dict,
         k_vals=k_vals,
