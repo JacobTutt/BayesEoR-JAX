@@ -197,7 +197,7 @@ class BayesEoRParser(ArgumentParser):
             default="./matrices/",
             help="Directory for matrix storage.",
         )
-        self.add_argument("--output-dir", type=str, default="./chains/", help="Directory for sampler outputs.")
+        self.add_argument("--output-dir", type=str, default="./BlackJAXOutputs/", help="Directory for sampler outputs.")
         self.add_argument("--priors", type=list[list[float]], help="Power-spectrum prior ranges [[min, max], ...].")
         self.add_argument(
             "--uniform-priors",
