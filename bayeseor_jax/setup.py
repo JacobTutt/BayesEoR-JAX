@@ -358,7 +358,7 @@ def run_setup(
     """
     Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    This is the main setup entry point used by :mod:`bayeseor_jax.run`. It:
+    This is the main setup entry point used by :mod:`bayeseor_jax.run_fit`. It:
 
     1. Loads or preprocesses visibilities/noise metadata.
     2. Builds matrix products (`T`, `Ninv`, `T_Ninv_T`) needed by the
@@ -632,7 +632,13 @@ def run_setup(
     T = jnp.asarray(T)
 
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    Ninv_d = Ninv @ vis_noisy
+    Ninv = jnp.asarray(Ninv)
+    if Ninv.ndim == 1:
+        Ninv_d = Ninv * vis_noisy
+    elif Ninv.ndim == 2:
+        Ninv_d = Ninv @ vis_noisy
+    else:
+        raise ValueError("Loaded Ninv must be 1D (diag vector) or 2D (matrix).")
     dbar = jnp.conj(T).T @ Ninv_d
     d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
 
@@ -693,7 +699,7 @@ def run_setup(
         n_power_params=n_power_params,
     )
 
-    # Return one object containing both configs and diagnostics needed by run.py.
+    # Return one object containing both configs and diagnostics needed by run_inference.
     return SetupResult(
         likelihood_class=likelihood_class,
         prior_class=prior_class,

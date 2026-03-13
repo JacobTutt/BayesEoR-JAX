@@ -104,7 +104,14 @@ class MaximumAPosteriori:
                 t_matrix = t_matrix.todense()
             t_matrix = jnp.asarray(t_matrix)
 
-            ninv_d = ninv @ jnp.asarray(vis_noisy)
+            ninv = jnp.asarray(ninv)
+            vis_noisy = jnp.asarray(vis_noisy)
+            if ninv.ndim == 1:
+                ninv_d = ninv * vis_noisy
+            elif ninv.ndim == 2:
+                ninv_d = ninv @ vis_noisy
+            else:
+                raise ValueError("Loaded Ninv must be 1D (diag vector) or 2D (matrix).")
             dbar = jnp.conj(t_matrix).T @ ninv_d
             d_ninv_d = jnp.real(jnp.vdot(vis_noisy, ninv_d))
 

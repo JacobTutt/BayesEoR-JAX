@@ -20,7 +20,6 @@ from astropy.constants import c
 from .dft_funcs import (
     inverse_udft_1d_rect,
     build_nudft_matrix,
-    reorder_fuv_to_uvf,
 )
 from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
@@ -851,29 +850,29 @@ class BuildMatrices:
 
     def build_Ninv(self) -> jnp.ndarray:
         """
-        Build the inverse noise covariance matrix N^{-1}.
+        Build the inverse noise covariance diagonal (vector form).
 
         Returns
         -------
         Ninv : jnp.ndarray
-            Dense diagonal matrix of shape (n_vis, n_vis), where
+            1D vector of shape (n_vis,) containing diag(N^{-1}), where
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return jnp.diag(1.0 / sigma_sq)
+        return 1.0 / sigma_sq
 
     def build_N(self) -> jnp.ndarray:
         """
-        Build the noise covariance matrix N.
+        Build the noise covariance diagonal (vector form).
 
         Returns
         -------
         N : jnp.ndarray
-            Dense diagonal matrix of shape (n_vis, n_vis), where
+            1D vector of shape (n_vis,) containing diag(N), where
             n_vis = n_freq * n_t * n_bls.
         """
         sigma_sq = self._sigma_squared_array()
-        return jnp.diag(sigma_sq)    
+        return sigma_sq
 
     # ------------------
     # Build T^H N^{-1} T
@@ -888,7 +887,8 @@ class BuildMatrices:
         T : jnp.ndarray
             Forward operator with shape (n_vis, n_params_eta).
         Ninv : jnp.ndarray
-            Inverse noise covariance with shape (n_vis, n_vis).
+            Inverse noise covariance diagonal in vector form with
+            shape (n_vis,), holding diag(N^{-1}).
 
         Returns
         -------
@@ -897,8 +897,7 @@ class BuildMatrices:
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
         
-        T = jnp.asarray(T)
-        Ninv_T = jnp.asarray(Ninv) @ T
+        Ninv_T = Ninv[:, None] * T
 
         # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
         return jnp.conj(T).T @ Ninv_T
@@ -1017,8 +1016,9 @@ class BuildMatrices:
         This uses a disk-first workflow to avoid keeping large matrices in
         memory longer than required.
         """
-        # Ensure prerequisites exist on disk.
+        # Ensure T exists on disk.
         self.build_matrix_if_not_here("T")
+        # Ensure Ninv exists on disk.
         self.build_matrix_if_not_here("Ninv")
 
         # Build dense T_Ninv_T only if absent.
