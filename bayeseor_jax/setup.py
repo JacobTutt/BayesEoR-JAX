@@ -293,7 +293,7 @@ def run_setup(
     fit_for_monopole: bool = False,
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
-    beta_fg: list[float] | None = None,
+    beta_fg: list[float] = [2.63, 2.82],
     # Frequency / time
     n_freq: int | None = None,
     f0_mhz: float | None = None,
@@ -435,6 +435,8 @@ def run_setup(
         n_v_fg = n_u_fg
     if fov_fg is None:
         fov_fg = fov_eor
+    if len(telescope_latlonalt) != 3:
+        raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
     du_eor, dv_eor = _resolve_uv_spacing(
         fov_deg=float(fov_eor),
         du=du_eor,

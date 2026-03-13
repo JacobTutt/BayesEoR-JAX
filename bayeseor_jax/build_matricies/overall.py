@@ -174,7 +174,7 @@ class BuildMatrices:
         dv_fg: float,
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
-        beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
+        beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
@@ -219,7 +219,12 @@ class BuildMatrices:
         self.dv_fg = dv_fg
         self.n_modes_fg = n_modes_fg
         self.n_powerlaws_fg = n_powerlaws_fg
-        self.beta_fg = beta_fg if beta_fg is not None else [2.63, 2.82]
+        if beta_fg is None:
+            self.beta_fg = [2.63, 2.82]
+        elif np.isscalar(beta_fg):
+            self.beta_fg = [float(beta_fg)]
+        else:
+            self.beta_fg = list(beta_fg)
         self.fit_for_monopole = fit_for_monopole
         # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)

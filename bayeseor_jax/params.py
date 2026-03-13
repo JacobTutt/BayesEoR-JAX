@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+
 from jsonargparse import ActionConfigFile, ArgumentParser
 
 
@@ -274,27 +276,8 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--effective-noise-path", type=str, help="Path to per-visibility effective-noise array.")
 
     def parse_args(self, args_str=None):
-        """Parse arguments and apply derived defaults."""
+        """Parse arguments and apply lightweight normalization."""
         args = super().parse_args(args_str)
-
-        if args.n_v_eor is None:
-            args.n_v_eor = args.n_u_eor
-        if args.n_u_fg is None:
-            args.n_u_fg = args.n_u_eor
-        if args.n_v_fg is None:
-            args.n_v_fg = args.n_u_fg
-        if args.fov_fg is None:
-            args.fov_fg = args.fov_eor
-        if args.n_eta is None:
-            args.n_eta = args.n_freq
-
-        if len(args.telescope_latlonalt) != 3:
-            raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
-
-        if args.n_powerlaws_fg is None:
-            args.n_powerlaws_fg = len(args.beta_fg) if args.n_modes_fg > 0 else 0
-        if args.n_modes_fg > args.n_powerlaws_fg and args.n_powerlaws_fg > 0:
-            args.n_modes_fg = args.n_powerlaws_fg
 
         if args.beam_type:
             args.beam_type = args.beam_type.lower()
