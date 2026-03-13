@@ -221,12 +221,22 @@ def get_vis_data(
 
         # In this mode, `n_freq/f0/df` define the analysis band explicitly.
         freqs_hz = (float(f0_mhz) + float(df_mhz) * np.arange(int(n_freq), dtype=float)) * 1e6
-        if jd_center is None:
-            raise ValueError("jd_center is required for preprocessed .npy inputs")
-        jds = Time(float(jd_center), format="jd") + np.arange(
-            -(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2
-        ) * (float(d_t) / 86400.0)
-        jds = jds.jd
+        if jd_min is not None:
+            # Old-pipeline compatible mode: construct times from lower bound.
+            jds = Time(float(jd_min), format="jd") + np.arange(int(n_t), dtype=float) * (
+                float(d_t) / 86400.0
+            )
+            jds = jds.jd
+        elif jd_center is not None:
+            # Centered-window mode around jd_center.
+            jds = Time(float(jd_center), format="jd") + np.arange(
+                -(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2
+            ) * (float(d_t) / 86400.0)
+            jds = jds.jd
+        else:
+            raise ValueError(
+                "One of jd_min or jd_center is required for preprocessed .npy inputs"
+            )
         dt = float(d_t)
     else:
         raise ValueError(f"Unsupported data_path suffix '{data_path.suffix}'")
@@ -301,7 +311,7 @@ def run_setup(
     n_eta: int | None = None,
     n_t: int = 1,
     d_t: float | None = None,
-    jd_center: float = 2461040.5,
+    jd_center: float | None = None,
     # Sky / beam
     nside: int = 256,
     fov_eor: float = 10.0,
@@ -382,7 +392,7 @@ def run_setup(
         Frequency-axis setup (overridden by data-driven values in raw mode).
     n_eta : int, optional
         Number of line-of-sight Fourier modes. Defaults to ``n_freq``.
-    n_t, d_t, jd_center : optional
+    n_t, d_t, jd_min, jd_center : optional
         Time-axis controls.
 
     nside, fov_eor, fov_fg, telescope_latlonalt : optional

@@ -100,7 +100,9 @@ class BayesEoRParser(ArgumentParser):
     d_t : float, optional
         Integration time in seconds. Defaults to None.
     jd_center : float, optional
-        Central Julian date. Defaults to 2461040.5.
+        Central Julian date used for centered time-window selection in raw
+        pyuvdata mode. In preprocessed ``.npy`` mode, use this or ``jd_min``
+        to define the time axis. Defaults to ``None``.
     nside : int
         HEALPix ``nside`` resolution parameter.
     fov_eor : float
@@ -146,7 +148,9 @@ class BayesEoRParser(ArgumentParser):
     n_freqs_select : int, optional
         Number of frequency channels to keep after downselect.
     jd_idx_min, jd_min, jd_center : optional
-        Time downselect controls for raw pyuvdata ingestion.
+        Time controls. In raw pyuvdata mode they define downselect behavior;
+        in preprocessed ``.npy`` mode use ``jd_min`` or ``jd_center`` to
+        anchor the reconstructed time axis.
     n_times_select : int, optional
         Number of time integrations to keep after downselect.
     form_pi : bool, optional
@@ -232,7 +236,7 @@ class BayesEoRParser(ArgumentParser):
         # Time / sky geometry
         self.add_argument("--n-t", type=int, default=1, help="Number of time integrations.")
         self.add_argument("--d-t", type=float, help="Integration time in seconds.")
-        self.add_argument("--jd-center", type=float, default=2461040.5, help="Central Julian date.")
+        self.add_argument("--jd-center", type=float, default=None, help="Central Julian date for centered time-window selection (raw mode) or centered time-axis anchor (.npy mode).")
         self.add_argument("--nside", type=int, required=True, help="HEALPix nside.")
         self.add_argument("--fov-eor", type=float, required=True, help="Circular EoR FoV in degrees.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")
@@ -259,7 +263,7 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--freq-center", type=float, help="Central frequency in Hz for downselect.")
         self.add_argument("--n-freqs-select", type=int, help="Number of frequencies to keep.")
         self.add_argument("--jd-idx-min", type=int, help="Minimum time index for downselect.")
-        self.add_argument("--jd-min", type=float, help="Minimum Julian date for downselect.")
+        self.add_argument("--jd-min", type=float, help="Minimum Julian date for downselect (raw mode) or time-axis anchor (.npy mode).")
         self.add_argument("--n-times-select", type=int, help="Number of times to keep.")
         self.add_argument("--form-pi", action="store_true", dest="form_pi", default=True, help="Form pseudo-Stokes I visibilities.")
         self.add_argument("--no-form-pi", action="store_false", dest="form_pi", help=argparse.SUPPRESS)
