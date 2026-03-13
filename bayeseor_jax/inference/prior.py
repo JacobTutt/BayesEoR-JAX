@@ -188,6 +188,35 @@ class PhiInverse:
         self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
         self.inverse_lw_power = inverse_lw_power
 
+    def evaluate(self, theta_power_linear: jax.Array) -> jax.Array:
+        """
+        Build diagonal prior precision ``Phi^{-1}`` for current power amplitudes.
+
+        Parameters
+        ----------
+        theta_power_linear : jax.Array
+            Linear-space power-spectrum amplitudes for each non-empty k-bin.
+
+        Returns
+        -------
+        jax.Array
+            Diagonal precision vector with EoR entries followed by FG/LSSM
+            entries.
+        """
+        safe_theta = jnp.maximum(
+            theta_power_linear, jnp.finfo(theta_power_linear.dtype).tiny
+        )
+        poweri_per_bin = self.power_norm_per_bin / safe_theta
+
+        idx = self.kbin_index_per_voxel
+        valid = idx >= 0
+        idx_clip = jnp.clip(idx, 0, poweri_per_bin.shape[0] - 1)
+        phi_eor = jnp.where(valid, poweri_per_bin[idx_clip], 0.0)
+
+        n_fg = self.n_par - self.n_eor_voxels
+        phi_fg = jnp.full((n_fg,), self.inverse_lw_power, dtype=phi_eor.dtype)
+        return jnp.concatenate([phi_eor, phi_fg], axis=0)
+
 
 def build_kbin_index_per_voxel(
     bin_id_per_k_mode: jax.Array,
@@ -238,22 +267,3 @@ def theta_power_to_linear(
     mask = jnp.asarray(uniform_priors, dtype=bool)
     return jnp.where(mask, theta_power, jnp.power(10.0, theta_power))
 
-
-def build_phi_inverse(theta_power_linear: jax.Array, cfg: PhiInverse) -> jax.Array:
-    """
-    Construct diagonal prior precision ``Phi^{-1}`` for latent coefficients.
-
-    The first ``n_eor_voxels`` entries follow the binned EoR power model and
-    the remaining entries (FG/LSSM) are assigned ``inverse_lw_power``.
-    """
-    safe_theta = jnp.maximum(theta_power_linear, jnp.finfo(theta_power_linear.dtype).tiny)
-    poweri_per_bin = cfg.power_norm_per_bin / safe_theta
-
-    idx = cfg.kbin_index_per_voxel
-    valid = idx >= 0
-    idx_clip = jnp.clip(idx, 0, poweri_per_bin.shape[0] - 1)
-    phi_eor = jnp.where(valid, poweri_per_bin[idx_clip], 0.0)
-
-    n_fg = cfg.n_par - cfg.n_eor_voxels
-    phi_fg = jnp.full((n_fg,), cfg.inverse_lw_power, dtype=phi_eor.dtype)
-    return jnp.concatenate([phi_eor, phi_fg], axis=0)

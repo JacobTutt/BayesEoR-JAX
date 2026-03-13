@@ -22,7 +22,6 @@ from .inference import (
     PhiInverse,
     Prior,
     build_kbin_index_per_voxel,
-    build_phi_inverse,
     compute_power_norm_per_bin,
     theta_power_to_linear,
 )
@@ -52,7 +51,6 @@ __all__ = [
     "PhiInverse",
     "Prior",
     "build_kbin_index_per_voxel",
-    "build_phi_inverse",
     "compute_power_norm_per_bin",
     "load_numpy_dict",
     "parse_uprior_inds",

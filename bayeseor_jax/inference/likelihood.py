@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from .prior import PhiInverse, Prior, build_phi_inverse, theta_power_to_linear
+from .prior import PhiInverse, Prior, theta_power_to_linear
 
 
 class Likelihood:
@@ -23,9 +23,9 @@ class Likelihood:
         Scalar ``d^H N^{-1} d``.
     n_data : int
         Number of data samples contributing to the noise normalization term.
-    phi_cfg : PhiInverse
+    phi_inv_class : PhiInverse
         Prior-precision construction settings.
-    prior_cfg : Prior
+    prior_class : Prior
         Sampler-space prior configuration used to evaluate the full log density.
     uniform_priors : jax.Array, optional
         Boolean mask over sampled power parameters where True entries are
@@ -45,25 +45,20 @@ class Likelihood:
         dbar: jax.Array,
         d_ninv_d: float,
         n_data: int,
-        phi_cfg: PhiInverse,
-        prior_cfg: Prior,
+        phi_inv_class: PhiInverse,
+        prior_class: Prior,
         uniform_priors: jax.Array | None = None,
         intrinsic_noise_fitting: bool = False,
         power_param_start: int = 0,
         n_power_params: int = 0,
     ) -> None:
-        # Ensure dense JAX arrays for the core likelihood linear algebra path.
-        if hasattr(t_ninv_t, "todense"):
-            t_ninv_t = t_ninv_t.todense()
-        if hasattr(dbar, "todense"):
-            dbar = dbar.todense()
 
         self.t_ninv_t = jnp.asarray(t_ninv_t)
         self.dbar = jnp.asarray(dbar)
         self.d_ninv_d = jnp.asarray(d_ninv_d)
         self.n_data = n_data
-        self.phi_cfg = phi_cfg
-        self.prior_cfg = prior_cfg
+        self.phi_inv_class = phi_inv_class
+        self.prior_class = prior_class
         if uniform_priors is None:
             self.uniform_priors = jnp.zeros((n_power_params,), dtype=bool)
         else:
@@ -107,7 +102,7 @@ class Likelihood:
         # Convert sampled power parameters into linear-space amplitudes.
         power_linear = theta_power_to_linear(theta_power, self.uniform_priors)
         # Build diagonal prior precision Phi^{-1} for latent linear coefficients.
-        phi_i = build_phi_inverse(power_linear, self.phi_cfg)
+        phi_i = self.phi_inv_class.evaluate(power_linear)
 
         # Apply intrinsic-noise scaling to compressed normal-equation terms.
         t_ninv_t_scaled = jax.lax.cond(
@@ -159,4 +154,4 @@ class Likelihood:
         This folds the sampler-space prior into the marginalized Gaussian
         objective so the returned value matches the old single-call target.
         """
-        return self.log_likelihood(theta) + self.prior_cfg.logprior(theta)
+        return self.log_likelihood(theta) + self.prior_class.logprior(theta)

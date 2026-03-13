@@ -15,7 +15,6 @@ from astropy.time import Time
 # from jax.experimental import sparse
 from numpy.typing import ArrayLike
 
-from ..inference.prior import build_phi_inverse
 from ..params import BayesEoRParser
 from ..setup import SetupResult, run_setup
 
@@ -156,7 +155,7 @@ class MaximumAPosteriori:
         log_det_sigma : jax.Array
             Log determinant of ``Sigma``.
         """
-        phi_i = build_phi_inverse(jnp.asarray(dmps), self.phi_cfg)
+        phi_i = self.phi_cfg.build(jnp.asarray(dmps))
         sigma = self.likelihood.t_ninv_t + jnp.diag(phi_i)
         chol = jnp.linalg.cholesky(sigma)
         y = jsp.linalg.solve_triangular(chol, self.likelihood.dbar, lower=True)
@@ -205,7 +204,7 @@ class MaximumAPosteriori:
         if ps is None and dmps is None:
             raise ValueError("One of 'ps' or 'dmps' must not be None")
         dmps = self.calculate_dmps(ps=ps, dmps=dmps)
-        phi_i = build_phi_inverse(jnp.asarray(dmps), self.phi_cfg)
+        phi_i = self.phi_cfg.build(jnp.asarray(dmps))
         return np.asarray(phi_i)
 
     def calculate_dmps(
