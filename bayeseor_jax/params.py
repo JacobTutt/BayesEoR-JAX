@@ -11,11 +11,11 @@ class BayesEoRParser(ArgumentParser):
     """
     Command line argument parser class for BayesEoR-JAX analysis parameters.
 
-    For more information on command line syntax, run:
+    For a minimal runnable example using this parser, see:
 
     .. code-block:: bash
 
-        python run-analysis.py --help
+        python examples/run_analysis_example.py
 
     Attributes
     ----------
