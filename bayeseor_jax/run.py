@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import blackjax
 from anesthetic import NestedSamples
@@ -39,17 +40,16 @@ def run(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prior_cfg = setup_result.prior_cfg
-    likelihood_cfg = setup_result.likelihood_cfg
-    n_dim = int(prior_cfg.bounds.shape[0])
+    prior_class = setup_result.prior_class
+    likelihood_class = setup_result.likelihood_class
+    n_dim = int(prior_class.bounds_log.shape[0])
 
-    n_live = max(n_dim + 2, int(np.ceil(n_live_scale_factor * n_dim)))
-    num_inner_steps = max(1, int(np.ceil(num_inner_scale_factor * n_dim)))
-    num_delete = max(1, int(np.floor(delete_scale_factor * n_live)))
-    num_delete = min(num_delete, n_live - 1)
+    n_live = jnp.ceil(n_live_scale_factor * n_dim)
+    num_inner_steps = jnp.ceil(num_inner_scale_factor * n_dim)
+    num_delete = jnp.floor(delete_scale_factor * n_live)
 
-    logprior_fn = prior_cfg.logprior
-    loglikelihood_fn = likelihood_cfg.log_likelihood
+    logprior_fn = prior_class.logprior
+    loglikelihood_fn = likelihood_class.log_likelihood
 
     ns_algo = blackjax.nss(
         logprior_fn=logprior_fn,
@@ -60,7 +60,7 @@ def run(
 
     rng_key = jax.random.PRNGKey(int(random_key))
     rng_key, init_key = jax.random.split(rng_key)
-    initial_particles = prior_cfg.sample_from_priors(init_key, n_live)
+    initial_particles = prior_class.sample_from_priors(init_key, n_live)
     state = ns_algo.init(initial_particles)
 
     @jax.jit
