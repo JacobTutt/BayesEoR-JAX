@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import blackjax
 from anesthetic import NestedSamples
 from blackjax.ns.utils import finalise, log_weights
+from blackjax.ns import adaptive as ns_adaptive
+from blackjax.ns import nss as ns_nss
 from tqdm.auto import tqdm
 
 from .setup import SetupResult
@@ -25,8 +26,8 @@ def run_inference(
     out_dir: Path | str,
     random_key: int = 0,
     n_live_scale_factor: float = 25.0,
-    num_inner_scale_factor: float = 12.0,
-    delete_scale_factor: float = 0.1,
+    num_inner_scale_factor: float = 3.0,
+    delete_scale_factor: float = 0.025,
     stop_threshold: float = -3.0,
 ) -> dict[str, Any]:
     """
@@ -54,6 +55,11 @@ def run_inference(
     dict[str, Any]
         Run summary containing dimensions, sampler settings, termination stats,
         evidence estimates, and output file paths.
+
+    Notes
+    -----
+    The initial NS state is constructed with a scan-based evaluator to reduce
+    peak memory during first likelihood/prior evaluation of live points.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -62,22 +68,48 @@ def run_inference(
     likelihood_class = setup_result.likelihood_class
     n_dim = int(prior_class.bounds_log.shape[0])
 
-    n_live = jnp.ceil(n_live_scale_factor * n_dim)
-    num_inner_steps = jnp.ceil(num_inner_scale_factor * n_dim)
-    num_delete = jnp.floor(delete_scale_factor * n_live)
+    n_live = int(np.ceil(n_live_scale_factor * n_dim))
+    num_inner_steps = int(np.ceil(num_inner_scale_factor * n_dim))
+    num_delete = max(1, int(np.floor(delete_scale_factor * n_live)))
 
+    # Configure the nested sampler; `step(...)` uses these callbacks/settings.
     ns_algo = blackjax.nss(
         logprior_fn=prior_class.logprior,
         loglikelihood_fn=likelihood_class.log_likelihood,
         num_delete=num_delete,
         num_inner_steps=num_inner_steps,
     )
-
+    # Draw initial live points from the prior.
     rng_key = jax.random.PRNGKey(int(random_key))
     rng_key, init_key = jax.random.split(rng_key)
     initial_particles = prior_class.sample_from_priors(init_key, n_live)
-    state = ns_algo.init(initial_particles)
 
+    # Build the initial NS state with lower memory demand by evaluating particles 
+    # in a lax scan rather than vmap.
+    def scan_eval(fn):
+        def eval_particles(particles):
+            _, values = jax.lax.scan(
+                lambda _, particle: (None, fn(particle)),
+                None,
+                particles,
+            )
+            return values
+
+        return eval_particles
+
+    # Using the lax scan evaluators derived the prior and likelihood functions
+    # for all intial particles
+    state = ns_adaptive.init(
+        particles=initial_particles,
+        logprior_fn=scan_eval(prior_class.logprior),
+        loglikelihood_fn=scan_eval(likelihood_class.log_likelihood),
+        update_inner_kernel_params_fn=ns_nss.compute_covariance_from_particles,
+    )
+
+    # BlackJaX's NS one step function:
+    # - Proposes new live points for all num_delete dead points with num_inner_steps of MCMC.
+    # - Evaluates the likelihood and prior for the new live points.
+    # - Updates the NS state with the new live points and the dead points that were replaced.
     @jax.jit
     def one_step(carry, _):
         state_in, key_in = carry
@@ -85,6 +117,7 @@ def run_inference(
         state_out, dead_info = ns_algo.step(subkey, state_in)
         return (state_out, key_in), dead_info
 
+    # Continue iterating until the log-evidence convergence criterion is met.  
     dead = []
     n_iter = 0
     with tqdm(desc="Dead points", unit=" dead points") as pbar:
@@ -94,17 +127,19 @@ def run_inference(
             n_iter += 1
             pbar.update(num_delete)
 
+    # Finalise the run and draw weight realisations for log-evidence uncertainty.
     with jax.default_device(jax.devices("cpu")[0]):
         final_state = finalise(state, dead)
         rng_key, weight_key = jax.random.split(rng_key)
         log_w = log_weights(weight_key, final_state, shape=100)
         logzs = jax.scipy.special.logsumexp(log_w, axis=0)
 
+        # Materialise posterior samples/likelihood arrays for downstream output.
         particles = np.array(final_state.particles)
         logl = np.array(final_state.loglikelihood)
         logl_birth = np.array(final_state.loglikelihood_birth)
 
-    # Save an Anesthetic-compatible chain file, matching the REACH pipeline output pattern.
+    # Save nested sampling results in Anesthetic-compatible format
     n_dim = int(particles.shape[1])
     param_names = [f"theta_{i}" for i in range(n_dim)]
     nested_samples = NestedSamples(
