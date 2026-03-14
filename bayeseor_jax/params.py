@@ -36,7 +36,7 @@ class BayesEoRParser(ArgumentParser):
     array_save_directory : str, optional
         Directory for matrix storage. Defaults to ``"./matrices/"``.
     output_dir : str, optional
-        Directory for sampler outputs. Defaults to ``"./chains/"``.
+        Directory for sampler outputs. Defaults to ``"./BlackJAXOutputs/"``.
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
     uniform_priors : list of bool/int, optional
@@ -50,9 +50,9 @@ class BayesEoRParser(ArgumentParser):
     n_live_scale_factor : float, optional
         Multiplier converting ``n_dim`` to live-point count. Defaults to 25.
     num_inner_scale_factor : float, optional
-        Multiplier converting ``n_dim`` to inner-step count. Defaults to 12.
+        Multiplier converting ``n_dim`` to inner-step count. Defaults to 3.
     delete_scale_factor : float, optional
-        Fraction of live points replaced per NS iteration. Defaults to 0.1.
+        Fraction of live points replaced per NS iteration. Defaults to 0.025.
     stop_threshold : float, optional
         Stop when ``logZ_live - logZ < stop_threshold``. Defaults to -3.
     random_key : int, optional
@@ -208,8 +208,8 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--inverse-lw-power", type=float, default=1e-16, help="Inverse FG prior power.")
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
-        self.add_argument("--num-inner-scale-factor", type=float, default=12.0, help="Inner steps = factor * n_dim.")
-        self.add_argument("--delete-scale-factor", type=float, default=0.1, help="Fraction of live points deleted per NS step.")
+        self.add_argument("--num-inner-scale-factor", type=float, default=3.0, help="Inner steps = factor * n_dim.")
+        self.add_argument("--delete-scale-factor", type=float, default=0.025, help="Fraction of live points deleted per NS step.")
         self.add_argument("--stop-threshold", type=float, default=-3.0, help="Stop when logZ_live - logZ is below this threshold.")
         self.add_argument("--random-key", type=int, default=0, help="PRNG seed for nested sampling.")
 
