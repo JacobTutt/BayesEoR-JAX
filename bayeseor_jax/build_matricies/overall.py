@@ -6,7 +6,6 @@ operators to build the dense Finv/Fprime blocks used downstream.
 """
 import os
 import time
-from uuid import uuid4
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -29,6 +28,17 @@ from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
 from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
+from .build_utils import (
+    _dense_matrix_path as _dense_matrix_path_impl,
+    _prepare_memmap_output as _prepare_memmap_output_impl,
+    _wait_for_file as _wait_for_file_impl,
+    check_if_matrix_exists as check_if_matrix_exists_impl,
+    get_T_component_layout as get_T_component_layout_impl,
+    load_dense_matrix as load_dense_matrix_impl,
+    load_matrix as load_matrix_impl,
+    save_dense_matrix as save_dense_matrix_impl,
+    save_matrix as save_matrix_impl,
+)
 from .jax_grid import MeshManager
 
 class BuildMatrices:
@@ -723,8 +733,11 @@ class BuildMatrices:
     #     """
     #     Finv_Fprime = self.build_Finv_Fprime()
     #     Fz = self.build_Fz()
-
     #     return Finv_Fprime @ Fz
+
+    # ------------------------
+    # Direct construction of T 
+    # ------------------------
 
     def _build_T_directly_impl(self) -> jnp.ndarray:
         r"""
@@ -867,210 +880,15 @@ class BuildMatrices:
             with self.mm.mesh:
                 return build_t_fn(self)
         return build_t_fn(self)
-
-    # ------------------------
-    # Noise covariance matrices
-    # ------------------------
-    def _sigma_squared_array(self) -> jnp.ndarray:
-        """
-        Build the per-visibility noise variance vector for the current settings.
-
-        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
-        """
-        if self.effective_noise is not None:
-            return jnp.abs(self.effective_noise) ** 2
-
-        if self.sigma is None:
-            raise ValueError("sigma must be provided when effective_noise is None.")
-
-        # Expect bl_red_array shaped (n_t, n_bls) or (n_t, n_bls, 1).
-        red = jnp.asarray(self.bl_red_array)
-        if red.ndim == 3 and red.shape[-1] == 1:
-            red = red[..., 0]
-        if red.shape[0] != self.n_t or red.shape[1] != self.nbls:
-            raise ValueError("bl_red_array must have shape (n_t, n_bls) or (n_t, n_bls, 1).")
-
-        # Expand redundancy over frequency: (n_t, n_freq, n_bls) then flatten.
-        red_tf = jnp.repeat(red[:, jnp.newaxis, :], self.n_freq, axis=1)
-        red_tf = red_tf.reshape(-1)
-
-        sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
-        return (sigma_redundancy ** 2).astype(jnp.complex128)
-
-    def build_Ninv(self) -> jnp.ndarray:
-        """
-        Build the inverse noise covariance diagonal (vector form).
-
-        Returns
-        -------
-        Ninv : jnp.ndarray
-            1D vector of shape (n_vis,) containing diag(N^{-1}), where
-            n_vis = n_freq * n_t * n_bls.
-        """
-        sigma_sq = self._sigma_squared_array()
-        return 1.0 / sigma_sq
-
-    def build_N(self) -> jnp.ndarray:
-        """
-        Build the noise covariance diagonal (vector form).
-
-        Returns
-        -------
-        N : jnp.ndarray
-            1D vector of shape (n_vis,) containing diag(N), where
-            n_vis = n_freq * n_t * n_bls.
-        """
-        sigma_sq = self._sigma_squared_array()
-        return sigma_sq
-
-    # ------------------
-    # Build T^H N^{-1} T
-    # ------------------
-
-    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
-        r"""
-        Build T^H N^{-1} T.
-
-        Parameters
-        ----------
-        T : jnp.ndarray
-            Forward operator with shape (n_vis, n_params_eta).
-        Ninv : jnp.ndarray
-            Inverse noise covariance diagonal in vector form with
-            shape (n_vis,), holding diag(N^{-1}).
-
-        Returns
-        -------
-        T_Ninv_T : jnp.ndarray
-            Dense matrix with shape (n_params_eta, n_params_eta), where 
-            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
-        """
-        
-        Ninv_T = Ninv[:, None] * T
-
-        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
-        return jnp.conj(T).T @ Ninv_T
-
-    # --------------------
-    # Matrix save/load API
-    # --------------------
-    def _matrix_path(self, matrix_name: str) -> Path:
-        """Return the .npz path for a stored sparse matrix."""
-        return self.array_save_directory / f"{matrix_name}.npz"
-
-    def _dense_matrix_path(self, matrix_name: str) -> Path:
-        """Return the .npy path for a stored dense matrix."""
-        return self.array_save_directory / f"{matrix_name}.npy"
+    
+    # -----------------------------------------------
+    # Direct construction of T (stepwise UV chunking)
+    # -----------------------------------------------
 
     def get_T_component_layout(self) -> dict[str, dict[str, int]]:
         """Return the direct-T column layout for EoR and foreground components."""
-        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
-        eor_width = int(self.n_uv_eor * (self.n_eta - 1))
-        fg_eta0_width = int(n_non_mp)
-        fg_lssm_width = int(n_non_mp * self.n_modes_fg)
-        fg_mp_width = int((self.n_eta + self.n_modes_fg) if self.fit_for_monopole else 0)
-
-        col = 0
-        layout: dict[str, dict[str, int]] = {}
-        for name, width in (
-            ("eor", eor_width),
-            ("fg_eta0", fg_eta0_width),
-            ("fg_lssm", fg_lssm_width),
-            ("fg_monopole", fg_mp_width),
-        ):
-            layout[name] = {
-                "col_start": col,
-                "col_stop": col + width,
-            }
-            col += width
-        return layout
-
-    def check_if_matrix_exists(self, matrix_name: str) -> bool:
-        """Return True if a saved matrix exists on disk."""
-        # Sparse path support disabled.
-        # return self._matrix_path(matrix_name).exists() or self._dense_matrix_path(matrix_name).exists()
-        return self._dense_matrix_path(matrix_name).exists()
-
-    def _wait_for_file(self, path: Path, timeout_s: float = 120.0) -> None:
-        """Poll until a file becomes visible on the shared filesystem."""
-        deadline = time.time() + timeout_s
-        while not path.exists():
-            if time.time() > deadline:
-                raise TimeoutError(f"Timed out waiting for {path}")
-            time.sleep(0.2)
-
-    def _prepare_memmap_output(
-        self,
-        path: Path,
-        *,
-        shape: tuple[int, ...],
-        dtype: np.dtype,
-        sync_name: str,
-    ) -> np.memmap:
-        """
-        Create or attach to a shared `.npy` memmap output.
-
-        Process 0 creates the file and publishes a ready token. Other processes
-        attach after a distributed barrier or, for non-distributed runs, by
-        polling the ready token.
-        """
-        ready_path = path.with_suffix(path.suffix + ".ready")
-        token = uuid4().hex
-
-        if jax.process_index() == 0:
-            if ready_path.exists():
-                ready_path.unlink()
-            mm = np.lib.format.open_memmap(
-                path,
-                mode="w+",
-                dtype=dtype,
-                shape=shape,
-            )
-            del mm
-            ready_path.write_text(token)
-
-        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
-            multihost_utils.sync_global_devices(sync_name)
-        else:
-            self._wait_for_file(ready_path)
-            if ready_path.read_text().strip() != token:
-                raise RuntimeError(f"Unexpected ready token in {ready_path}")
-
-        return np.load(path, mmap_mode="r+")
-
-    # def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
-    #     """Save a BCOO matrix to disk as data/indices/shape npz."""
-    #     path = self._matrix_path(matrix_name)
-    #     np.savez(
-    #         path,
-    #         data=np.array(matrix.data),
-    #         indices=np.array(matrix.indices),
-    #         shape=np.array(matrix.shape, dtype=np.int64),
-    #     )
-
-    def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
-        """
-        Save a dense matrix to disk as `.npy`.
-
-        Distributed arrays are written shard-by-shard into a shared memmap so
-        that no process needs to gather the full global array.
-        """
-        path = self._dense_matrix_path(matrix_name)
-        if not hasattr(matrix, "addressable_shards"):
-            np.save(path, np.asarray(matrix))
-            return
-
-        mm = self._prepare_memmap_output(
-            path,
-            shape=tuple(int(dim) for dim in matrix.shape),
-            dtype=np.dtype(matrix.dtype),
-            sync_name=f"{matrix_name}-save-ready",
-        )
-        for shard in matrix.addressable_shards:
-            mm[shard.index] = np.asarray(shard.data)
-        mm.flush()
-        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
-            multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
+        return get_T_component_layout_impl(self)
+    
 
     def save_T_stepwise_row_memmap(
         self,
@@ -1219,15 +1037,156 @@ class BuildMatrices:
         elapsed = time.perf_counter() - t_start
         self.build_timings_seconds[f"{matrix_name}_stepwise_save"] = elapsed
         self._log_build(f"saved {matrix_name} stepwise in {elapsed:.3f} s")
+    
+
+    # ------------------------
+    # Noise covariance matrices
+    # ------------------------
+    def _sigma_squared_array(self) -> jnp.ndarray:
+        """
+        Build the per-visibility noise variance vector for the current settings.
+
+        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
+        """
+        if self.effective_noise is not None:
+            return jnp.abs(self.effective_noise) ** 2
+
+        if self.sigma is None:
+            raise ValueError("sigma must be provided when effective_noise is None.")
+
+        # Expect bl_red_array shaped (n_t, n_bls) or (n_t, n_bls, 1).
+        red = jnp.asarray(self.bl_red_array)
+        if red.ndim == 3 and red.shape[-1] == 1:
+            red = red[..., 0]
+        if red.shape[0] != self.n_t or red.shape[1] != self.nbls:
+            raise ValueError("bl_red_array must have shape (n_t, n_bls) or (n_t, n_bls, 1).")
+
+        # Expand redundancy over frequency: (n_t, n_freq, n_bls) then flatten.
+        red_tf = jnp.repeat(red[:, jnp.newaxis, :], self.n_freq, axis=1)
+        red_tf = red_tf.reshape(-1)
+
+        sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
+        return (sigma_redundancy ** 2).astype(jnp.complex128)
+
+    def build_Ninv(self) -> jnp.ndarray:
+        """
+        Build the inverse noise covariance diagonal (vector form).
+
+        Returns
+        -------
+        Ninv : jnp.ndarray
+            1D vector of shape (n_vis,) containing diag(N^{-1}), where
+            n_vis = n_freq * n_t * n_bls.
+        """
+        sigma_sq = self._sigma_squared_array()
+        return 1.0 / sigma_sq
+
+    def build_N(self) -> jnp.ndarray:
+        """
+        Build the noise covariance diagonal (vector form).
+
+        Returns
+        -------
+        N : jnp.ndarray
+            1D vector of shape (n_vis,) containing diag(N), where
+            n_vis = n_freq * n_t * n_bls.
+        """
+        sigma_sq = self._sigma_squared_array()
+        return sigma_sq
+
+    # ------------------
+    # Build T^H N^{-1} T
+    # ------------------
+
+    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
+        r"""
+        Build T^H N^{-1} T.
+
+        Parameters
+        ----------
+        T : jnp.ndarray
+            Forward operator with shape (n_vis, n_params_eta).
+        Ninv : jnp.ndarray
+            Inverse noise covariance diagonal in vector form with
+            shape (n_vis,), holding diag(N^{-1}).
+
+        Returns
+        -------
+        T_Ninv_T : jnp.ndarray
+            Dense matrix with shape (n_params_eta, n_params_eta), where 
+            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
+        """
+        
+        Ninv_T = Ninv[:, None] * T
+
+        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
+        return jnp.conj(T).T @ Ninv_T
+
+    # --------------------
+    # Matrix save/load API
+    # --------------------
+    # def _matrix_path(self, matrix_name: str) -> Path:
+    #     """Return the .npz path for a stored sparse matrix."""
+    #     return self.array_save_directory / f"{matrix_name}.npz"
+
+    def _dense_matrix_path(self, matrix_name: str) -> Path:
+        """Return the .npy path for a stored dense matrix."""
+        return _dense_matrix_path_impl(self, matrix_name)
+
+
+    def check_if_matrix_exists(self, matrix_name: str) -> bool:
+        """Return True if a saved matrix exists on disk."""
+        return check_if_matrix_exists_impl(self, matrix_name)
+
+    def _wait_for_file(self, path: Path, timeout_s: float = 120.0) -> None:
+        """Poll until a file becomes visible on the shared filesystem."""
+        _wait_for_file_impl(path, timeout_s=timeout_s)
+
+    def _prepare_memmap_output(
+        self,
+        path: Path,
+        *,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        sync_name: str,
+    ) -> np.memmap:
+        """
+        Create or attach to a shared `.npy` memmap output.
+
+        Process 0 creates the file and publishes a ready token. Other processes
+        attach after a distributed barrier or, for non-distributed runs, by
+        polling the ready token.
+        """
+        return _prepare_memmap_output_impl(
+            self,
+            path,
+            shape=shape,
+            dtype=dtype,
+            sync_name=sync_name,
+        )
+
+    # def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
+    #     """Save a BCOO matrix to disk as data/indices/shape npz."""
+    #     path = self._matrix_path(matrix_name)
+    #     np.savez(
+    #         path,
+    #         data=np.array(matrix.data),
+    #         indices=np.array(matrix.indices),
+    #         shape=np.array(matrix.shape, dtype=np.int64),
+    #     )
+
+    def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
+        """
+        Save a dense matrix to disk as `.npy`.
+
+        Distributed arrays are written shard-by-shard into a shared memmap so
+        that no process needs to gather the full global array.
+        """
+        save_dense_matrix_impl(self, matrix_name, matrix)
 
     def save_matrix(self, matrix_name: str, matrix) -> None:
         """Save a matrix, sparse as .npz or dense as .npy."""
-        # Sparse path support disabled.
-        # if isinstance(matrix, sparse.BCOO):
-        #     self.save_sparse_matrix(matrix_name, matrix)
-        # else:
-        #     self.save_dense_matrix(matrix_name, matrix)
-        self.save_dense_matrix(matrix_name, matrix)
+        save_matrix_impl(self, matrix_name, matrix)
 
     # def load_sparse_matrix(self, matrix_name: str) -> sparse.BCOO:
     #     """Load a BCOO matrix from disk."""
@@ -1240,21 +1199,11 @@ class BuildMatrices:
 
     def load_dense_matrix(self, matrix_name: str) -> jnp.ndarray:
         """Load a dense matrix from disk."""
-        path = self._dense_matrix_path(matrix_name)
-        return jnp.array(np.load(path))
+        return load_dense_matrix_impl(self, matrix_name)
 
     def load_matrix(self, matrix_name: str):
         """Load a matrix (sparse or dense) from disk."""
-        matrix = None
-        # Sparse path support disabled.
-        # if self._matrix_path(matrix_name).exists():
-        #     matrix = self.load_sparse_matrix(matrix_name)
-        # elif self._dense_matrix_path(matrix_name).exists():
-        if self._dense_matrix_path(matrix_name).exists():
-            matrix = self.load_dense_matrix(matrix_name)
-        else:
-            raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
-        return matrix
+        return load_matrix_impl(self, matrix_name)
 
     def build_matrix_if_not_here(self, matrix_name: str) -> None:
         r"""
