@@ -4,6 +4,10 @@ High-level orchestration for constructing model matrices and associated kernels.
 This module wires together UV/LMN model spaces, beam evaluation, and NUDFT
 operators to build the dense Finv/Fprime blocks used downstream.
 """
+import os
+import time
+from uuid import uuid4
+
 import jax
 jax.config.update("jax_enable_x64", True)
 
@@ -12,7 +16,7 @@ from typing import Optional, Sequence, Tuple, Union
 import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
-from jax.experimental import sparse
+from jax.experimental import multihost_utils, sparse
 from functools import partial
 
 from astropy.constants import c
@@ -158,6 +162,11 @@ class BuildMatrices:
     array_save_directory : str, optional
         Path to the directory where sparse matrices will be saved.
         Defaults to './matrices/'.
+    t_stepwise_eor_uv_chunk : int, optional
+        EoR UV chunk size used by the stepwise `.npy` T writer. Defaults to 128.
+    t_stepwise_fg_uv_chunk : int, optional
+        Foreground UV chunk size used by the stepwise `.npy` T writer.
+        Defaults to 128.
     """
 
 
@@ -201,6 +210,8 @@ class BuildMatrices:
         sigma: Optional[float] = None,
         effective_noise: Optional[jnp.ndarray] = None,
         array_save_directory: str = "./matrices/",
+        t_stepwise_eor_uv_chunk: int = 128,
+        t_stepwise_fg_uv_chunk: int = 128,
     ) -> None:
         
         # Store EoR UV-plane parameters.
@@ -273,6 +284,13 @@ class BuildMatrices:
         self.effective_noise = effective_noise
         self.array_save_directory = Path(array_save_directory)
         self.array_save_directory.mkdir(parents=True, exist_ok=True)
+        self.t_stepwise_eor_uv_chunk = int(t_stepwise_eor_uv_chunk)
+        self.t_stepwise_fg_uv_chunk = int(t_stepwise_fg_uv_chunk)
+        if self.t_stepwise_eor_uv_chunk < 1:
+            raise ValueError("t_stepwise_eor_uv_chunk must be >= 1")
+        if self.t_stepwise_fg_uv_chunk < 1:
+            raise ValueError("t_stepwise_fg_uv_chunk must be >= 1")
+        self.build_timings_seconds: dict[str, float] = {}
 
         # UV model space (EoR + FG rectilinear grids).
         self.uv_model_space = UV_ModelSpace(
@@ -319,6 +337,20 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
+
+    def _build_log_enabled(self) -> bool:
+        """Return True when matrix build/save progress logging is enabled."""
+        return os.environ.get("BAYESEOR_BUILD_LOG", "0").lower() not in {
+            "0",
+            "false",
+            "no",
+            "",
+        }
+
+    def _log_build(self, message: str) -> None:
+        """Emit a build/save progress message from process 0 when enabled."""
+        if self._build_log_enabled() and jax.process_index() == 0:
+            print(f"[BuildMatrices] {message}", flush=True)
 
 
     # ---------------------------
@@ -395,6 +427,23 @@ class BuildMatrices:
         )  # (n_bls, n_uv_eor)
 
         return Finv_Fprime_block_eor, Finv_Fprime_block_fg
+
+    def _beam_weighted_nudft_lmn_to_uvw_block(self, i_f: int, i_t: int) -> jnp.ndarray:
+        """
+        Build the beam-weighted LMN -> UVW operator for one (frequency, time) block.
+
+        This is the shared geometric core used by the direct ``T`` construction paths.
+        """
+        lmn_fg_it = self.lmn_model_space.lmn_fg[i_t, :, :]
+        uvw_irad_if = self.inst_uvw_irad[i_f, :, :]
+        nudft_lmn_to_uvw = build_nudft_matrix(
+            lmn_fg_it,
+            uvw_irad_if,
+            sign=+1,
+        )
+        nudft_lmn_to_uvw *= self.lmn_model_space.pixel_area_sr
+        beam_it = self.beam_response[i_f, i_t, :]
+        return nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]
 
     def _build_finv_fprime_blocks(self):
         """
@@ -913,11 +962,81 @@ class BuildMatrices:
         """Return the .npy path for a stored dense matrix."""
         return self.array_save_directory / f"{matrix_name}.npy"
 
+    def get_T_component_layout(self) -> dict[str, dict[str, int]]:
+        """Return the direct-T column layout for EoR and foreground components."""
+        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
+        eor_width = int(self.n_uv_eor * (self.n_eta - 1))
+        fg_eta0_width = int(n_non_mp)
+        fg_lssm_width = int(n_non_mp * self.n_modes_fg)
+        fg_mp_width = int((self.n_eta + self.n_modes_fg) if self.fit_for_monopole else 0)
+
+        col = 0
+        layout: dict[str, dict[str, int]] = {}
+        for name, width in (
+            ("eor", eor_width),
+            ("fg_eta0", fg_eta0_width),
+            ("fg_lssm", fg_lssm_width),
+            ("fg_monopole", fg_mp_width),
+        ):
+            layout[name] = {
+                "col_start": col,
+                "col_stop": col + width,
+            }
+            col += width
+        return layout
+
     def check_if_matrix_exists(self, matrix_name: str) -> bool:
         """Return True if a saved matrix exists on disk."""
         # Sparse path support disabled.
         # return self._matrix_path(matrix_name).exists() or self._dense_matrix_path(matrix_name).exists()
         return self._dense_matrix_path(matrix_name).exists()
+
+    def _wait_for_file(self, path: Path, timeout_s: float = 120.0) -> None:
+        """Poll until a file becomes visible on the shared filesystem."""
+        deadline = time.time() + timeout_s
+        while not path.exists():
+            if time.time() > deadline:
+                raise TimeoutError(f"Timed out waiting for {path}")
+            time.sleep(0.2)
+
+    def _prepare_memmap_output(
+        self,
+        path: Path,
+        *,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
+        sync_name: str,
+    ) -> np.memmap:
+        """
+        Create or attach to a shared `.npy` memmap output.
+
+        Process 0 creates the file and publishes a ready token. Other processes
+        attach after a distributed barrier or, for non-distributed runs, by
+        polling the ready token.
+        """
+        ready_path = path.with_suffix(path.suffix + ".ready")
+        token = uuid4().hex
+
+        if jax.process_index() == 0:
+            if ready_path.exists():
+                ready_path.unlink()
+            mm = np.lib.format.open_memmap(
+                path,
+                mode="w+",
+                dtype=dtype,
+                shape=shape,
+            )
+            del mm
+            ready_path.write_text(token)
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(sync_name)
+        else:
+            self._wait_for_file(ready_path)
+            if ready_path.read_text().strip() != token:
+                raise RuntimeError(f"Unexpected ready token in {ready_path}")
+
+        return np.load(path, mmap_mode="r+")
 
     # def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
     #     """Save a BCOO matrix to disk as data/indices/shape npz."""
@@ -930,9 +1049,176 @@ class BuildMatrices:
     #     )
 
     def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
-        """Save a dense matrix to disk as .npy."""
+        """
+        Save a dense matrix to disk as `.npy`.
+
+        Distributed arrays are written shard-by-shard into a shared memmap so
+        that no process needs to gather the full global array.
+        """
         path = self._dense_matrix_path(matrix_name)
-        np.save(path, np.array(matrix))
+        if not hasattr(matrix, "addressable_shards"):
+            np.save(path, np.asarray(matrix))
+            return
+
+        mm = self._prepare_memmap_output(
+            path,
+            shape=tuple(int(dim) for dim in matrix.shape),
+            dtype=np.dtype(matrix.dtype),
+            sync_name=f"{matrix_name}-save-ready",
+        )
+        for shard in matrix.addressable_shards:
+            mm[shard.index] = np.asarray(shard.data)
+        mm.flush()
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
+
+    def save_T_stepwise_row_memmap(
+        self,
+        *,
+        matrix_name: str = "T",
+        eor_uv_chunk: Optional[int] = None,
+        fg_uv_chunk: Optional[int] = None,
+    ) -> None:
+        """
+        Build and save ``T`` block-by-block over ``(time, frequency)`` row slices.
+
+        This path never materializes the full mixed ``T`` array. Instead, each
+        process builds the row blocks it owns and streams them directly into the
+        final `.npy` memmap.
+        """
+        path = self._dense_matrix_path(matrix_name)
+        layout = self.get_T_component_layout()
+        n_rows = int(self.n_t * self.n_freq * self.nbls)
+        n_cols = int(layout["fg_monopole"]["col_stop"])
+        eor_uv_chunk = max(1, int(self.t_stepwise_eor_uv_chunk if eor_uv_chunk is None else eor_uv_chunk))
+        fg_uv_chunk = max(1, int(self.t_stepwise_fg_uv_chunk if fg_uv_chunk is None else fg_uv_chunk))
+
+        mm = self._prepare_memmap_output(
+            path,
+            shape=(n_rows, n_cols),
+            dtype=np.dtype(np.complex128),
+            sync_name=f"{matrix_name}-stepwise-ready",
+        )
+
+        t_start = time.perf_counter()
+        process_index = int(jax.process_index())
+        process_count = int(jax.process_count())
+        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
+        eor_eta_count = int(self.n_eta - 1)
+        lssm_mode_count = int(self.n_modes_fg)
+
+        eor_basis = inverse_udft_1d_rect(
+            self.n_freq,
+            self.n_eta,
+            include_eta0=False,
+        ) * self.d_eta
+        eta0_basis = jnp.ones((self.n_freq, 1), dtype=jnp.complex128) * self.d_eta * self.n_eta
+        if self.n_modes_fg > 0:
+            lssm_basis = build_lssm_basis(
+                n_freq=self.n_freq,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            ) * self.d_eta * self.n_eta
+        else:
+            lssm_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
+
+        if self.fit_for_monopole:
+            mp_basis = inverse_udft_1d_rect(
+                n_freq=self.n_freq,
+                n_eta=self.n_eta,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            ) * self.d_eta
+            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
+            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
+        else:
+            mp_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
+
+        lmn_center_fg = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
+        lmn_center_eor = lmn_center_fg[:, self.lmn_model_space.eor_fg_shared_axis]
+
+        eor_uv_kernel = build_nudft_matrix(
+            self.uv_model_space.uv_eor,
+            lmn_center_eor,
+            sign=-1,
+        ) * (self.du_eor * self.dv_eor)
+
+        def fg_uv_kernel(uv_start: int, uv_stop: int) -> jnp.ndarray:
+            return build_nudft_matrix(
+                self.uv_model_space.uv_fg[:, uv_start:uv_stop],
+                lmn_center_fg,
+                sign=-1,
+            ) * (self.du_fg * self.dv_fg)
+
+        fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if self.fit_for_monopole else None
+
+        total_blocks = int(self.n_t * self.n_freq)
+        for block_index in range(process_index, total_blocks, process_count):
+            i_t = int(block_index // self.n_freq)
+            i_f = int(block_index % self.n_freq)
+            row0 = block_index * self.nbls
+            row1 = row0 + self.nbls
+
+            if jax.process_index() == 0 and (block_index % max(1, self.n_freq) == 0):
+                self._log_build(
+                    f"stepwise T save processing row block {block_index + 1}/{total_blocks}"
+                )
+
+            beam_block = self._beam_weighted_nudft_lmn_to_uvw_block(i_f, i_t).block_until_ready()
+            beam_block_eor = beam_block[:, self.lmn_model_space.eor_fg_shared_axis]
+
+            for uv0 in range(0, self.n_uv_eor, eor_uv_chunk):
+                uv1 = min(uv0 + eor_uv_chunk, self.n_uv_eor)
+                eor_block = jnp.dot(beam_block_eor, eor_uv_kernel[:, uv0:uv1]).block_until_ready()
+                t_eor_rows = (eor_block[..., None] * eor_basis[i_f][None, None, :]).reshape(
+                    self.nbls,
+                    (uv1 - uv0) * eor_eta_count,
+                )
+                col0 = int(layout["eor"]["col_start"]) + uv0 * eor_eta_count
+                col1 = col0 + (uv1 - uv0) * eor_eta_count
+                mm[row0:row1, col0:col1] = np.asarray(t_eor_rows)
+
+            for uv0 in range(0, n_non_mp, fg_uv_chunk):
+                uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
+                fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
+
+                eta0_rows = fg_block * eta0_basis[i_f, 0]
+                eta0_col0 = int(layout["fg_eta0"]["col_start"]) + uv0
+                eta0_col1 = eta0_col0 + (uv1 - uv0)
+                mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
+
+                if lssm_mode_count > 0:
+                    t_fg_lssm_rows = (
+                        fg_block[..., None] * lssm_basis[i_f][None, None, :]
+                    ).reshape(
+                        self.nbls,
+                        (uv1 - uv0) * lssm_mode_count,
+                    )
+                    lssm_col0 = int(layout["fg_lssm"]["col_start"]) + uv0 * lssm_mode_count
+                    lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
+                    mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
+
+            if self.fit_for_monopole and fg_mp_kernel is not None:
+                fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
+                t_fg_mp_rows = fg_mp_block * mp_basis[i_f][None, :]
+                mp_col0 = int(layout["fg_monopole"]["col_start"])
+                mp_col1 = int(layout["fg_monopole"]["col_stop"])
+                mm[row0:row1, mp_col0:mp_col1] = np.asarray(t_fg_mp_rows)
+
+            mm.flush()
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(f"{matrix_name}-stepwise-done")
+
+        elapsed = time.perf_counter() - t_start
+        self.build_timings_seconds[f"{matrix_name}_stepwise_save"] = elapsed
+        self._log_build(f"saved {matrix_name} stepwise in {elapsed:.3f} s")
 
     def save_matrix(self, matrix_name: str, matrix) -> None:
         """Save a matrix, sparse as .npz or dense as .npy."""
@@ -979,9 +1265,14 @@ class BuildMatrices:
         matrix_name : str
             Name of the matrix to build and save.
         """
-        if not self.check_if_matrix_exists(matrix_name):
-            matrix = self._build_matrix_by_name(matrix_name)
-            self.save_matrix(matrix_name, matrix)
+        if self.check_if_matrix_exists(matrix_name):
+            return
+        if matrix_name == "T":
+            self._log_build("saving T by stepwise row-block memmap without building monolithic T")
+            self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
+            return
+        matrix = self._build_matrix_by_name(matrix_name)
+        self.save_matrix(matrix_name, matrix)
 
     def _build_matrix_by_name(self, matrix_name: str):
         """Build a supported matrix by name."""
