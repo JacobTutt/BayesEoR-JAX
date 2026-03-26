@@ -4,7 +4,6 @@ High-level orchestration for constructing model matrices and associated kernels.
 This module wires together UV/LMN model spaces, beam evaluation, and NUDFT
 operators to build the dense Finv/Fprime blocks used downstream.
 """
-import os
 import time
 
 import jax
@@ -30,6 +29,7 @@ from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
 from .build_utils import (
     _dense_matrix_path as _dense_matrix_path_impl,
+    _log_build,
     _prepare_memmap_output as _prepare_memmap_output_impl,
     check_if_matrix_exists as check_if_matrix_exists_impl,
     get_T_component_layout as get_T_component_layout_impl,
@@ -344,20 +344,6 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
-
-    def _build_log_enabled(self) -> bool:
-        """Return True when matrix build/save progress logging is enabled."""
-        return os.environ.get("BAYESEOR_BUILD_LOG", "0").lower() not in {
-            "0",
-            "false",
-            "no",
-            "",
-        }
-
-    def _log_build(self, message: str) -> None:
-        """Emit a build/save progress message from process 0 when enabled."""
-        if self._build_log_enabled() and jax.process_index() == 0:
-            print(f"[BuildMatrices] {message}", flush=True)
 
 
     # ---------------------------
@@ -997,7 +983,8 @@ class BuildMatrices:
             row1 = row0 + self.nbls
 
             if jax.process_index() == 0 and (block_index % max(1, self.n_freq) == 0):
-                self._log_build(
+                _log_build(
+                    self,
                     f"stepwise T save processing row block {block_index + 1}/{total_blocks}"
                 )
 
@@ -1061,7 +1048,7 @@ class BuildMatrices:
 
         elapsed = time.perf_counter() - t_start
         self.build_timings_seconds[f"{matrix_name}_stepwise_save"] = elapsed
-        self._log_build(f"saved {matrix_name} stepwise in {elapsed:.3f} s")
+        _log_build(self, f"saved {matrix_name} stepwise in {elapsed:.3f} s")
     
 
     # ------------------------
@@ -1163,7 +1150,7 @@ class BuildMatrices:
         if check_if_matrix_exists_impl(self, matrix_name):
             return
         if matrix_name == "T":
-            self._log_build("saving T by stepwise row-block memmap without building monolithic T")
+            _log_build(self, "saving T by stepwise row-block memmap without building monolithic T")
             self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
             return
         matrix = self._build_matrix_by_name(matrix_name)

@@ -31,6 +31,21 @@ def _dense_matrix_path(bm, matrix_name: str) -> Path:
     return Path(bm.array_save_directory) / f"{matrix_name}.npy"
 
 
+def _log_build(bm, message: str) -> None:
+    """
+    Emit a build/save progress message from process 0.
+
+    Parameters
+    ----------
+    bm : BuildMatrices
+        Matrix builder instance owning the build.
+    message : str
+        Message to print.
+    """
+    if jax.process_index() == 0:
+        print(f"[BuildMatrices] {message}", flush=True)
+
+
 def get_T_component_layout(bm) -> dict[str, dict[str, int]]:
     """
     Return the direct-``T`` column layout for EoR and foreground components.
