@@ -16,6 +16,7 @@ import numpy as np
 from pathlib import Path
 from jax.experimental import multihost_utils
 from functools import partial
+from jax.sharding import Mesh, PartitionSpec as P
 
 from astropy.constants import c
 
@@ -31,6 +32,7 @@ from .build_utils import (
     _dense_matrix_path as _dense_matrix_path_impl,
     _log_build,
     _prepare_memmap_output as _prepare_memmap_output_impl,
+    _slice_bounds as _slice_bounds_impl,
     check_if_matrix_exists as check_if_matrix_exists_impl,
     get_T_component_layout as get_T_component_layout_impl,
     load_matrix as load_matrix_impl,
@@ -174,6 +176,12 @@ class BuildMatrices:
     t_stepwise_fg_uv_chunk : int, optional
         Foreground UV chunk size used by the stepwise `.npy` T writer.
         Defaults to 128.
+    t_ninv_t_block_cols : int, optional
+        Parameter-space block width used by the blockwise `.npy`
+        ``T_Ninv_T`` writer. Defaults to 16384.
+    t_ninv_t_right_block_batch : int, optional
+        Number of right-hand parameter blocks evaluated together inside one
+        local ``T_Ninv_T`` kernel call. Defaults to 4.
     """
 
 
@@ -219,6 +227,8 @@ class BuildMatrices:
         array_save_directory: str = "./matrices/",
         t_stepwise_eor_uv_chunk: int = 128,
         t_stepwise_fg_uv_chunk: int = 128,
+        t_ninv_t_block_cols: int = 16384,
+        t_ninv_t_right_block_batch: int = 4,
     ) -> None:
         
         # Store EoR UV-plane parameters.
@@ -293,11 +303,16 @@ class BuildMatrices:
         self.array_save_directory.mkdir(parents=True, exist_ok=True)
         self.t_stepwise_eor_uv_chunk = int(t_stepwise_eor_uv_chunk)
         self.t_stepwise_fg_uv_chunk = int(t_stepwise_fg_uv_chunk)
+        self.t_ninv_t_block_cols = int(t_ninv_t_block_cols)
+        self.t_ninv_t_right_block_batch = int(t_ninv_t_right_block_batch)
         if self.t_stepwise_eor_uv_chunk < 1:
             raise ValueError("t_stepwise_eor_uv_chunk must be >= 1")
         if self.t_stepwise_fg_uv_chunk < 1:
             raise ValueError("t_stepwise_fg_uv_chunk must be >= 1")
-        self.build_timings_seconds: dict[str, float] = {}
+        if self.t_ninv_t_block_cols < 1:
+            raise ValueError("t_ninv_t_block_cols must be >= 1")
+        if self.t_ninv_t_right_block_batch < 1:
+            raise ValueError("t_ninv_t_right_block_batch must be >= 1")
 
         # UV model space (EoR + FG rectilinear grids).
         self.uv_model_space = UV_ModelSpace(
@@ -478,7 +493,718 @@ class BuildMatrices:
 
         return full_eor, full_fg
 
+    # ------------------------
+    # Direct construction of T 
+    # ------------------------
 
+    def _build_T_directly_impl(self) -> jnp.ndarray:
+        r"""
+        Construct ``T = (F^{-1}F')F_z`` directly, without explicitly building ``F_z``.
+
+        Intuition
+        ---------
+        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense UV response
+        block over ``(t, bl, uv)``:
+
+        - ``full_eor[f, t, bl, u_eor]``
+        - ``full_fg[f,  t, bl, u_fg]``
+
+        ``F_z`` then only applies 1D spectral basis expansions per UV mode:
+
+        - EoR: eta basis with eta=0 removed
+        - FG non-monopole: ``[eta0 | LSSM]``
+        - FG monopole (optional): ``[full eta | LSSM]`` monopole block
+
+        So instead of forming huge block-diagonal/permutation matrices and
+        multiplying, we apply those basis vectors directly via broadcasted
+        products, then reshape/concatenate into the same final column ordering
+        as ``build_T``.
+
+        Returns
+        -------
+        T : jnp.ndarray
+            Dense matrix with shape
+            (n_vis, n_params_eta), where
+            n_vis = n_freq * n_t * n_bls and
+            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
+        """
+        full_eor, full_fg = self._build_finv_fprime_blocks()
+
+        # ------------------------
+        # EoR contribution to T
+        # ------------------------
+        # Build frequency->eta basis for EoR (eta=0 excluded).
+        eor_basis = inverse_udft_1d_rect(
+            self.n_freq,
+            self.n_eta,
+            include_eta0=False,
+        )
+        eor_basis = eor_basis * self.d_eta  # (n_freq, n_eta-1)
+
+        # Apply basis per-frequency:
+        # full_eor[f,t,bl,u] * eor_basis[f,eta] -> t_eor[f,t,bl,u,eta]
+        t_eor = full_eor[..., None] * eor_basis[:, None, None, None, :]
+        # Flatten to legacy row order: time slowest, then frequency, then baseline.
+        t_eor = jnp.transpose(t_eor, (1, 0, 2, 3, 4)).reshape(
+            self.n_t * self.n_freq * self.nbls,
+            self.n_uv_eor * (self.n_eta - 1),
+        )
+
+        # -----------------------
+        # FG contribution to T
+        # -----------------------
+        n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
+        fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
+
+        n_rows = self.n_t * self.n_freq * self.nbls
+
+        # FG eta0 columns for each non-monopole UV mode.
+        eta0_basis = (
+            jnp.ones((self.n_freq, 1), dtype=full_fg.dtype)
+            * self.d_eta
+            * self.n_eta
+        )  # (n_freq, 1)
+        t_fg_eta0 = fg_non_mp * eta0_basis[:, None, None, :]
+        t_fg_eta0 = jnp.transpose(t_fg_eta0, (1, 0, 2, 3)).reshape(
+            n_rows,
+            n_non_mp,
+        )
+
+        # FG LSSM columns for each non-monopole UV mode.
+        if self.n_modes_fg > 0:
+            lssm_basis = build_lssm_basis(
+                n_freq=self.n_freq,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            )
+            lssm_basis = lssm_basis * self.d_eta * self.n_eta  # (n_freq, n_modes_fg)
+            t_fg_lssm = fg_non_mp[..., None] * lssm_basis[:, None, None, None, :]
+            t_fg_lssm = jnp.transpose(t_fg_lssm, (1, 0, 2, 3, 4)).reshape(
+                n_rows,
+                n_non_mp * self.n_modes_fg,
+            )
+        else:
+            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
+
+        # FG monopole block (eta + LSSM), if enabled.
+        if self.fit_for_monopole:
+            mp_basis = inverse_udft_1d_rect(
+                n_freq=self.n_freq,
+                n_eta=self.n_eta,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            )
+            mp_basis = mp_basis * self.d_eta
+            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
+            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
+
+            fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
+            t_fg_mp = fg_mp[..., None] * mp_basis[:, None, None, :]
+            t_fg_mp = jnp.transpose(t_fg_mp, (1, 0, 2, 3)).reshape(
+                n_rows,
+                mp_basis.shape[1],
+            )
+        else:
+            t_fg_mp = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
+
+        # Legacy FG column ordering.
+        t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
+
+        # Final column ordering matches legacy Fz block layout:
+        # [EoR columns][FG columns].
+        return jnp.concatenate([t_eor, t_fg], axis=1)
+
+    def build_T_directly(self) -> jnp.ndarray:
+        """
+        Build T using an automatically selected JAX executor.
+
+        - single-device runs: use a ``jax.jit`` executor
+        - multi-device runs:  use a ``jax.jit`` executor with output sharding
+          and run in mesh context
+        """
+        multi_device = self.mm.n_dev > 1
+        jit_kwargs = {"static_argnums": (0,)}
+        if multi_device:
+            jit_kwargs["out_shardings"] = self.sharding_mat
+        build_t_fn = jax.jit(BuildMatrices._build_T_directly_impl, **jit_kwargs)
+
+        if multi_device:
+            with self.mm.mesh:
+                return build_t_fn(self)
+        return build_t_fn(self)
+    
+    # -----------------------------------------------
+    # Direct construction of T (stepwise UV chunking)
+    # -----------------------------------------------
+
+    def save_T_stepwise_row_memmap(
+        self,
+        *,
+        matrix_name: str = "T",
+        eor_uv_chunk: Optional[int] = None,
+        fg_uv_chunk: Optional[int] = None,
+    ) -> None:
+        """
+        Build and save ``T`` block-by-block over ``(time, frequency)`` row slices.
+
+        Parameters
+        ----------
+        matrix_name : str, optional
+            Output matrix name. Defaults to ``"T"``.
+        eor_uv_chunk : int, optional
+            Number of EoR UV modes evaluated per local chunk. If omitted, the
+            instance default ``t_stepwise_eor_uv_chunk`` is used.
+        fg_uv_chunk : int, optional
+            Number of foreground UV modes evaluated per local chunk. If omitted,
+            the instance default ``t_stepwise_fg_uv_chunk`` is used.
+
+        Notes
+        -----
+        This path never materializes the full mixed ``T`` array. Instead, each
+        process loops over the ``(time, frequency)`` row blocks it owns, builds
+        only that block's EoR/foreground UV responses, and streams the resulting
+        rows directly into the final `.npy` memmap. The main materialization
+        boundary is therefore one small row block and UV chunk, not the full
+        distributed ``T`` object.
+        """
+        path = _dense_matrix_path_impl(self, matrix_name)
+        layout = get_T_component_layout_impl(self)
+        n_rows = int(self.n_t * self.n_freq * self.nbls)
+        n_cols = int(layout["fg_monopole"]["col_stop"])
+        eor_uv_chunk = max(1, int(self.t_stepwise_eor_uv_chunk if eor_uv_chunk is None else eor_uv_chunk))
+        fg_uv_chunk = max(1, int(self.t_stepwise_fg_uv_chunk if fg_uv_chunk is None else fg_uv_chunk))
+
+        mm = _prepare_memmap_output_impl(
+            self,
+            path,
+            shape=(n_rows, n_cols),
+            dtype=np.dtype(np.complex128),
+            sync_name=f"{matrix_name}-stepwise-ready",
+        )
+
+        # Assign disjoint `(time, frequency)` row blocks across processes.
+        process_index = int(jax.process_index())
+        process_count = int(jax.process_count())
+        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
+        eor_eta_count = int(self.n_eta - 1)
+        lssm_mode_count = int(self.n_modes_fg)
+
+        # Precompute the 1D spectral bases once; each row block reuses the
+        # basis vector corresponding to its observing frequency.
+        eor_basis = inverse_udft_1d_rect(
+            self.n_freq,
+            self.n_eta,
+            include_eta0=False,
+        ) * self.d_eta
+        eta0_basis = jnp.ones((self.n_freq, 1), dtype=jnp.complex128) * self.d_eta * self.n_eta
+        if self.n_modes_fg > 0:
+            lssm_basis = build_lssm_basis(
+                n_freq=self.n_freq,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            ) * self.d_eta * self.n_eta
+        else:
+            lssm_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
+
+        if self.fit_for_monopole:
+            mp_basis = inverse_udft_1d_rect(
+                n_freq=self.n_freq,
+                n_eta=self.n_eta,
+                n_modes=self.n_modes_fg,
+                n_powerlaws=self.n_powerlaws_fg,
+                f0_mhz=self.f0_mhz,
+                df_mhz=self.df_mhz,
+                beta=self.beta_fg,
+            ) * self.d_eta
+            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
+            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
+        else:
+            mp_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
+
+        lmn_center_fg = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
+        lmn_center_eor = lmn_center_fg[:, self.lmn_model_space.eor_fg_shared_axis]
+
+        # The EoR UV->LM kernel is shared by every row block, so build it once.
+        eor_uv_kernel = build_nudft_matrix(
+            self.uv_model_space.uv_eor,
+            lmn_center_eor,
+            sign=-1,
+        ) * (self.du_eor * self.dv_eor)
+
+        def fg_uv_kernel(uv_start: int, uv_stop: int) -> jnp.ndarray:
+            return build_nudft_matrix(
+                self.uv_model_space.uv_fg[:, uv_start:uv_stop],
+                lmn_center_fg,
+                sign=-1,
+            ) * (self.du_fg * self.dv_fg)
+
+        fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if self.fit_for_monopole else None
+
+        total_blocks = int(self.n_t * self.n_freq)
+        for block_index in range(process_index, total_blocks, process_count):
+            i_t = int(block_index // self.n_freq)
+            i_f = int(block_index % self.n_freq)
+            row0 = block_index * self.nbls
+            row1 = row0 + self.nbls
+
+            if jax.process_index() == 0 and (block_index % max(1, self.n_freq) == 0):
+                _log_build(
+                    self,
+                    f"stepwise T save processing row block {block_index + 1}/{total_blocks}"
+                )
+
+            # Build the beam-weighted LMN->UVW operator for this single
+            # `(time, frequency)` block and keep all subsequent contractions
+            # local to these `n_bls` rows.
+            beam_block = self._beam_weighted_nudft_lmn_to_uvw_block(i_f, i_t).block_until_ready()
+            beam_block_eor = beam_block[:, self.lmn_model_space.eor_fg_shared_axis]
+
+            # EoR columns are written in UV chunks so only a small
+            # `(n_bls, uv_chunk * n_eta)` tile needs to materialize at once.
+            for uv0 in range(0, self.n_uv_eor, eor_uv_chunk):
+                uv1 = min(uv0 + eor_uv_chunk, self.n_uv_eor)
+                eor_block = jnp.dot(beam_block_eor, eor_uv_kernel[:, uv0:uv1]).block_until_ready()
+                t_eor_rows = (eor_block[..., None] * eor_basis[i_f][None, None, :]).reshape(
+                    self.nbls,
+                    (uv1 - uv0) * eor_eta_count,
+                )
+                col0 = int(layout["eor"]["col_start"]) + uv0 * eor_eta_count
+                col1 = col0 + (uv1 - uv0) * eor_eta_count
+                mm[row0:row1, col0:col1] = np.asarray(t_eor_rows)
+
+            # Foreground non-monopole columns are also streamed in UV chunks.
+            # For each chunk we write both the eta0 and LSSM contributions before
+            # discarding the temporary block.
+            for uv0 in range(0, n_non_mp, fg_uv_chunk):
+                uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
+                fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
+
+                eta0_rows = fg_block * eta0_basis[i_f, 0]
+                eta0_col0 = int(layout["fg_eta0"]["col_start"]) + uv0
+                eta0_col1 = eta0_col0 + (uv1 - uv0)
+                mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
+
+                if lssm_mode_count > 0:
+                    t_fg_lssm_rows = (
+                        fg_block[..., None] * lssm_basis[i_f][None, None, :]
+                    ).reshape(
+                        self.nbls,
+                        (uv1 - uv0) * lssm_mode_count,
+                    )
+                    lssm_col0 = int(layout["fg_lssm"]["col_start"]) + uv0 * lssm_mode_count
+                    lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
+                    mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
+
+            # The monopole block is a separate last-column FG mode and therefore
+            # only requires one small extra contraction per row block.
+            if self.fit_for_monopole and fg_mp_kernel is not None:
+                fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
+                t_fg_mp_rows = fg_mp_block * mp_basis[i_f][None, :]
+                mp_col0 = int(layout["fg_monopole"]["col_start"])
+                mp_col1 = int(layout["fg_monopole"]["col_stop"])
+                mm[row0:row1, mp_col0:mp_col1] = np.asarray(t_fg_mp_rows)
+
+            # Flush after each row block so the on-disk file always reflects the
+            # completed work, even for very long runs.
+            mm.flush()
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(f"{matrix_name}-stepwise-done")
+    
+
+    # ------------------------
+    # Noise covariance matrices
+    # ------------------------
+    def _sigma_squared_array(self) -> jnp.ndarray:
+        """
+        Build the per-visibility noise variance vector for the current settings.
+
+        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
+        """
+        if self.effective_noise is not None:
+            return jnp.abs(self.effective_noise) ** 2
+
+        if self.sigma is None:
+            raise ValueError("sigma must be provided when effective_noise is None.")
+
+        # Expect bl_red_array shaped (n_t, n_bls) or (n_t, n_bls, 1).
+        red = jnp.asarray(self.bl_red_array)
+        if red.ndim == 3 and red.shape[-1] == 1:
+            red = red[..., 0]
+        if red.shape[0] != self.n_t or red.shape[1] != self.nbls:
+            raise ValueError("bl_red_array must have shape (n_t, n_bls) or (n_t, n_bls, 1).")
+
+        # Expand redundancy over frequency: (n_t, n_freq, n_bls) then flatten.
+        red_tf = jnp.repeat(red[:, jnp.newaxis, :], self.n_freq, axis=1)
+        red_tf = red_tf.reshape(-1)
+
+        sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
+        return (sigma_redundancy ** 2).astype(jnp.complex128)
+
+    def build_Ninv(self) -> jnp.ndarray:
+        """
+        Build the inverse noise covariance diagonal (vector form).
+
+        Returns
+        -------
+        Ninv : jnp.ndarray
+            1D vector of shape (n_vis,) containing diag(N^{-1}), where
+            n_vis = n_freq * n_t * n_bls.
+        """
+        sigma_sq = self._sigma_squared_array()
+        return 1.0 / sigma_sq
+
+    def build_N(self) -> jnp.ndarray:
+        """
+        Build the noise covariance diagonal (vector form).
+
+        Returns
+        -------
+        N : jnp.ndarray
+            1D vector of shape (n_vis,) containing diag(N), where
+            n_vis = n_freq * n_t * n_bls.
+        """
+        sigma_sq = self._sigma_squared_array()
+        return sigma_sq
+
+    # -----------------------------
+    # Build T^H N^{-1} T (directly)
+    # -----------------------------
+    
+    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
+        r"""
+        Build T^H N^{-1} T.
+
+        Parameters
+        ----------
+        T : jnp.ndarray
+            Forward operator with shape (n_vis, n_params_eta).
+        Ninv : jnp.ndarray
+            Inverse noise covariance diagonal in vector form with
+            shape (n_vis,), holding diag(N^{-1}).
+
+        Returns
+        -------
+        T_Ninv_T : jnp.ndarray
+            Dense matrix with shape (n_params_eta, n_params_eta), where 
+            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
+        """
+        
+        Ninv_T = Ninv[:, None] * T
+
+        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
+        return jnp.conj(T).T @ Ninv_T
+    
+    # --------------------------------------------------
+    # Build T^H N^{-1} T (blockwise, cached T and Ninv)
+    # --------------------------------------------------
+
+    @staticmethod
+    @partial(
+        jax.jit,
+        in_shardings=(P(("host", "dev"), None), P(("host", "dev")), None, None),
+        out_shardings=P(("host", "dev"), None),
+        static_argnums=(4, 5),
+    )
+    def _build_T_Ninv_T_cached_block_batch(
+        T: jnp.ndarray,
+        Ninv: jnp.ndarray,
+        i0: int,
+        j0: int,
+        left_width: int,
+        right_width: int,
+    ) -> jnp.ndarray:
+        r"""
+        Build one block batch of ``T^H N^{-1} T`` from cached sharded inputs.
+
+        Parameters
+        ----------
+        T : jnp.ndarray
+            Globally sharded design matrix with shape ``(n_vis, n_params)``.
+        Ninv : jnp.ndarray
+            Globally sharded inverse-noise vector with shape ``(n_vis,)``.
+        i0, j0 : int
+            Global starting parameter indices for the left and right blocks.
+        left_width, right_width : int
+            Widths of the left and right parameter blocks.
+
+        Returns
+        -------
+        jnp.ndarray
+            Dense block batch with shape ``(left_width, right_width)`` and row
+            sharding over the combined host/device mesh.
+
+        """
+        n_vis = T.shape[0]
+        # Slice the cached global `T` into the current left/right parameter
+        # blocks. The visibility axis stays fully distributed; only the
+        # parameter columns change from call to call.
+        T_left = jax.lax.dynamic_slice(T, (0, i0), (n_vis, left_width))
+        T_right = jax.lax.dynamic_slice(T, (0, j0), (n_vis, right_width))
+        # Each device contributes its local visibility rows to the same
+        # Gram-block contraction, and JAX combines those partial products
+        # according to the output sharding.
+        return jnp.conj(T_left).T @ (Ninv[:, None] * T_right)
+
+
+    def save_T_Ninv_T_blockwise_memmap(
+        self,
+        *,
+        matrix_name: str = "T_Ninv_T",
+        t_matrix_name: str = "T",
+        ninv_matrix_name: str = "Ninv",
+        block_cols: Optional[int] = None,
+        right_block_batch: Optional[int] = None,
+    ) -> None:
+        r"""
+        Build and save ``T^H N^{-1} T`` from saved ``T`` and ``Ninv`` arrays.
+
+        Parameters
+        ----------
+        matrix_name : str, optional
+            Output dense matrix name. Defaults to ``"T_Ninv_T"``.
+        t_matrix_name : str, optional
+            Saved design-matrix name to read from disk. Defaults to ``"T"``.
+        ninv_matrix_name : str, optional
+            Saved inverse-noise vector name to read from disk. Defaults to
+            ``"Ninv"``.
+        block_cols : int, optional
+            Parameter-space block width. If omitted, the instance default
+            ``t_ninv_t_block_cols`` is used.
+        right_block_batch : int, optional
+            Number of right-hand parameter blocks evaluated together per local
+            kernel launch. If omitted, the instance default
+            ``t_ninv_t_right_block_batch`` is used.
+        """
+        t_path = _dense_matrix_path_impl(self, t_matrix_name)
+        ninv_path = _dense_matrix_path_impl(self, ninv_matrix_name)
+        out_path = _dense_matrix_path_impl(self, matrix_name)
+        if not t_path.exists():
+            raise FileNotFoundError(f"Saved matrix not found: {t_path}")
+        if not ninv_path.exists():
+            raise FileNotFoundError(f"Saved matrix not found: {ninv_path}")
+
+        block_cols = max(
+            1,
+            int(self.t_ninv_t_block_cols if block_cols is None else block_cols),
+        )
+        right_block_batch = max(
+            1,
+            int(self.t_ninv_t_right_block_batch if right_block_batch is None else right_block_batch),
+        )
+
+        T_mm = np.load(t_path, mmap_mode="r")
+        Ninv_mm = np.load(ninv_path, mmap_mode="r")
+        n_vis, n_params = (int(T_mm.shape[0]), int(T_mm.shape[1]))
+        if tuple(Ninv_mm.shape) != (n_vis,):
+            raise ValueError(
+                f"{ninv_matrix_name} has shape {tuple(Ninv_mm.shape)} but expected {(n_vis,)}"
+            )
+
+        process_count = int(jax.process_count())
+        local_device_count = int(jax.local_device_count())
+        # The cached backend partitions the visibility axis evenly across JAX
+        # processes, then splits each process-local stripe across its local
+        # GPUs. These divisibility checks make that mapping explicit.
+        if n_vis % process_count != 0:
+            raise ValueError(
+                f"n_vis={n_vis} must divide process_count={process_count} for cached T_Ninv_T"
+            )
+        rows_per_process = n_vis // process_count
+        if rows_per_process % max(1, local_device_count) != 0:
+            raise ValueError(
+                f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
+            )
+
+        process_index = int(jax.process_index())
+        row0 = process_index * rows_per_process
+        row1 = row0 + rows_per_process
+
+        # Pre-create the dense on-disk output once so every process can attach
+        # to the same memmap and write only the blocks it owns.
+        mm = _prepare_memmap_output_impl(
+            self,
+            out_path,
+            shape=(n_params, n_params),
+            dtype=np.dtype(np.complex128),
+            sync_name=f"{matrix_name}-blockwise-ready",
+        )
+
+        # Cache the host-local visibility stripe once. This is the key change
+        # from the earlier disk-first implementation: the hot loop below never
+        # rereads `T.npy` or `Ninv.npy`.
+        local_T = np.asarray(T_mm[row0:row1, :])
+        local_Ninv = np.asarray(Ninv_mm[row0:row1])
+
+        devices = np.asarray(jax.devices(), dtype=object)
+        if devices.size != process_count * local_device_count:
+            raise ValueError(
+                "jax.devices() size must equal process_count * local_device_count for cached T_Ninv_T"
+            )
+        mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
+
+        total_param_blocks = int((n_params + block_cols - 1) // block_cols)
+        with mesh:
+            # Convert each process-local host stripe into one global sharded
+            # array. After this point, the block kernel can reuse the same
+            # cached distributed `T` and `Ninv` for every output block.
+            T = multihost_utils.host_local_array_to_global_array(
+                local_T, mesh, P(("host", "dev"), None)
+            )
+            Ninv = multihost_utils.host_local_array_to_global_array(
+                local_Ninv, mesh, P(("host", "dev"))
+            )
+            T.block_until_ready()
+            Ninv.block_until_ready()
+
+            for block_i in range(total_param_blocks):
+                # Each outer-loop step builds one row of parameter-space blocks
+                # in the normal matrix. That row is then flushed to disk before
+                # advancing so long runs always leave durable progress behind.
+                i0 = int(block_i * block_cols)
+                i1 = int(min(i0 + block_cols, n_params))
+                left_width = i1 - i0
+
+                if process_index == 0:
+                    _log_build(
+                        self,
+                        f"cached T_Ninv_T processing parameter block row {block_i + 1}/{total_param_blocks}",
+                    )
+
+                # All devices cooperate on the same block row. Reusing the
+                # cached sharded `T` avoids rereading the 100 GB design matrix
+                # inside the hot loop; only the finished block batch is copied
+                # back to host and written to disk.
+                for block_j_start in range(block_i, total_param_blocks, right_block_batch):
+                    # Evaluate several adjacent right-hand parameter blocks in
+                    # one kernel call so the GPUs see a larger GEMM and spend
+                    # less time on launch overhead.
+                    j0 = int(block_j_start * block_cols)
+                    j1 = int(min(j0 + right_block_batch * block_cols, n_params))
+                    right_width = j1 - j0
+
+                    gram_batch = self._build_T_Ninv_T_cached_block_batch(
+                        T,
+                        Ninv,
+                        i0,
+                        j0,
+                        left_width,
+                        right_width,
+                    )
+                    gram_batch.block_until_ready()
+
+                    for shard in gram_batch.addressable_shards:
+                        # Each process only receives the output shards that are
+                        # addressable from its local devices. We materialize
+                        # those small shards on host and write them into the
+                        # correct dense-matrix slices.
+                        row_slice, col_slice = shard.index
+                        block_host = np.asarray(shard.data)
+                        row_start, row_stop = _slice_bounds_impl(row_slice, left_width)
+                        col_start, col_stop = _slice_bounds_impl(col_slice, right_width)
+                        rr0 = i0 + row_start
+                        rr1 = i0 + row_stop
+                        cc0 = j0 + col_start
+                        cc1 = j0 + col_stop
+
+                        mm[rr0:rr1, cc0:cc1] = block_host
+                        # The normal matrix is Hermitian, so every strict
+                        # upper-triangle block determines its mirrored partner.
+                        # Mirroring here avoids a separate post-processing pass.
+                        if j0 != i0 or j1 != i1:
+                            mm[cc0:cc1, rr0:rr1] = block_host.conj().T
+
+                # Flush after each completed parameter-block row so the dense
+                # memmap always reflects the durable progress made so far.
+                mm.flush()
+
+            if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+                multihost_utils.sync_global_devices(f"{matrix_name}-blockwise-done")
+
+    # --------------------
+    # Matrix save/load API
+    # --------------------
+
+    def build_matrix_if_not_here(self, matrix_name: str) -> None:
+        r"""
+        Build and save a matrix if it does not already exist on disk.
+
+        Parameters
+        ----------
+        matrix_name : str
+            Name of the matrix to build and save.
+        """
+        if check_if_matrix_exists_impl(self, matrix_name):
+            return
+        _log_build(self, f"building and saving {matrix_name}")
+        t_start = time.perf_counter()
+        if matrix_name == "T":
+            self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
+        elif matrix_name == "T_Ninv_T":
+            self.build_matrix_if_not_here("T")
+            self.build_matrix_if_not_here("Ninv")
+            self.save_T_Ninv_T_blockwise_memmap(matrix_name=matrix_name)
+        else:
+            matrix = self._build_matrix_by_name(matrix_name)
+            save_matrix_impl(self, matrix_name, matrix)
+        elapsed = time.perf_counter() - t_start
+        _log_build(self, f"built and saved {matrix_name} in {elapsed:.3f} s")
+
+    def _build_matrix_by_name(self, matrix_name: str):
+        """Build a supported matrix by name."""
+        _log_build(self, f"building {matrix_name}")
+        t_start = time.perf_counter()
+        matrix = None
+        # if matrix_name == "Fz":
+        #     matrix = self.build_Fz()
+        # elif matrix_name == "Finv_Fprime":
+        #     matrix = self.build_Finv_Fprime()
+        if matrix_name == "T":
+            matrix = self.build_T_directly()
+        elif matrix_name == "Ninv":
+            matrix = self.build_Ninv()
+        elif matrix_name == "N":
+            matrix = self.build_N()
+        elif matrix_name == "T_Ninv_T":
+            T = load_matrix_impl(self, "T")
+            Ninv = load_matrix_impl(self, "Ninv")
+            try:
+                matrix = self.build_T_Ninv_T(T, Ninv)
+            finally:
+                # Drop large intermediates as soon as possible.
+                del T
+                del Ninv
+        else:
+            raise ValueError(f"Unsupported matrix name '{matrix_name}'.")
+        elapsed = time.perf_counter() - t_start
+        _log_build(self, f"built {matrix_name} in {elapsed:.3f} s")
+        return matrix
+
+    def build_minimum_matrix_stack(self) -> None:
+        """
+        Build and save T, Ninv, then T_Ninv_T in that order.
+
+        This uses a disk-first workflow to avoid keeping large matrices in
+        memory longer than required.
+        """
+        # Ensure T exists on disk.
+        self.build_matrix_if_not_here("T")
+        # Ensure Ninv exists on disk.
+        self.build_matrix_if_not_here("Ninv")
+
+        # Build and save T_Ninv_T through the blockwise disk-first path.
+        self.build_matrix_if_not_here("T_Ninv_T")
+    
+    
     # @partial(jax.jit, static_argnums=(0,))
     # def build_Finv_Fprime(self) -> jnp.ndarray:
     #     """
@@ -717,489 +1443,3 @@ class BuildMatrices:
     #     Finv_Fprime = self.build_Finv_Fprime()
     #     Fz = self.build_Fz()
     #     return Finv_Fprime @ Fz
-
-    # ------------------------
-    # Direct construction of T 
-    # ------------------------
-
-    def _build_T_directly_impl(self) -> jnp.ndarray:
-        r"""
-        Construct ``T = (F^{-1}F')F_z`` directly, without explicitly building ``F_z``.
-
-        Intuition
-        ---------
-        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense UV response
-        block over ``(t, bl, uv)``:
-
-        - ``full_eor[f, t, bl, u_eor]``
-        - ``full_fg[f,  t, bl, u_fg]``
-
-        ``F_z`` then only applies 1D spectral basis expansions per UV mode:
-
-        - EoR: eta basis with eta=0 removed
-        - FG non-monopole: ``[eta0 | LSSM]``
-        - FG monopole (optional): ``[full eta | LSSM]`` monopole block
-
-        So instead of forming huge block-diagonal/permutation matrices and
-        multiplying, we apply those basis vectors directly via broadcasted
-        products, then reshape/concatenate into the same final column ordering
-        as ``build_T``.
-
-        Returns
-        -------
-        T : jnp.ndarray
-            Dense matrix with shape
-            (n_vis, n_params_eta), where
-            n_vis = n_freq * n_t * n_bls and
-            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
-        """
-        full_eor, full_fg = self._build_finv_fprime_blocks()
-
-        # ------------------------
-        # EoR contribution to T
-        # ------------------------
-        # Build frequency->eta basis for EoR (eta=0 excluded).
-        eor_basis = inverse_udft_1d_rect(
-            self.n_freq,
-            self.n_eta,
-            include_eta0=False,
-        )
-        eor_basis = eor_basis * self.d_eta  # (n_freq, n_eta-1)
-
-        # Apply basis per-frequency:
-        # full_eor[f,t,bl,u] * eor_basis[f,eta] -> t_eor[f,t,bl,u,eta]
-        t_eor = full_eor[..., None] * eor_basis[:, None, None, None, :]
-        # Flatten to legacy row order: time slowest, then frequency, then baseline.
-        t_eor = jnp.transpose(t_eor, (1, 0, 2, 3, 4)).reshape(
-            self.n_t * self.n_freq * self.nbls,
-            self.n_uv_eor * (self.n_eta - 1),
-        )
-
-        # -----------------------
-        # FG contribution to T
-        # -----------------------
-        n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
-        fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
-
-        n_rows = self.n_t * self.n_freq * self.nbls
-
-        # FG eta0 columns for each non-monopole UV mode.
-        eta0_basis = (
-            jnp.ones((self.n_freq, 1), dtype=full_fg.dtype)
-            * self.d_eta
-            * self.n_eta
-        )  # (n_freq, 1)
-        t_fg_eta0 = fg_non_mp * eta0_basis[:, None, None, :]
-        t_fg_eta0 = jnp.transpose(t_fg_eta0, (1, 0, 2, 3)).reshape(
-            n_rows,
-            n_non_mp,
-        )
-
-        # FG LSSM columns for each non-monopole UV mode.
-        if self.n_modes_fg > 0:
-            lssm_basis = build_lssm_basis(
-                n_freq=self.n_freq,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            )
-            lssm_basis = lssm_basis * self.d_eta * self.n_eta  # (n_freq, n_modes_fg)
-            t_fg_lssm = fg_non_mp[..., None] * lssm_basis[:, None, None, None, :]
-            t_fg_lssm = jnp.transpose(t_fg_lssm, (1, 0, 2, 3, 4)).reshape(
-                n_rows,
-                n_non_mp * self.n_modes_fg,
-            )
-        else:
-            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
-
-        # FG monopole block (eta + LSSM), if enabled.
-        if self.fit_for_monopole:
-            mp_basis = inverse_udft_1d_rect(
-                n_freq=self.n_freq,
-                n_eta=self.n_eta,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            )
-            mp_basis = mp_basis * self.d_eta
-            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
-            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
-
-            fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
-            t_fg_mp = fg_mp[..., None] * mp_basis[:, None, None, :]
-            t_fg_mp = jnp.transpose(t_fg_mp, (1, 0, 2, 3)).reshape(
-                n_rows,
-                mp_basis.shape[1],
-            )
-        else:
-            t_fg_mp = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
-
-        # Legacy FG column ordering.
-        t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
-
-        # Final column ordering matches legacy Fz block layout:
-        # [EoR columns][FG columns].
-        return jnp.concatenate([t_eor, t_fg], axis=1)
-
-    def build_T_directly(self) -> jnp.ndarray:
-        """
-        Build T using an automatically selected JAX executor.
-
-        - single-device runs: use a ``jax.jit`` executor
-        - multi-device runs:  use a ``jax.jit`` executor with output sharding
-          and run in mesh context
-        """
-        multi_device = self.mm.n_dev > 1
-        jit_kwargs = {"static_argnums": (0,)}
-        if multi_device:
-            jit_kwargs["out_shardings"] = self.sharding_mat
-        build_t_fn = jax.jit(BuildMatrices._build_T_directly_impl, **jit_kwargs)
-
-        if multi_device:
-            with self.mm.mesh:
-                return build_t_fn(self)
-        return build_t_fn(self)
-    
-    # -----------------------------------------------
-    # Direct construction of T (stepwise UV chunking)
-    # -----------------------------------------------
-
-    def save_T_stepwise_row_memmap(
-        self,
-        *,
-        matrix_name: str = "T",
-        eor_uv_chunk: Optional[int] = None,
-        fg_uv_chunk: Optional[int] = None,
-    ) -> None:
-        """
-        Build and save ``T`` block-by-block over ``(time, frequency)`` row slices.
-
-        Parameters
-        ----------
-        matrix_name : str, optional
-            Output matrix name. Defaults to ``"T"``.
-        eor_uv_chunk : int, optional
-            Number of EoR UV modes evaluated per local chunk. If omitted, the
-            instance default ``t_stepwise_eor_uv_chunk`` is used.
-        fg_uv_chunk : int, optional
-            Number of foreground UV modes evaluated per local chunk. If omitted,
-            the instance default ``t_stepwise_fg_uv_chunk`` is used.
-
-        Notes
-        -----
-        This path never materializes the full mixed ``T`` array. Instead, each
-        process loops over the ``(time, frequency)`` row blocks it owns, builds
-        only that block's EoR/foreground UV responses, and streams the resulting
-        rows directly into the final `.npy` memmap. The main materialization
-        boundary is therefore one small row block and UV chunk, not the full
-        distributed ``T`` object.
-        """
-        path = _dense_matrix_path_impl(self, matrix_name)
-        layout = get_T_component_layout_impl(self)
-        n_rows = int(self.n_t * self.n_freq * self.nbls)
-        n_cols = int(layout["fg_monopole"]["col_stop"])
-        eor_uv_chunk = max(1, int(self.t_stepwise_eor_uv_chunk if eor_uv_chunk is None else eor_uv_chunk))
-        fg_uv_chunk = max(1, int(self.t_stepwise_fg_uv_chunk if fg_uv_chunk is None else fg_uv_chunk))
-
-        mm = _prepare_memmap_output_impl(
-            self,
-            path,
-            shape=(n_rows, n_cols),
-            dtype=np.dtype(np.complex128),
-            sync_name=f"{matrix_name}-stepwise-ready",
-        )
-
-        t_start = time.perf_counter()
-        # Assign disjoint `(time, frequency)` row blocks across processes.
-        process_index = int(jax.process_index())
-        process_count = int(jax.process_count())
-        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
-        eor_eta_count = int(self.n_eta - 1)
-        lssm_mode_count = int(self.n_modes_fg)
-
-        # Precompute the 1D spectral bases once; each row block reuses the
-        # basis vector corresponding to its observing frequency.
-        eor_basis = inverse_udft_1d_rect(
-            self.n_freq,
-            self.n_eta,
-            include_eta0=False,
-        ) * self.d_eta
-        eta0_basis = jnp.ones((self.n_freq, 1), dtype=jnp.complex128) * self.d_eta * self.n_eta
-        if self.n_modes_fg > 0:
-            lssm_basis = build_lssm_basis(
-                n_freq=self.n_freq,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            ) * self.d_eta * self.n_eta
-        else:
-            lssm_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
-
-        if self.fit_for_monopole:
-            mp_basis = inverse_udft_1d_rect(
-                n_freq=self.n_freq,
-                n_eta=self.n_eta,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            ) * self.d_eta
-            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
-            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
-        else:
-            mp_basis = jnp.zeros((self.n_freq, 0), dtype=jnp.complex128)
-
-        lmn_center_fg = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
-        lmn_center_eor = lmn_center_fg[:, self.lmn_model_space.eor_fg_shared_axis]
-
-        # The EoR UV->LM kernel is shared by every row block, so build it once.
-        eor_uv_kernel = build_nudft_matrix(
-            self.uv_model_space.uv_eor,
-            lmn_center_eor,
-            sign=-1,
-        ) * (self.du_eor * self.dv_eor)
-
-        def fg_uv_kernel(uv_start: int, uv_stop: int) -> jnp.ndarray:
-            return build_nudft_matrix(
-                self.uv_model_space.uv_fg[:, uv_start:uv_stop],
-                lmn_center_fg,
-                sign=-1,
-            ) * (self.du_fg * self.dv_fg)
-
-        fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if self.fit_for_monopole else None
-
-        total_blocks = int(self.n_t * self.n_freq)
-        for block_index in range(process_index, total_blocks, process_count):
-            i_t = int(block_index // self.n_freq)
-            i_f = int(block_index % self.n_freq)
-            row0 = block_index * self.nbls
-            row1 = row0 + self.nbls
-
-            if jax.process_index() == 0 and (block_index % max(1, self.n_freq) == 0):
-                _log_build(
-                    self,
-                    f"stepwise T save processing row block {block_index + 1}/{total_blocks}"
-                )
-
-            # Build the beam-weighted LMN->UVW operator for this single
-            # `(time, frequency)` block and keep all subsequent contractions
-            # local to these `n_bls` rows.
-            beam_block = self._beam_weighted_nudft_lmn_to_uvw_block(i_f, i_t).block_until_ready()
-            beam_block_eor = beam_block[:, self.lmn_model_space.eor_fg_shared_axis]
-
-            # EoR columns are written in UV chunks so only a small
-            # `(n_bls, uv_chunk * n_eta)` tile needs to materialize at once.
-            for uv0 in range(0, self.n_uv_eor, eor_uv_chunk):
-                uv1 = min(uv0 + eor_uv_chunk, self.n_uv_eor)
-                eor_block = jnp.dot(beam_block_eor, eor_uv_kernel[:, uv0:uv1]).block_until_ready()
-                t_eor_rows = (eor_block[..., None] * eor_basis[i_f][None, None, :]).reshape(
-                    self.nbls,
-                    (uv1 - uv0) * eor_eta_count,
-                )
-                col0 = int(layout["eor"]["col_start"]) + uv0 * eor_eta_count
-                col1 = col0 + (uv1 - uv0) * eor_eta_count
-                mm[row0:row1, col0:col1] = np.asarray(t_eor_rows)
-
-            # Foreground non-monopole columns are also streamed in UV chunks.
-            # For each chunk we write both the eta0 and LSSM contributions before
-            # discarding the temporary block.
-            for uv0 in range(0, n_non_mp, fg_uv_chunk):
-                uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
-                fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
-
-                eta0_rows = fg_block * eta0_basis[i_f, 0]
-                eta0_col0 = int(layout["fg_eta0"]["col_start"]) + uv0
-                eta0_col1 = eta0_col0 + (uv1 - uv0)
-                mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
-
-                if lssm_mode_count > 0:
-                    t_fg_lssm_rows = (
-                        fg_block[..., None] * lssm_basis[i_f][None, None, :]
-                    ).reshape(
-                        self.nbls,
-                        (uv1 - uv0) * lssm_mode_count,
-                    )
-                    lssm_col0 = int(layout["fg_lssm"]["col_start"]) + uv0 * lssm_mode_count
-                    lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
-                    mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
-
-            # The monopole block is a separate last-column FG mode and therefore
-            # only requires one small extra contraction per row block.
-            if self.fit_for_monopole and fg_mp_kernel is not None:
-                fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
-                t_fg_mp_rows = fg_mp_block * mp_basis[i_f][None, :]
-                mp_col0 = int(layout["fg_monopole"]["col_start"])
-                mp_col1 = int(layout["fg_monopole"]["col_stop"])
-                mm[row0:row1, mp_col0:mp_col1] = np.asarray(t_fg_mp_rows)
-
-            # Flush after each row block so the on-disk file always reflects the
-            # completed work, even for very long runs.
-            mm.flush()
-
-        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
-            multihost_utils.sync_global_devices(f"{matrix_name}-stepwise-done")
-
-        elapsed = time.perf_counter() - t_start
-        self.build_timings_seconds[f"{matrix_name}_stepwise_save"] = elapsed
-        _log_build(self, f"saved {matrix_name} stepwise in {elapsed:.3f} s")
-    
-
-    # ------------------------
-    # Noise covariance matrices
-    # ------------------------
-    def _sigma_squared_array(self) -> jnp.ndarray:
-        """
-        Build the per-visibility noise variance vector for the current settings.
-
-        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
-        """
-        if self.effective_noise is not None:
-            return jnp.abs(self.effective_noise) ** 2
-
-        if self.sigma is None:
-            raise ValueError("sigma must be provided when effective_noise is None.")
-
-        # Expect bl_red_array shaped (n_t, n_bls) or (n_t, n_bls, 1).
-        red = jnp.asarray(self.bl_red_array)
-        if red.ndim == 3 and red.shape[-1] == 1:
-            red = red[..., 0]
-        if red.shape[0] != self.n_t or red.shape[1] != self.nbls:
-            raise ValueError("bl_red_array must have shape (n_t, n_bls) or (n_t, n_bls, 1).")
-
-        # Expand redundancy over frequency: (n_t, n_freq, n_bls) then flatten.
-        red_tf = jnp.repeat(red[:, jnp.newaxis, :], self.n_freq, axis=1)
-        red_tf = red_tf.reshape(-1)
-
-        sigma_redundancy = self.sigma / jnp.sqrt(red_tf)
-        return (sigma_redundancy ** 2).astype(jnp.complex128)
-
-    def build_Ninv(self) -> jnp.ndarray:
-        """
-        Build the inverse noise covariance diagonal (vector form).
-
-        Returns
-        -------
-        Ninv : jnp.ndarray
-            1D vector of shape (n_vis,) containing diag(N^{-1}), where
-            n_vis = n_freq * n_t * n_bls.
-        """
-        sigma_sq = self._sigma_squared_array()
-        return 1.0 / sigma_sq
-
-    def build_N(self) -> jnp.ndarray:
-        """
-        Build the noise covariance diagonal (vector form).
-
-        Returns
-        -------
-        N : jnp.ndarray
-            1D vector of shape (n_vis,) containing diag(N), where
-            n_vis = n_freq * n_t * n_bls.
-        """
-        sigma_sq = self._sigma_squared_array()
-        return sigma_sq
-
-    # ------------------
-    # Build T^H N^{-1} T
-    # ------------------
-
-    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
-        r"""
-        Build T^H N^{-1} T.
-
-        Parameters
-        ----------
-        T : jnp.ndarray
-            Forward operator with shape (n_vis, n_params_eta).
-        Ninv : jnp.ndarray
-            Inverse noise covariance diagonal in vector form with
-            shape (n_vis,), holding diag(N^{-1}).
-
-        Returns
-        -------
-        T_Ninv_T : jnp.ndarray
-            Dense matrix with shape (n_params_eta, n_params_eta), where 
-            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
-        """
-        
-        Ninv_T = Ninv[:, None] * T
-
-        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
-        return jnp.conj(T).T @ Ninv_T
-
-    # --------------------
-    # Matrix save/load API
-    # --------------------
-
-    def build_matrix_if_not_here(self, matrix_name: str) -> None:
-        r"""
-        Build and save a matrix if it does not already exist on disk.
-
-        Parameters
-        ----------
-        matrix_name : str
-            Name of the matrix to build and save.
-        """
-        if check_if_matrix_exists_impl(self, matrix_name):
-            return
-        if matrix_name == "T":
-            _log_build(self, "saving T by stepwise row-block memmap without building monolithic T")
-            self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
-            return
-        matrix = self._build_matrix_by_name(matrix_name)
-        save_matrix_impl(self, matrix_name, matrix)
-
-    def _build_matrix_by_name(self, matrix_name: str):
-        """Build a supported matrix by name."""
-        matrix = None
-        # if matrix_name == "Fz":
-        #     matrix = self.build_Fz()
-        # elif matrix_name == "Finv_Fprime":
-        #     matrix = self.build_Finv_Fprime()
-        if matrix_name == "T":
-            matrix = self.build_T_directly()
-        elif matrix_name == "Ninv":
-            matrix = self.build_Ninv()
-        elif matrix_name == "N":
-            matrix = self.build_N()
-        elif matrix_name == "T_Ninv_T":
-            T = load_matrix_impl(self, "T")
-            Ninv = load_matrix_impl(self, "Ninv")
-            try:
-                matrix = self.build_T_Ninv_T(T, Ninv)
-            finally:
-                # Drop large intermediates as soon as possible.
-                del T
-                del Ninv
-        else:
-            raise ValueError(f"Unsupported matrix name '{matrix_name}'.")
-        return matrix
-
-    def build_minimum_matrix_stack(self) -> None:
-        """
-        Build and save T, Ninv, then T_Ninv_T in that order.
-
-        This uses a disk-first workflow to avoid keeping large matrices in
-        memory longer than required.
-        """
-        # Ensure T exists on disk.
-        self.build_matrix_if_not_here("T")
-        # Ensure Ninv exists on disk.
-        self.build_matrix_if_not_here("Ninv")
-
-        # Build dense T_Ninv_T only if absent.
-        if not check_if_matrix_exists_impl(self, "T_Ninv_T"):
-            T_Ninv_T = self._build_matrix_by_name("T_Ninv_T")
-            try:
-                save_matrix_impl(self, "T_Ninv_T", T_Ninv_T)
-            finally:
-                del T_Ninv_T
-    
-    

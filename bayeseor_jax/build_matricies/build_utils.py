@@ -94,7 +94,20 @@ def check_if_matrix_exists(bm, matrix_name: str) -> bool:
     matrix_name : str
         Logical matrix name, e.g. ``"T"`` or ``"Ninv"``.
     """
-    return _dense_matrix_path(bm, matrix_name).exists()
+    path = _dense_matrix_path(bm, matrix_name)
+    exists = path.exists()
+    if getattr(jax, "distributed", None) is None or not jax.distributed.is_initialized():
+        return exists
+
+    decision_path = path.with_suffix(path.suffix + ".exists")
+    if jax.process_index() == 0:
+        decision_path.write_text("1" if exists else "0")
+
+    multihost_utils.sync_global_devices(f"{matrix_name}-exists-ready")
+    _wait_for_file(decision_path)
+    exists = decision_path.read_text().strip() == "1"
+    multihost_utils.sync_global_devices(f"{matrix_name}-exists-read")
+    return exists
 
 
 def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
@@ -175,6 +188,27 @@ def _prepare_memmap_output(
             raise RuntimeError(f"Unexpected ready token in {ready_path}")
 
     return np.load(path, mmap_mode="r+")
+
+
+def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
+    """
+    Convert a possibly open-ended slice into concrete local bounds.
+
+    Parameters
+    ----------
+    sl : slice
+        Slice object, potentially containing ``None`` bounds.
+    extent : int
+        Full length of the axis that the slice indexes.
+
+    Returns
+    -------
+    tuple of int
+        Concrete ``(start, stop)`` bounds within ``[0, extent]``.
+    """
+    start = 0 if sl.start is None else int(sl.start)
+    stop = extent if sl.stop is None else int(sl.stop)
+    return start, stop
 
 
 def save_dense_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
