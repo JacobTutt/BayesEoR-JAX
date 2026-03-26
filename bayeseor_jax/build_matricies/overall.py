@@ -15,7 +15,7 @@ from typing import Optional, Sequence, Tuple, Union
 import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
-from jax.experimental import multihost_utils, sparse
+from jax.experimental import multihost_utils
 from functools import partial
 
 from astropy.constants import c
@@ -31,12 +31,9 @@ from .beam_model import Beam_Model
 from .build_utils import (
     _dense_matrix_path as _dense_matrix_path_impl,
     _prepare_memmap_output as _prepare_memmap_output_impl,
-    _wait_for_file as _wait_for_file_impl,
     check_if_matrix_exists as check_if_matrix_exists_impl,
     get_T_component_layout as get_T_component_layout_impl,
-    load_dense_matrix as load_dense_matrix_impl,
     load_matrix as load_matrix_impl,
-    save_dense_matrix as save_dense_matrix_impl,
     save_matrix as save_matrix_impl,
 )
 from .jax_grid import MeshManager
@@ -885,11 +882,6 @@ class BuildMatrices:
     # Direct construction of T (stepwise UV chunking)
     # -----------------------------------------------
 
-    def get_T_component_layout(self) -> dict[str, dict[str, int]]:
-        """Return the direct-T column layout for EoR and foreground components."""
-        return get_T_component_layout_impl(self)
-    
-
     def save_T_stepwise_row_memmap(
         self,
         *,
@@ -904,14 +896,15 @@ class BuildMatrices:
         process builds the row blocks it owns and streams them directly into the
         final `.npy` memmap.
         """
-        path = self._dense_matrix_path(matrix_name)
-        layout = self.get_T_component_layout()
+        path = _dense_matrix_path_impl(self, matrix_name)
+        layout = get_T_component_layout_impl(self)
         n_rows = int(self.n_t * self.n_freq * self.nbls)
         n_cols = int(layout["fg_monopole"]["col_stop"])
         eor_uv_chunk = max(1, int(self.t_stepwise_eor_uv_chunk if eor_uv_chunk is None else eor_uv_chunk))
         fg_uv_chunk = max(1, int(self.t_stepwise_fg_uv_chunk if fg_uv_chunk is None else fg_uv_chunk))
 
-        mm = self._prepare_memmap_output(
+        mm = _prepare_memmap_output_impl(
+            self,
             path,
             shape=(n_rows, n_cols),
             dtype=np.dtype(np.complex128),
@@ -1125,85 +1118,6 @@ class BuildMatrices:
     # --------------------
     # Matrix save/load API
     # --------------------
-    # def _matrix_path(self, matrix_name: str) -> Path:
-    #     """Return the .npz path for a stored sparse matrix."""
-    #     return self.array_save_directory / f"{matrix_name}.npz"
-
-    def _dense_matrix_path(self, matrix_name: str) -> Path:
-        """Return the .npy path for a stored dense matrix."""
-        return _dense_matrix_path_impl(self, matrix_name)
-
-
-    def check_if_matrix_exists(self, matrix_name: str) -> bool:
-        """Return True if a saved matrix exists on disk."""
-        return check_if_matrix_exists_impl(self, matrix_name)
-
-    def _wait_for_file(self, path: Path, timeout_s: float = 120.0) -> None:
-        """Poll until a file becomes visible on the shared filesystem."""
-        _wait_for_file_impl(path, timeout_s=timeout_s)
-
-    def _prepare_memmap_output(
-        self,
-        path: Path,
-        *,
-        shape: tuple[int, ...],
-        dtype: np.dtype,
-        sync_name: str,
-    ) -> np.memmap:
-        """
-        Create or attach to a shared `.npy` memmap output.
-
-        Process 0 creates the file and publishes a ready token. Other processes
-        attach after a distributed barrier or, for non-distributed runs, by
-        polling the ready token.
-        """
-        return _prepare_memmap_output_impl(
-            self,
-            path,
-            shape=shape,
-            dtype=dtype,
-            sync_name=sync_name,
-        )
-
-    # def save_sparse_matrix(self, matrix_name: str, matrix: sparse.BCOO) -> None:
-    #     """Save a BCOO matrix to disk as data/indices/shape npz."""
-    #     path = self._matrix_path(matrix_name)
-    #     np.savez(
-    #         path,
-    #         data=np.array(matrix.data),
-    #         indices=np.array(matrix.indices),
-    #         shape=np.array(matrix.shape, dtype=np.int64),
-    #     )
-
-    def save_dense_matrix(self, matrix_name: str, matrix: jnp.ndarray) -> None:
-        """
-        Save a dense matrix to disk as `.npy`.
-
-        Distributed arrays are written shard-by-shard into a shared memmap so
-        that no process needs to gather the full global array.
-        """
-        save_dense_matrix_impl(self, matrix_name, matrix)
-
-    def save_matrix(self, matrix_name: str, matrix) -> None:
-        """Save a matrix, sparse as .npz or dense as .npy."""
-        save_matrix_impl(self, matrix_name, matrix)
-
-    # def load_sparse_matrix(self, matrix_name: str) -> sparse.BCOO:
-    #     """Load a BCOO matrix from disk."""
-    #     path = self._matrix_path(matrix_name)
-    #     with np.load(path) as npz:
-    #         data = jnp.array(npz["data"])
-    #         indices = jnp.array(npz["indices"])
-    #         shape = tuple(npz["shape"].tolist())
-    #     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
-
-    def load_dense_matrix(self, matrix_name: str) -> jnp.ndarray:
-        """Load a dense matrix from disk."""
-        return load_dense_matrix_impl(self, matrix_name)
-
-    def load_matrix(self, matrix_name: str):
-        """Load a matrix (sparse or dense) from disk."""
-        return load_matrix_impl(self, matrix_name)
 
     def build_matrix_if_not_here(self, matrix_name: str) -> None:
         r"""
@@ -1214,14 +1128,14 @@ class BuildMatrices:
         matrix_name : str
             Name of the matrix to build and save.
         """
-        if self.check_if_matrix_exists(matrix_name):
+        if check_if_matrix_exists_impl(self, matrix_name):
             return
         if matrix_name == "T":
             self._log_build("saving T by stepwise row-block memmap without building monolithic T")
             self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
             return
         matrix = self._build_matrix_by_name(matrix_name)
-        self.save_matrix(matrix_name, matrix)
+        save_matrix_impl(self, matrix_name, matrix)
 
     def _build_matrix_by_name(self, matrix_name: str):
         """Build a supported matrix by name."""
@@ -1237,8 +1151,8 @@ class BuildMatrices:
         elif matrix_name == "N":
             matrix = self.build_N()
         elif matrix_name == "T_Ninv_T":
-            T = self.load_matrix("T")
-            Ninv = self.load_matrix("Ninv")
+            T = load_matrix_impl(self, "T")
+            Ninv = load_matrix_impl(self, "Ninv")
             try:
                 matrix = self.build_T_Ninv_T(T, Ninv)
             finally:
@@ -1262,10 +1176,10 @@ class BuildMatrices:
         self.build_matrix_if_not_here("Ninv")
 
         # Build dense T_Ninv_T only if absent.
-        if not self.check_if_matrix_exists("T_Ninv_T"):
+        if not check_if_matrix_exists_impl(self, "T_Ninv_T"):
             T_Ninv_T = self._build_matrix_by_name("T_Ninv_T")
             try:
-                self.save_matrix("T_Ninv_T", T_Ninv_T)
+                save_matrix_impl(self, "T_Ninv_T", T_Ninv_T)
             finally:
                 del T_Ninv_T
     
