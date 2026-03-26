@@ -31,6 +31,7 @@ from bayeseor_jax.build_matricies import BuildMatrices  # noqa: E402
 from bayeseor_jax.build_matricies.build_utils import (  # noqa: E402
     _dense_matrix_path,
     _log_build,
+    save_dense_matrix,
 )
 from bayeseor_jax.setup import _resolve_uv_spacing, get_vis_data  # noqa: E402
 
@@ -285,7 +286,7 @@ def main() -> None:
 
         t1 = time.perf_counter()
         _log_build(bm, f"saving direct T as {args.direct_matrix_name}")
-        bm.save_dense_matrix(args.direct_matrix_name, T_direct)
+        save_dense_matrix(bm, args.direct_matrix_name, T_direct)
         summary["build_timings_seconds"]["T_direct_save"] = time.perf_counter() - t1
         del T_direct
 
