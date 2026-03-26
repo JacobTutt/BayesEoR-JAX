@@ -892,9 +892,25 @@ class BuildMatrices:
         """
         Build and save ``T`` block-by-block over ``(time, frequency)`` row slices.
 
+        Parameters
+        ----------
+        matrix_name : str, optional
+            Output matrix name. Defaults to ``"T"``.
+        eor_uv_chunk : int, optional
+            Number of EoR UV modes evaluated per local chunk. If omitted, the
+            instance default ``t_stepwise_eor_uv_chunk`` is used.
+        fg_uv_chunk : int, optional
+            Number of foreground UV modes evaluated per local chunk. If omitted,
+            the instance default ``t_stepwise_fg_uv_chunk`` is used.
+
+        Notes
+        -----
         This path never materializes the full mixed ``T`` array. Instead, each
-        process builds the row blocks it owns and streams them directly into the
-        final `.npy` memmap.
+        process loops over the ``(time, frequency)`` row blocks it owns, builds
+        only that block's EoR/foreground UV responses, and streams the resulting
+        rows directly into the final `.npy` memmap. The main materialization
+        boundary is therefore one small row block and UV chunk, not the full
+        distributed ``T`` object.
         """
         path = _dense_matrix_path_impl(self, matrix_name)
         layout = get_T_component_layout_impl(self)
@@ -912,12 +928,15 @@ class BuildMatrices:
         )
 
         t_start = time.perf_counter()
+        # Assign disjoint `(time, frequency)` row blocks across processes.
         process_index = int(jax.process_index())
         process_count = int(jax.process_count())
         n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
         eor_eta_count = int(self.n_eta - 1)
         lssm_mode_count = int(self.n_modes_fg)
 
+        # Precompute the 1D spectral bases once; each row block reuses the
+        # basis vector corresponding to its observing frequency.
         eor_basis = inverse_udft_1d_rect(
             self.n_freq,
             self.n_eta,
@@ -954,6 +973,7 @@ class BuildMatrices:
         lmn_center_fg = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
         lmn_center_eor = lmn_center_fg[:, self.lmn_model_space.eor_fg_shared_axis]
 
+        # The EoR UV->LM kernel is shared by every row block, so build it once.
         eor_uv_kernel = build_nudft_matrix(
             self.uv_model_space.uv_eor,
             lmn_center_eor,
@@ -981,9 +1001,14 @@ class BuildMatrices:
                     f"stepwise T save processing row block {block_index + 1}/{total_blocks}"
                 )
 
+            # Build the beam-weighted LMN->UVW operator for this single
+            # `(time, frequency)` block and keep all subsequent contractions
+            # local to these `n_bls` rows.
             beam_block = self._beam_weighted_nudft_lmn_to_uvw_block(i_f, i_t).block_until_ready()
             beam_block_eor = beam_block[:, self.lmn_model_space.eor_fg_shared_axis]
 
+            # EoR columns are written in UV chunks so only a small
+            # `(n_bls, uv_chunk * n_eta)` tile needs to materialize at once.
             for uv0 in range(0, self.n_uv_eor, eor_uv_chunk):
                 uv1 = min(uv0 + eor_uv_chunk, self.n_uv_eor)
                 eor_block = jnp.dot(beam_block_eor, eor_uv_kernel[:, uv0:uv1]).block_until_ready()
@@ -995,6 +1020,9 @@ class BuildMatrices:
                 col1 = col0 + (uv1 - uv0) * eor_eta_count
                 mm[row0:row1, col0:col1] = np.asarray(t_eor_rows)
 
+            # Foreground non-monopole columns are also streamed in UV chunks.
+            # For each chunk we write both the eta0 and LSSM contributions before
+            # discarding the temporary block.
             for uv0 in range(0, n_non_mp, fg_uv_chunk):
                 uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
                 fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
@@ -1015,6 +1043,8 @@ class BuildMatrices:
                     lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
                     mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
 
+            # The monopole block is a separate last-column FG mode and therefore
+            # only requires one small extra contraction per row block.
             if self.fit_for_monopole and fg_mp_kernel is not None:
                 fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
                 t_fg_mp_rows = fg_mp_block * mp_basis[i_f][None, :]
@@ -1022,6 +1052,8 @@ class BuildMatrices:
                 mp_col1 = int(layout["fg_monopole"]["col_stop"])
                 mm[row0:row1, mp_col0:mp_col1] = np.asarray(t_fg_mp_rows)
 
+            # Flush after each row block so the on-disk file always reflects the
+            # completed work, even for very long runs.
             mm.flush()
 
         if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
