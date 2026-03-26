@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+
+import jax
+
 from bayeseor_jax import * 
 
 
@@ -49,6 +53,13 @@ def run_example(config_path: str = "test_data/eor/config.yaml", do_sampling: boo
 
 def main() -> None:
     """Small runnable example with optional CLI overrides."""
+    if os.environ.get("SLURM_PROCID") is not None:
+        # Multi-node GH200 runs on Isambard currently need PXN disabled for the
+        # distributed collectives used by JAX/XLA to avoid NCCL failures.
+        os.environ.setdefault("NCCL_PXN_DISABLE", "1")
+        os.environ.setdefault("NCCL_P2P_PXN_LEVEL", "0")
+        jax.distributed.initialize()
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
