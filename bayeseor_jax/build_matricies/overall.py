@@ -1040,17 +1040,25 @@ class BuildMatrices:
             sync_name=f"{matrix_name}-blockwise-ready",
         )
 
-        # Cache the host-local visibility stripe once. This is the key change
-        # from the earlier disk-first implementation: the hot loop below never
-        # rereads `T.npy` or `Ninv.npy`.
-        local_T = np.asarray(T_mm[row0:row1, :])
-        local_Ninv = np.asarray(Ninv_mm[row0:row1])
-
         devices = np.asarray(jax.devices(), dtype=object)
         if devices.size != process_count * local_device_count:
             raise ValueError(
                 "jax.devices() size must equal process_count * local_device_count for cached T_Ninv_T"
             )
+        row_shards = int(devices.size)
+        n_params_padded = int(((n_params + row_shards - 1) // row_shards) * row_shards)
+        pad_cols = int(n_params_padded - n_params)
+
+        # Cache the host-local visibility stripe once. When the parameter count
+        # is not divisible by the global row-sharding factor we pad only these
+        # in-memory copies with trailing zero columns. The output memmap keeps
+        # the true `(n_params, n_params)` shape and every block write is clipped
+        # back to the valid physical rows/columns below.
+        local_T = np.asarray(T_mm[row0:row1, :])
+        if pad_cols:
+            local_T = np.pad(local_T, ((0, 0), (0, pad_cols)), mode="constant")
+        local_Ninv = np.asarray(Ninv_mm[row0:row1])
+
         mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
 
         total_param_blocks = int((n_params + block_cols - 1) // block_cols)
@@ -1073,7 +1081,13 @@ class BuildMatrices:
                 # advancing so long runs always leave durable progress behind.
                 i0 = int(block_i * block_cols)
                 i1 = int(min(i0 + block_cols, n_params))
-                left_width = i1 - i0
+                valid_left_width = i1 - i0
+                left_width = int(
+                    min(
+                        ((valid_left_width + row_shards - 1) // row_shards) * row_shards,
+                        n_params_padded - i0,
+                    )
+                )
 
                 if process_index == 0:
                     _log_build(
@@ -1091,7 +1105,8 @@ class BuildMatrices:
                     # less time on launch overhead.
                     j0 = int(block_j_start * block_cols)
                     j1 = int(min(j0 + right_block_batch * block_cols, n_params))
-                    right_width = j1 - j0
+                    valid_right_width = j1 - j0
+                    right_width = valid_right_width
 
                     gram_batch = self._build_T_Ninv_T_cached_block_batch(
                         T,
@@ -1112,16 +1127,25 @@ class BuildMatrices:
                         block_host = np.asarray(shard.data)
                         row_start, row_stop = _slice_bounds_impl(row_slice, left_width)
                         col_start, col_stop = _slice_bounds_impl(col_slice, right_width)
+                        row_stop_valid = min(row_stop, valid_left_width)
+                        col_stop_valid = min(col_stop, valid_right_width)
+                        if row_stop_valid <= row_start or col_stop_valid <= col_start:
+                            continue
+
+                        keep_rows = row_stop_valid - row_start
+                        keep_cols = col_stop_valid - col_start
+                        block_host = block_host[:keep_rows, :keep_cols]
+
                         rr0 = i0 + row_start
-                        rr1 = i0 + row_stop
+                        rr1 = i0 + row_stop_valid
                         cc0 = j0 + col_start
-                        cc1 = j0 + col_stop
+                        cc1 = j0 + col_stop_valid
 
                         mm[rr0:rr1, cc0:cc1] = block_host
                         # The normal matrix is Hermitian, so every strict
                         # upper-triangle block determines its mirrored partner.
                         # Mirroring here avoids a separate post-processing pass.
-                        if j0 != i0 or j1 != i1:
+                        if j0 != i0 or valid_right_width != valid_left_width:
                             mm[cc0:cc1, rr0:rr1] = block_host.conj().T
 
                 # Flush after each completed parameter-block row so the dense

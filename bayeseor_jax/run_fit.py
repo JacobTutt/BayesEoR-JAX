@@ -25,8 +25,11 @@ def run_inference(
     setup_result: SetupResult,
     out_dir: Path | str,
     random_key: int = 0,
+    n_live: int | None = None,
     n_live_scale_factor: float = 25.0,
+    num_inner_steps: int | None = None,
     num_inner_scale_factor: float = 3.0,
+    num_delete: int | None = None,
     delete_scale_factor: float = 0.025,
     stop_threshold: float = -3.0,
 ) -> dict[str, Any]:
@@ -41,10 +44,19 @@ def run_inference(
         Directory where nested-sampling outputs and summary files are written.
     random_key : int, optional
         PRNG seed used to initialize nested sampling.
+    n_live : int, optional
+        Explicit live-point count. If omitted, computed from
+        ``n_live_scale_factor * n_dim``.
     n_live_scale_factor : float, optional
         Live-point count scale factor applied to the inferred parameter count.
+    num_inner_steps : int, optional
+        Explicit number of inner MCMC steps. If omitted, computed from
+        ``num_inner_scale_factor * n_dim``.
     num_inner_scale_factor : float, optional
         Number of inner MCMC steps scale factor applied to parameter count.
+    num_delete : int, optional
+        Explicit number of live points replaced per NS iteration. If omitted,
+        computed from ``delete_scale_factor * n_live``.
     delete_scale_factor : float, optional
         Fraction of live points replaced at each nested-sampling iteration.
     stop_threshold : float, optional
@@ -68,9 +80,17 @@ def run_inference(
     likelihood_class = setup_result.likelihood_class
     n_dim = int(prior_class.bounds_log.shape[0])
 
-    n_live = int(np.ceil(n_live_scale_factor * n_dim))
-    num_inner_steps = int(np.ceil(num_inner_scale_factor * n_dim))
-    num_delete = max(1, int(np.floor(delete_scale_factor * n_live)))
+    n_live = int(n_live) if n_live is not None else int(np.ceil(n_live_scale_factor * n_dim))
+    num_inner_steps = (
+        int(num_inner_steps)
+        if num_inner_steps is not None
+        else int(np.ceil(num_inner_scale_factor * n_dim))
+    )
+    num_delete = (
+        max(1, int(num_delete))
+        if num_delete is not None
+        else max(1, int(np.floor(delete_scale_factor * n_live)))
+    )
 
     # Configure the nested sampler; `step(...)` uses these callbacks/settings.
     ns_algo = blackjax.nss(
