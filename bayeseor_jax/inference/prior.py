@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import distrax
 from functools import partial
 
-
 class Prior:
     """
     Sampler-space prior configuration.
@@ -17,10 +16,6 @@ class Prior:
     bounds_log : jax.Array
         Power-spectrum parameter bounds with shape ``(n_power_params, 2)`` in
         log10 space.
-    uniform_priors : jax.Array, optional
-        Boolean mask over power-spectrum parameters where True indicates that
-        parameter is sampled directly in linear power space. False entries are
-        sampled in ``log10`` power space.
     power_param_start : int, optional
         Start index of power-spectrum parameters within ``theta``.
     n_power_params : int
@@ -30,7 +25,6 @@ class Prior:
     def __init__(
         self,
         bounds_log: jax.Array,
-        uniform_priors: jax.Array | None = None,
         power_param_start: int = 0,
         n_power_params: int = 0,
     ) -> None:
@@ -47,35 +41,12 @@ class Prior:
                 f"{bounds_log.shape[0]} != {n_power_params}"
             )
 
-        # 2) Build/validate the per-bin mask controlling sampler coordinates:
-        #    True  -> sample this bin directly in linear power space.
-        #    False -> sample this bin in log10(power) space.
-        if uniform_priors is None:
-            self.uniform_priors = jnp.zeros((n_power_params,), dtype=bool)
-        else:
-            mask = jnp.asarray(uniform_priors, dtype=bool)
-            if mask.shape != (n_power_params,):
-                raise ValueError(
-                    "uniform_priors must have shape "
-                    f"({n_power_params},), got {mask.shape}"
-                )
-            self.uniform_priors = mask
-
-        # 3) Convert log-space bounds to linear-space bounds (10**x), then
-        #    construct the actual sampler bounds used by logprior/sample:
-        #    - uniform_priors=True  -> use linear bounds
-        #    - uniform_priors=False -> keep log10 bounds
-        bounds_linear = jnp.power(10.0, bounds_log)
+        # The sampler always works in log10(power) coordinates. Any optional
+        # Jacobian correction for linear-uniform physical priors is handled in
+        # the likelihood classes, not here.
         self.bounds_log = bounds_log
-        self.bounds = jnp.stack(
-            [
-                jnp.where(self.uniform_priors, bounds_linear[:, 0], bounds_log[:, 0]),
-                jnp.where(self.uniform_priors, bounds_linear[:, 1], bounds_log[:, 1]),
-            ],
-            axis=1,
-        )
-        self.lower = self.bounds[:, 0]
-        self.upper = self.bounds[:, 1]
+        self.lower = bounds_log[:, 0]
+        self.upper = bounds_log[:, 1]
         # Cache one distrax prior object for repeated log_prob/sample calls.
         self.uniform_prior = distrax.Uniform(self.lower, self.upper)
         self.power_param_start = power_param_start
@@ -111,159 +82,28 @@ class Prior:
         )
 
 
-
-
-class PhiInverse:
-    """
-    Prior-precision configuration for the latent linear coefficients.
-
-    In the hierarchical model, the latent coefficient vector ``a`` is given a
-    zero-mean Gaussian prior, ``a ~ N(0, Phi)``, where ``Phi`` is diagonal in
-    this implementation. The object stores the static ingredients needed to
-    construct ``Phi^{-1}`` (the prior precision) from sampled power-spectrum
-    amplitudes during each likelihood evaluation.
-
-    Statistically, ``Phi^{-1}`` controls shrinkage/regularization of latent
-    modes:
-
-    - larger precision => stronger pull of coefficients toward zero
-    - smaller precision => weaker prior constraint (broader prior)
-
-    The resulting precision enters the marginalized Gaussian system as
-    ``Sigma = T^H N^{-1} T + Phi^{-1}``, so it directly affects MAP estimates,
-    posterior curvature, and evidence values.
-
-    To keep repeated log-likelihood calls cheap, this class precomputes and
-    stores geometry/cosmology-dependent terms (voxel->bin mapping and per-bin
-    normalization factors) that do not change with ``theta``.
-
-    Parameters
-    ----------
-    bin_id_per_k_mode : jax.Array
-        Native spherical-bin assignment from ``k_cube.py`` with shape
-        ``(n_eor_voxels,)`` and invalid entries encoded as ``-1``.
-    valid_mask : jax.Array
-        Native validity mask from ``k_cube.py`` with shape
-        ``(n_eor_voxels,)``.
-    k_vals : jax.Array
-        Mean k value per spherical bin.
-    ps_box_size_ra_mpc : float
-        Comoving box size along RA-like transverse axis, in Mpc.
-    ps_box_size_dec_mpc : float
-        Comoving box size along Dec-like transverse axis, in Mpc.
-    ps_box_size_para_mpc : float
-        Comoving box size along LOS axis, in Mpc.
-    inst_to_cosmo_vol : float or jax.Array
-        Conversion factor from instrumental voxel units to comoving units.
-    n_par : int
-        Total number of latent linear coefficients (EoR + FG/LSSM).
-    inverse_lw_power : float, optional
-        Prior precision assigned to FG/LSSM amplitudes.
-    """
-
-    def __init__(
-        self,
-        bin_id_per_k_mode: jax.Array,
-        valid_mask: jax.Array,
-        k_vals: jax.Array,
-        ps_box_size_ra_mpc: float,
-        ps_box_size_dec_mpc: float,
-        ps_box_size_para_mpc: float,
-        inst_to_cosmo_vol: float | jax.Array,
-        n_par: int,
-        inverse_lw_power: float = 1e-16,
-    ) -> None:
-        self.kbin_index_per_voxel = build_kbin_index_per_voxel(
-            bin_id_per_k_mode=bin_id_per_k_mode,
-            valid_mask=valid_mask,
-        )
-        self.power_norm_per_bin = compute_power_norm_per_bin(
-            k_vals=jnp.asarray(k_vals, dtype=jnp.float64),
-            ps_box_size_ra_mpc=ps_box_size_ra_mpc,
-            ps_box_size_dec_mpc=ps_box_size_dec_mpc,
-            ps_box_size_para_mpc=ps_box_size_para_mpc,
-            inst_to_cosmo_vol=jnp.asarray(inst_to_cosmo_vol, dtype=jnp.float64),
-        )
-        self.n_par = n_par
-        self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
-        self.inverse_lw_power = inverse_lw_power
-
-    def evaluate(self, theta_power_linear: jax.Array) -> jax.Array:
-        """
-        Build diagonal prior precision ``Phi^{-1}`` for current power amplitudes.
-
-        Parameters
-        ----------
-        theta_power_linear : jax.Array
-            Linear-space power-spectrum amplitudes for each non-empty k-bin.
-
-        Returns
-        -------
-        jax.Array
-            Diagonal precision vector with EoR entries followed by FG/LSSM
-            entries.
-        """
-        safe_theta = jnp.maximum(
-            theta_power_linear, jnp.finfo(theta_power_linear.dtype).tiny
-        )
-        poweri_per_bin = self.power_norm_per_bin / safe_theta
-
-        idx = self.kbin_index_per_voxel
-        valid = idx >= 0
-        idx_clip = jnp.clip(idx, 0, poweri_per_bin.shape[0] - 1)
-        phi_eor = jnp.where(valid, poweri_per_bin[idx_clip], 0.0)
-
-        n_fg = self.n_par - self.n_eor_voxels
-        phi_fg = jnp.full((n_fg,), self.inverse_lw_power, dtype=phi_eor.dtype)
-        return jnp.concatenate([phi_eor, phi_fg], axis=0)
-
-
-def build_kbin_index_per_voxel(
-    bin_id_per_k_mode: jax.Array,
-    valid_mask: jax.Array,
-) -> jax.Array:
-    """
-    Build an index map from native ``k_cube.py`` assignments.
-
-    Valid entries keep their bin ID and invalid entries are set to ``-1``.
-    """
-    bid = jnp.asarray(bin_id_per_k_mode, dtype=jnp.int32)
-    valid = jnp.asarray(valid_mask, dtype=bool)
-    return jnp.where(valid, bid, -1).astype(jnp.int32)
-
-
-def compute_power_norm_per_bin(
-    k_vals: jax.Array,
-    ps_box_size_ra_mpc: float,
-    ps_box_size_dec_mpc: float,
-    ps_box_size_para_mpc: float,
-    inst_to_cosmo_vol: jax.Array,
-) -> jax.Array:
-    """
-    Compute old-BayesEoR dimensionless power normalization per k-bin.
-
-    This matches the normalization used in old `posterior.py`:
-
-    ``norm_i = (k_i^3 / (2*pi^2)) / V_cosmo * (inst_to_cosmo_vol)^2``
-    """
-    cosmo_volume = (
-        jnp.asarray(ps_box_size_ra_mpc, dtype=jnp.float64)
-        * jnp.asarray(ps_box_size_dec_mpc, dtype=jnp.float64)
-        * jnp.asarray(ps_box_size_para_mpc, dtype=jnp.float64)
-    )
-    return (k_vals**3 / (2.0 * jnp.pi**2)) / cosmo_volume * (inst_to_cosmo_vol**2)
-
-
 def theta_power_to_linear(
     theta_power: jax.Array,
-    uniform_priors: jax.Array,
 ) -> jax.Array:
     """
     Convert sampled power parameters to linear scale.
 
-    ``uniform_priors=True`` entries are already linear; False entries are
-    interpreted as log10(power) and exponentiated.
+    The sampler always works in log10(power) coordinates, so all sampled
+    power parameters are exponentiated here.
     """
-    mask = jnp.asarray(uniform_priors, dtype=bool)
-    return jnp.where(mask, theta_power, jnp.power(10.0, theta_power))
+    return jnp.power(10.0, theta_power)
 
+
+def linear_uniform_log_jacobian(
+    theta_power: jax.Array,
+    uniform_priors: jax.Array,
+) -> jax.Array:
+    """
+    Jacobian correction for bins with linear-uniform physical priors.
+
+    The sampler coordinates are always ``log10(power)``. For bins whose
+    intended physical prior is uniform in linear power, the old BayesEoR
+    target adds ``sum(log(power_linear))`` to the log density, which is
+    equivalent to ``log(10) * sum(theta_power)`` over those bins.
+    """
+    return jnp.log(10.0) * jnp.sum(jnp.where(uniform_priors, theta_power, 0.0))

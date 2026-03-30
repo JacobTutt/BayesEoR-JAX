@@ -18,7 +18,8 @@ from .analyze import (
     MaximumAPosteriori,
 )
 from .inference import (
-    Likelihood,
+    FullLikelihood,
+    MarginalisedLikelihood,
     PhiInverse,
     Prior,
     build_kbin_index_per_voxel,
@@ -31,6 +32,7 @@ from .model import (
 )
 from .params import BayesEoRParser
 from .run_fit import run_inference
+from .run_hmc import run_full_nuts, run_marginalised_nuts
 from .setup import SetupResult, get_vis_data, run_setup
 from .utils import (
     load_numpy_dict,
@@ -47,7 +49,8 @@ __all__ = [
     "BayesEoRParser",
     "Cosmology",
     "InstrumentModel",
-    "Likelihood",
+    "MarginalisedLikelihood",
+    "FullLikelihood",
     "PhiInverse",
     "Prior",
     "build_kbin_index_per_voxel",
@@ -61,6 +64,8 @@ __all__ = [
     "get_vis_data",
     "run_setup",
     "run_inference",
+    "run_full_nuts",
+    "run_marginalised_nuts",
     "form_pI_vis",
     "jy_to_ksr",
     "save_numpy_dict",

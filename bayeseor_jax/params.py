@@ -40,9 +40,10 @@ class BayesEoRParser(ArgumentParser):
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
     uniform_priors : list of bool/int, optional
-        Boolean mask over k bins where True indicates uniform prior in linear
-        power (sampled directly in linear space). False bins are sampled in
-        log10 space.
+        Boolean mask over k bins where True indicates a linear-uniform
+        physical prior implemented through a Jacobian correction in the
+        likelihood. Sampler coordinates remain in log10-power space for all
+        bins.
     inverse_lw_power : float, optional
         Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
     use_intrinsic_noise_fitting : bool, optional

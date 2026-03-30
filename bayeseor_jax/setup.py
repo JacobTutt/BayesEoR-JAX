@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
+from functools import partial
+import time
 import warnings
 
 import jax
@@ -11,10 +14,15 @@ import jax.numpy as jnp
 # from jax.experimental import sparse
 import numpy as np
 from astropy.time import Time
+from jax.experimental import multihost_utils
+from jax.experimental.pjit import pjit
+from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
 from .build_matricies import BuildMatrices
-from .inference.likelihood import Likelihood
-from .inference.prior import PhiInverse, Prior
+from .build_matricies.build_utils import load_matrix
+from .inference.likelihood_marg import MarginalisedLikelihood
+from .inference.phi import PhiInverse
+from .inference.prior import Prior
 from .model.cosmology_transforms import Cosmology
 from .model.instrument import InstrumentModel
 from .model.k_cube import (
@@ -25,7 +33,7 @@ from .model.k_cube import (
     mask_k_cube,
 )
 from .model.noise import generate_gaussian_noise
-from .utils import load_numpy_dict
+from .utils import load_numpy_dict, load_sharded_npy
 from .vis import preprocess_uvdata
 
 jax.config.update("jax_enable_x64", True)
@@ -102,6 +110,132 @@ def _resolve_uv_spacing(
         )
 
     return du_val, dv_val
+
+
+def _wait_for_file_visible(path: Path, timeout_s: float = 120.0) -> None:
+    """Poll until a file becomes visible on the shared filesystem."""
+    deadline = time.time() + timeout_s
+    while not path.exists():
+        if time.time() > deadline:
+            raise TimeoutError(f"Timed out waiting for {path}")
+        time.sleep(0.2)
+
+
+def _select_marginalised_likelihood_backend(*, distributed: bool) -> str:
+    """Choose the dense solver backend for the marginalized likelihood."""
+    if not distributed:
+        return "jax"
+    if importlib.util.find_spec("jaxmg") is not None:
+        return "jaxmg"
+    warnings.warn(
+        "Multiple devices are visible but jaxmg is not importable; falling back "
+        "to the existing 2D JAX Cholesky likelihood backend.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return "jax"
+
+
+def _build_and_save_compressed_likelihood_terms(
+    bm: BuildMatrices,
+    vis_noisy: jax.Array,
+) -> int:
+    """
+    Build and save ``dbar`` and ``d_ninv_d`` into the matrix directory.
+
+    The saved design matrix ``T.npy`` is loaded directly into a row-sharded
+    global JAX array so all visible GPUs participate in the dense matvec
+
+    ``dbar = T^H N^{-1} d``.
+
+    This keeps the workflow simple: load the saved matrices once, distribute
+    the large ``T`` matrix across all devices, evaluate the compressed terms,
+    and save the results back into the matrix directory for later inference
+    loads.
+
+    Returns
+    -------
+    int
+        Number of model parameters, i.e. the length of ``dbar``.
+    """
+    matrix_dir = Path(bm.array_save_directory)
+    dbar_path = matrix_dir / "dbar.npy"
+    d_ninv_d_path = matrix_dir / "d_ninv_d.npy"
+    t_path = matrix_dir / "T.npy"
+
+    if dbar_path.exists() and d_ninv_d_path.exists():
+        dbar_mm = np.load(dbar_path, mmap_mode="r")
+        return int(dbar_mm.shape[0])
+
+    ninv = np.asarray(load_matrix(bm, "Ninv")).reshape(-1)
+    vis_noisy_np = np.asarray(vis_noisy, dtype=np.complex128).reshape(-1)
+
+    if ninv.ndim != 1:
+        raise ValueError(
+            "Compressed-term build currently requires saved diagonal Ninv."
+        )
+
+    ninv_d = ninv * vis_noisy_np
+    t_mm = np.load(t_path, mmap_mode="r")
+    n_vis, n_params = map(int, t_mm.shape)
+    if ninv_d.shape != (n_vis,):
+        raise ValueError(
+            f"Ninv_d has shape {ninv_d.shape} but T has {n_vis} visibility rows."
+        )
+
+    if int(jax.device_count()) > 1:
+        devices = np.asarray(jax.devices(), dtype=object)
+        mesh = Mesh(devices, ("data",))
+        matrix_sharding = NamedSharding(mesh, P("data", None))
+        vector_sharding = NamedSharding(mesh, P("data"))
+
+        @partial(
+            pjit,
+            in_shardings=(P("data", None), P("data")),
+            out_shardings=P(None),
+        )
+        def _build_dbar(t_matrix: jax.Array, ninv_d_vec: jax.Array) -> jax.Array:
+            return jnp.conj(t_matrix).T @ ninv_d_vec
+
+        @partial(
+            pjit,
+            in_shardings=(P("data"), P("data")),
+            out_shardings=P(),
+        )
+        def _build_d_ninv_d(
+            vis_noisy_vec: jax.Array, ninv_d_vec: jax.Array
+        ) -> jax.Array:
+            return jnp.real(jnp.vdot(vis_noisy_vec, ninv_d_vec))
+
+        with mesh:
+            t_matrix = load_sharded_npy(t_path, matrix_sharding, dtype=np.complex128)
+            ninv_d_vec = jax.device_put(jnp.asarray(ninv_d), vector_sharding)
+            vis_noisy_vec = jax.device_put(
+                jnp.asarray(vis_noisy_np, dtype=jnp.complex128),
+                vector_sharding,
+            )
+
+            dbar = _build_dbar(t_matrix, ninv_d_vec)
+            d_ninv_d = _build_d_ninv_d(vis_noisy_vec, ninv_d_vec)
+            dbar.block_until_ready()
+            d_ninv_d.block_until_ready()
+    else:
+        t_matrix = jnp.asarray(np.asarray(t_mm, dtype=np.complex128))
+        ninv_d_vec = jnp.asarray(ninv_d, dtype=jnp.complex128)
+        vis_noisy_vec = jnp.asarray(vis_noisy_np, dtype=jnp.complex128)
+        dbar = jnp.conj(t_matrix).T @ ninv_d_vec
+        d_ninv_d = jnp.real(jnp.vdot(vis_noisy_vec, ninv_d_vec))
+
+    if jax.process_index() == 0:
+        np.save(dbar_path, np.asarray(dbar))
+        np.save(d_ninv_d_path, np.asarray(d_ninv_d))
+
+    if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+        multihost_utils.sync_global_devices("compressed-terms-saved")
+        _wait_for_file_visible(dbar_path)
+        _wait_for_file_visible(d_ninv_d_path)
+
+    return n_params
 
 
 def get_vis_data(
@@ -411,9 +545,10 @@ def run_setup(
         Power-spectrum prior bounds with shape ``(n_power_params, 2)`` in
         log10 space.
     uniform_priors : array-like of bool, optional
-        Boolean mask of length ``n_power_params`` where True bins are sampled
-        directly in linear power space and False bins are sampled in log10
-        space. If None, all bins are sampled in log10 space.
+        Boolean mask of length ``n_power_params`` where True bins use the
+        old BayesEoR linear-uniform physical prior implemented via a Jacobian
+        correction inside the likelihood. Sampler coordinates remain in
+        log10-power space for all bins.
     inverse_lw_power : float, optional
         Inverse prior power assigned to FG/LSSM latent coefficients.
     use_intrinsic_noise_fitting : bool, optional
@@ -620,31 +755,16 @@ def run_setup(
     )
     bm.build_minimum_matrix_stack()
 
-    # Load compressed matrix terms and form:
-    #   dbar = T^H N^-1 d
-    #   d_Ninv_d = d^H N^-1 d
-    # using sparse matvecs upstream to avoid unnecessary dense materialization.
-    T = bm.load_matrix("T")
-    Ninv = bm.load_matrix("Ninv")
-    T_Ninv_T = bm.load_matrix("T_Ninv_T")
-    if hasattr(T, "todense"):
-        T = T.todense()
-    T = jnp.asarray(T)
-
+    # The matrix stack saves the heavy matrix products into `array_save_directory`.
+    # Build the remaining compressed data terms from those saved products so the
+    # likelihood can initialize directly from disk without reloading the full
+    # dense design matrix into one process.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    Ninv = jnp.asarray(Ninv)
-    if Ninv.ndim == 1:
-        Ninv_d = Ninv * vis_noisy
-    elif Ninv.ndim == 2:
-        Ninv_d = Ninv @ vis_noisy
-    else:
-        raise ValueError("Loaded Ninv must be 1D (diag vector) or 2D (matrix).")
-    dbar = jnp.conj(T).T @ Ninv_d
-    d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
+    n_params = _build_and_save_compressed_likelihood_terms(bm, vis_noisy)
 
     # Assemble sampler-space prior and latent-space precision configs.
-    # `Prior` now receives log-space bounds and constructs sampler-space bounds.
-    # `PhiInverse` maps sampled power amplitudes to latent precision diag.
+    # `Prior` now works directly in log10(power) sampler coordinates.
+    # `PhiInverse` maps linearized power amplitudes to latent precision diag.
     if priors is None:
         raise ValueError("priors must be provided")
 
@@ -669,7 +789,6 @@ def run_setup(
 
     prior_class = Prior(
         bounds_log=bounds_log,
-        uniform_priors=uniform_priors_mask,
         power_param_start=0,
         n_power_params=n_power_params,
     )
@@ -682,14 +801,19 @@ def run_setup(
         ps_box_size_dec_mpc=ps_box_size_dec_mpc,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
         inst_to_cosmo_vol=float(cosmo.inst_to_cosmo_vol(z)),
-        n_par=int(T_Ninv_T.shape[0]),
+        n_par=int(n_params),
         inverse_lw_power=float(inverse_lw_power),
     )
     
-    likelihood_class = Likelihood(
-        t_ninv_t=jnp.asarray(T_Ninv_T),
-        dbar=jnp.asarray(dbar),
-        d_ninv_d=jnp.asarray(d_ninv_d),
+    distributed_likelihood = bool(int(jax.device_count()) > 1)
+    likelihood_backend = _select_marginalised_likelihood_backend(
+        distributed=distributed_likelihood
+    )
+
+    likelihood_class = MarginalisedLikelihood(
+        matrix_dir=str(array_save_directory),
+        distributed=distributed_likelihood,
+        backend=likelihood_backend,
         n_data=int(vis_noisy.size),
         phi_inv_class=phi_inverse_class,
         prior_class=prior_class,

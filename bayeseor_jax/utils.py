@@ -10,6 +10,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.sharding import NamedSharding
 
 jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)
@@ -208,3 +209,40 @@ def load_numpy_dict(fp: Path | str, as_jax: bool = False) -> Any:
         except (TypeError, ValueError):
             return loaded
     return loaded
+
+
+def load_sharded_npy(
+    fp: Path | str,
+    sharding: NamedSharding,
+    *,
+    dtype: np.dtype | None = None,
+) -> jax.Array:
+    """
+    Load a dense ``.npy`` array directly into a sharded JAX array.
+
+    Parameters
+    ----------
+    fp : pathlib.Path or str
+        Path to the ``.npy`` file.
+    sharding : jax.sharding.NamedSharding
+        Target sharding for the returned global array.
+    dtype : numpy.dtype or None, optional
+        Optional dtype override applied shard-by-shard while loading.
+
+    Returns
+    -------
+    jax.Array
+        Global array whose addressable shards are read lazily from the file.
+    """
+    if not isinstance(fp, Path):
+        fp = Path(fp)
+    if not fp.exists():
+        raise FileNotFoundError(f"{fp} does not exist")
+
+    mm = np.load(fp, mmap_mode="r")
+    out_dtype = np.dtype(mm.dtype if dtype is None else dtype)
+
+    def _callback(index):
+        return np.asarray(mm[index], dtype=out_dtype)
+
+    return jax.make_array_from_callback(mm.shape, sharding, _callback)
