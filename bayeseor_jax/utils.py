@@ -17,6 +17,13 @@ jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)
 
 
+def block_until_ready(value: Any) -> Any:
+    """Synchronize a JAX-backed value and return the realized object."""
+    if hasattr(value, "block_until_ready"):
+        return value.block_until_ready()
+    return value
+
+
 def mpiprint(*args: Any, rank: int = 0, **kwargs: Any) -> None:
     """
     Lightweight rank-gated print helper.
@@ -180,8 +187,7 @@ def estimate_average_eval_time(
     start = time.perf_counter()
     for _ in range(int(avg_iters)):
         value = likelihood_fn(theta_ref)
-        if hasattr(value, "block_until_ready"):
-            value = value.block_until_ready()
+        value = block_until_ready(value)
         if not np.isfinite(float(np.asarray(value))):
             raise ValueError("Non-finite likelihood value encountered during timing.")
     return (time.perf_counter() - start) / max(1, int(avg_iters))

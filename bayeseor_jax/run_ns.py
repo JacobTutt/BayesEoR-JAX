@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import jax
+jax.config.update("jax_enable_x64", True)
+
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
 import blackjax
-import jax
-jax.config.update("jax_enable_x64", True)
+
 import numpy as np
 from anesthetic import NestedSamples
 from blackjax.ns import adaptive as ns_adaptive
@@ -19,16 +21,13 @@ from pymultinest.solve import solve
 from tqdm.auto import tqdm
 
 from .setup import SetupResult
-from .utils import estimate_average_eval_time, validate_multinest_output_path
+from .utils import (
+    block_until_ready,
+    estimate_average_eval_time,
+    validate_multinest_output_path,
+)
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _block_until_ready_scalar(value: Any) -> float:
-    """Return a Python float from a scalar that may live on a JAX device."""
-    if hasattr(value, "block_until_ready"):
-        value = value.block_until_ready()
-    return float(np.asarray(value))
 
 
 def run_blackjaxns(
@@ -254,7 +253,7 @@ def run_multinest(
 
     def loglikelihood(theta):
         value = likelihood_class.log_likelihood(theta)
-        return _block_until_ready_scalar(value)
+        return float(np.asarray(block_until_ready(value)))
 
     solve_kwargs: dict[str, Any] = {
         "LogLikelihood": loglikelihood,
