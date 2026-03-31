@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jaxmg
 import numpy as np
@@ -347,7 +348,7 @@ class MarginalisedLikelihood:
         row-sharded solver mesh, and returns the old BayesEoR-style objective
         with optional intrinsic-noise and Jacobian corrections.
         """
-        theta = jnp.asarray(theta)
+        theta = jnp.asarray(theta, dtype=jnp.float64)
         with self.mesh:
             return self._log_likelihood_impl(
                 self.t_ninv_t,

@@ -7,6 +7,8 @@ from pathlib import Path
 from pprint import pformat
 from typing import Any
 
+import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 import jax.scipy as jsp
