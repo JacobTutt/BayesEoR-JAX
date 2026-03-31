@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from typing import Any
 from functools import partial
@@ -119,21 +118,6 @@ def _wait_for_file_visible(path: Path, timeout_s: float = 120.0) -> None:
         if time.time() > deadline:
             raise TimeoutError(f"Timed out waiting for {path}")
         time.sleep(0.2)
-
-
-def _select_marginalised_likelihood_backend(*, distributed: bool) -> str:
-    """Choose the dense solver backend for the marginalized likelihood."""
-    if not distributed:
-        return "jax"
-    if importlib.util.find_spec("jaxmg") is not None:
-        return "jaxmg"
-    warnings.warn(
-        "Multiple devices are visible but jaxmg is not importable; falling back "
-        "to the existing 2D JAX Cholesky likelihood backend.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
-    return "jax"
 
 
 def _build_and_save_compressed_likelihood_terms(
@@ -805,15 +789,8 @@ def run_setup(
         inverse_lw_power=float(inverse_lw_power),
     )
     
-    distributed_likelihood = bool(int(jax.device_count()) > 1)
-    likelihood_backend = _select_marginalised_likelihood_backend(
-        distributed=distributed_likelihood
-    )
-
     likelihood_class = MarginalisedLikelihood(
         matrix_dir=str(array_save_directory),
-        distributed=distributed_likelihood,
-        backend=likelihood_backend,
         n_data=int(vis_noisy.size),
         phi_inv_class=phi_inverse_class,
         prior_class=prior_class,

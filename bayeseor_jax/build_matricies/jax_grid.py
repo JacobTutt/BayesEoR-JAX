@@ -1,62 +1,14 @@
-"""Simple JAX mesh/sharding helpers for matrix-build workloads.
+"""Simple JAX mesh/sharding helpers for BayesEoR-JAX workloads.
 
 This module intentionally keeps a single mesh axis over all devices and shards
-only the leading array dimension. That matches the current BuildMatrices usage,
-where frequency/time-like batch axes are the natural split dimension.
+only the leading array dimension. That matches both the current matrix-build
+usage and the row-sharded JAXMg solver layout used by the marginalized
+likelihood.
 """
-
-import math
 
 import jax
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
-
-
-def factor_squareish(n_devices: int) -> tuple[int, int]:
-    """
-    Return a near-square 2D factorization of ``n_devices``.
-
-    Parameters
-    ----------
-    n_devices : int
-        Total number of devices to arrange in a 2D mesh.
-
-    Returns
-    -------
-    tuple of int
-        ``(n_rows, n_cols)`` mesh shape with factors chosen to be as square
-        as possible.
-    """
-    if n_devices < 1:
-        raise ValueError("n_devices must be >= 1")
-
-    best_rows = 1
-    best_cols = n_devices
-    best_gap = n_devices - 1
-    for rows in range(1, int(math.isqrt(n_devices)) + 1):
-        if n_devices % rows != 0:
-            continue
-        cols = n_devices // rows
-        gap = abs(cols - rows)
-        if gap < best_gap:
-            best_rows = rows
-            best_cols = cols
-            best_gap = gap
-    return best_rows, best_cols
-
-
-def build_likelihood_mesh() -> Mesh:
-    """
-    Build a square-ish 2D mesh for dense likelihood matrices.
-
-    Returns
-    -------
-    jax.sharding.Mesh
-        Device mesh with axis names ``("row", "col")``.
-    """
-    devices = np.asarray(jax.devices(), dtype=object)
-    n_rows, n_cols = factor_squareish(int(devices.size))
-    return Mesh(devices.reshape(n_rows, n_cols), ("row", "col"))
 
 
 def build_solver_mesh() -> Mesh:

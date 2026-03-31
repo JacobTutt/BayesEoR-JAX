@@ -44,21 +44,14 @@ def _build_full_likelihood(setup_result: SetupResult) -> FullLikelihood:
 
 def _build_marginalised_likelihood(
     setup_result: SetupResult,
-    *,
-    distributed: bool = False,
 ) -> MarginalisedLikelihood:
-    """Instantiate the marginalized likelihood from saved compressed terms."""
+    """Instantiate the JAXMg marginalized likelihood from saved terms."""
     matrix_dir = Path(setup_result.bm.array_save_directory)
     prior_class = setup_result.prior_class
     likelihood_class = setup_result.likelihood_class
-    backend = (
-        getattr(likelihood_class, "backend", "jax") if distributed else "jax"
-    )
 
     return MarginalisedLikelihood(
         matrix_dir=str(matrix_dir),
-        distributed=bool(distributed),
-        backend=backend,
         n_data=int(setup_result.vis_dict["vis_noisy"].size),
         phi_inv_class=setup_result.phi_inverse_class,
         prior_class=prior_class,
@@ -208,11 +201,14 @@ def _build_unconstrained_logdensity_marginalised(
             + marginal_likelihood.n_power_params
         ]
         power_prior = marginal_likelihood.prior_class.logprior(theta_power)
-        return (
-            marginal_likelihood._log_likelihood_terms(t_ninv_t, dbar, d_ninv_d, theta)
-            + power_prior
-            + log_jac
-        )
+        with marginal_likelihood.mesh:
+            log_like = marginal_likelihood._log_likelihood_impl(
+                t_ninv_t,
+                dbar,
+                d_ninv_d,
+                theta,
+            )
+        return log_like + power_prior + log_jac
 
     logdensity_fn = jax.jit(
         lambda position_u: logdensity_terms(
@@ -422,14 +418,17 @@ def run_marginalised_nuts(
     distributed_likelihood: bool = False,
     use_window_adaptation: bool = True,
 ) -> dict[str, Any]:
-    """Run BlackJAX NUTS on the analytically marginalized posterior."""
+    """
+    Run BlackJAX NUTS on the analytically marginalized posterior.
+
+    ``distributed_likelihood`` is retained for call-site compatibility but no
+    longer changes behavior: the marginalized likelihood always uses the JAXMg
+    solver mesh, including on single-GPU runs.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    marginal_likelihood = _build_marginalised_likelihood(
-        setup_result,
-        distributed=bool(distributed_likelihood),
-    )
+    marginal_likelihood = _build_marginalised_likelihood(setup_result)
     logdensity_fn, transform, initial_position = _build_unconstrained_logdensity_marginalised(
         marginal_likelihood
     )
@@ -545,7 +544,8 @@ def run_marginalised_nuts(
         "theta_dim": int(initial_position.shape[0]),
         "n_power_params": int(marginal_likelihood.n_power_params),
         "t_ninv_t_shape": [int(x) for x in marginal_likelihood.t_ninv_t.shape],
-        "used_distributed_likelihood": bool(distributed_likelihood),
+        "used_distributed_likelihood": True,
+        "requested_distributed_likelihood": bool(distributed_likelihood),
         "used_window_adaptation": bool(use_window_adaptation),
         "adapted_step_size": step_size,
         "inverse_mass_matrix_shape": list(inverse_mass_matrix.shape),
