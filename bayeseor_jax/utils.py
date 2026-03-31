@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +125,66 @@ def write_log_files(
         else:
             args_dict = _coerce_args_dict(args)
             args_file.write_text(json.dumps(args_dict, indent=2, default=str) + "\n")
+
+
+def validate_multinest_output_path(
+    out_dir: Path,
+    file_root: str,
+    longest_suffix: str = "post_equal_weights.dat",
+) -> str:
+    """
+    Validate a MultiNest output prefix against the 100-character path limit.
+
+    Parameters
+    ----------
+    out_dir : pathlib.Path
+        Directory that will contain the MultiNest output files.
+    file_root : str
+        Filename prefix passed to MultiNest, for example ``"data-"``.
+    longest_suffix : str, optional
+        Longest expected suffix emitted by MultiNest. Defaults to
+        ``"post_equal_weights.dat"``.
+
+    Returns
+    -------
+    str
+        The full ``outputfiles_basename`` string to pass to MultiNest.
+    """
+    outputfiles_basename = (out_dir / file_root).as_posix()
+    longest_path = f"{outputfiles_basename}{longest_suffix}"
+    if len(longest_path) > 100:
+        raise ValueError(
+            "MultiNest requires output file paths of length <= 100 characters. "
+            f"The derived path '{longest_path}' has length {len(longest_path)}."
+        )
+    return outputfiles_basename
+
+
+def estimate_average_eval_time(
+    likelihood_fn,
+    theta_ref: np.ndarray,
+    avg_iters: int,
+) -> float:
+    """
+    Estimate the average scalar likelihood evaluation time.
+
+    Parameters
+    ----------
+    likelihood_fn : callable
+        Scalar log-likelihood callback.
+    theta_ref : numpy.ndarray
+        Reference parameter vector used for repeated timing calls.
+    avg_iters : int
+        Number of repeated evaluations.
+    """
+    start = time.perf_counter()
+    for _ in range(int(avg_iters)):
+        value = likelihood_fn(theta_ref)
+        if hasattr(value, "block_until_ready"):
+            value = value.block_until_ready()
+        if not np.isfinite(float(np.asarray(value))):
+            raise ValueError("Non-finite likelihood value encountered during timing.")
+    return (time.perf_counter() - start) / max(1, int(avg_iters))
 
 
 def save_numpy_dict(

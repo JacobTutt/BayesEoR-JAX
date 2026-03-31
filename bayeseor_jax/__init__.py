@@ -31,7 +31,7 @@ from .model import (
     InstrumentModel,
 )
 from .params import BayesEoRParser
-from .run_fit import run_inference
+from .run_ns import run_blackjaxns, run_multinest, run_nestedsampling
 from .run_hmc import run_full_nuts, run_marginalised_nuts
 from .setup import SetupResult, get_vis_data, run_setup
 from .utils import (
@@ -63,7 +63,9 @@ __all__ = [
     "SetupResult",
     "get_vis_data",
     "run_setup",
-    "run_inference",
+    "run_blackjaxns",
+    "run_multinest",
+    "run_nestedsampling",
     "run_full_nuts",
     "run_marginalised_nuts",
     "form_pI_vis",

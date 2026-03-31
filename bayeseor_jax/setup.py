@@ -476,7 +476,7 @@ def run_setup(
     """
     Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    This is the main setup entry point used by :mod:`bayeseor_jax.run_fit`. It:
+    This is the main setup entry point used by :mod:`bayeseor_jax.run_ns`. It:
 
     1. Loads or preprocesses visibilities/noise metadata.
     2. Builds matrix products (`T`, `Ninv`, `T_Ninv_T`) needed by the
@@ -800,7 +800,8 @@ def run_setup(
         n_power_params=n_power_params,
     )
 
-    # Return one object containing both configs and diagnostics needed by run_inference.
+    # Return one object containing both configs and diagnostics needed by
+    # run_nestedsampling.
     return SetupResult(
         likelihood_class=likelihood_class,
         prior_class=prior_class,

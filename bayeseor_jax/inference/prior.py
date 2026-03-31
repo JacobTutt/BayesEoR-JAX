@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import numpy as np
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import distrax
 from functools import partial
@@ -47,6 +49,11 @@ class Prior:
         self.bounds_log = bounds_log
         self.lower = bounds_log[:, 0]
         self.upper = bounds_log[:, 1]
+        # Cache NumPy views for Python-side sampler callbacks such as
+        # MultiNest, which repeatedly call back outside JIT-compiled code.
+        self.bounds_log_numpy = np.asarray(bounds_log, dtype=np.float64)
+        self.lower_numpy = self.bounds_log_numpy[:, 0]
+        self.upper_numpy = self.bounds_log_numpy[:, 1]
         # Cache one distrax prior object for repeated log_prob/sample calls.
         self.uniform_prior = distrax.Uniform(self.lower, self.upper)
         self.power_param_start = power_param_start
@@ -80,6 +87,12 @@ class Prior:
             seed=rng_key,
             sample_shape=(int(n_samples),),
         )
+    
+    def transform_unit_cube(self, cube: np.ndarray) -> np.ndarray:
+        """
+        Map a unit-cube point into the sampler-space box prior.
+        """
+        return self.lower_numpy + (self.upper_numpy - self.lower_numpy) * cube
 
 
 def theta_power_to_linear(
