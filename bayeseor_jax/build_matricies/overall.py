@@ -1155,6 +1155,215 @@ class BuildMatrices:
             if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
                 multihost_utils.sync_global_devices(f"{matrix_name}-blockwise-done")
 
+
+    # --------------------------------------------
+    # Build T^H N^{-1} d and d^H N^{-1} (directly)
+    # --------------------------------------------
+
+    def build_dbar(
+        self,
+        T: jnp.ndarray,
+        Ninv: jnp.ndarray,
+        vis_noisy: jnp.ndarray,
+    ) -> jnp.ndarray:
+        r"""
+        Build ``dbar = T^H N^{-1} d`` directly from dense inputs.
+
+        Parameters
+        ----------
+        T : jnp.ndarray
+            Forward operator with shape ``(n_vis, n_params_eta)``.
+        Ninv : jnp.ndarray
+            Inverse noise covariance diagonal in vector form with shape
+            ``(n_vis,)``, holding ``diag(N^{-1})``.
+        vis_noisy : jnp.ndarray
+            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
+
+        Returns
+        -------
+        jnp.ndarray
+            Compressed data vector with shape ``(n_params_eta,)``.
+        """
+        ninv_d = Ninv * vis_noisy
+        # This is the same dense contraction that later appears inside the
+        # marginalized quadratic term, just compressed once up front.
+        return jnp.conj(T).T @ ninv_d
+
+    def build_d_ninv_d(
+        self,
+        Ninv: jnp.ndarray,
+        vis_noisy: jnp.ndarray,
+    ) -> jnp.ndarray:
+        r"""
+        Build the scalar data term ``d^H N^{-1} d`` directly.
+
+        Parameters
+        ----------
+        Ninv : jnp.ndarray
+            Inverse noise covariance diagonal in vector form with shape
+            ``(n_vis,)``.
+        vis_noisy : jnp.ndarray
+            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
+
+        Returns
+        -------
+        jnp.ndarray
+            Real scalar ``d^H N^{-1} d``.
+        """
+        ninv_d = Ninv * vis_noisy
+        return jnp.real(jnp.vdot(vis_noisy, ninv_d))
+    
+    # ------------------------------------------------------
+    # Build T^H N^{-1} d (cached T and Ninv, blockwise dbar)
+    # ------------------------------------------------------
+    
+
+    def save_dbar_from_saved_T(
+        self,
+        vis_noisy: jnp.ndarray,
+        *,
+        matrix_name: str = "dbar",
+        t_matrix_name: str = "T",
+        ninv_matrix_name: str = "Ninv",
+    ) -> None:
+        r"""
+        Build and save ``dbar = T^H N^{-1} d`` from saved ``T`` and ``Ninv``.
+
+        Parameters
+        ----------
+        vis_noisy : jnp.ndarray
+            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
+        matrix_name : str, optional
+            Output vector name. Defaults to ``"dbar"``.
+        t_matrix_name : str, optional
+            Saved design-matrix name to read from disk. Defaults to ``"T"``.
+        ninv_matrix_name : str, optional
+            Saved inverse-noise vector name to read from disk. Defaults to
+            ``"Ninv"``.
+
+        Notes
+        -----
+        This follows the same cached disk-first pattern as the saved
+        ``T_Ninv_T`` path, but the contraction is simpler: once the globally
+        sharded ``T`` and row-sharded ``N^{-1} d`` are materialized, one dense
+        distributed matvec produces the full compressed data vector.
+        """
+        t_path = _dense_matrix_path_impl(self, t_matrix_name)
+        ninv_path = _dense_matrix_path_impl(self, ninv_matrix_name)
+        out_path = _dense_matrix_path_impl(self, matrix_name)
+        if not t_path.exists():
+            raise FileNotFoundError(f"Saved matrix not found: {t_path}")
+        if not ninv_path.exists():
+            raise FileNotFoundError(f"Saved matrix not found: {ninv_path}")
+
+        T_mm = np.load(t_path, mmap_mode="r")
+        Ninv_mm = np.load(ninv_path, mmap_mode="r")
+        n_vis, n_params = (int(T_mm.shape[0]), int(T_mm.shape[1]))
+        if tuple(Ninv_mm.shape) != (n_vis,):
+            raise ValueError(
+                f"{ninv_matrix_name} has shape {tuple(Ninv_mm.shape)} but expected {(n_vis,)}"
+            )
+
+        vis_noisy_np = np.asarray(vis_noisy, dtype=np.complex128).reshape(-1)
+        if vis_noisy_np.shape != (n_vis,):
+            raise ValueError(
+                f"vis_noisy has shape {vis_noisy_np.shape} but expected {(n_vis,)}"
+            )
+
+        process_count = int(jax.process_count())
+        process_index = int(jax.process_index())
+        if n_vis % process_count != 0:
+            raise ValueError(
+                f"n_vis={n_vis} must divide process_count={process_count} for cached dbar"
+            )
+
+        rows_per_process = n_vis // process_count
+        row0 = process_index * rows_per_process
+        row1 = row0 + rows_per_process
+        local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
+
+        if int(jax.device_count()) > 1:
+            local_device_count = int(jax.local_device_count())
+            if rows_per_process % max(1, local_device_count) != 0:
+                raise ValueError(
+                    f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
+                )
+
+            devices = np.asarray(jax.devices(), dtype=object)
+            if devices.size != process_count * local_device_count:
+                raise ValueError(
+                    "jax.devices() size must equal process_count * local_device_count for cached dbar"
+                )
+
+            mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
+
+            @partial(
+                pjit,
+                in_shardings=(P(("host", "dev"), None), P(("host", "dev"))),
+                out_shardings=P(None),
+            )
+            def _build_dbar_cached(
+                T: jnp.ndarray, ninv_d: jnp.ndarray
+            ) -> jnp.ndarray:
+                return jnp.conj(T).T @ ninv_d
+
+            local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
+            with mesh:
+                T = multihost_utils.host_local_array_to_global_array(
+                    local_T, mesh, P(("host", "dev"), None)
+                )
+                ninv_d = multihost_utils.host_local_array_to_global_array(
+                    local_ninv_d, mesh, P(("host", "dev"))
+                )
+                dbar = _build_dbar_cached(T, ninv_d)
+                dbar.block_until_ready()
+        else:
+            T = jnp.asarray(np.asarray(T_mm, dtype=np.complex128))
+            ninv_d = jnp.asarray(np.asarray(Ninv_mm) * vis_noisy_np, dtype=jnp.complex128)
+            dbar = jnp.conj(T).T @ ninv_d
+
+        if jax.process_index() == 0:
+            np.save(out_path, np.asarray(dbar))
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
+
+    def save_d_ninv_d(
+        self,
+        vis_noisy: jnp.ndarray,
+        *,
+        matrix_name: str = "d_ninv_d",
+        ninv_matrix_name: str = "Ninv",
+    ) -> None:
+        r"""
+        Build and save ``d^H N^{-1} d`` from saved ``Ninv`` and ``d``.
+
+        Parameters
+        ----------
+        vis_noisy : jnp.ndarray
+            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
+        matrix_name : str, optional
+            Output scalar name. Defaults to ``"d_ninv_d"``.
+        ninv_matrix_name : str, optional
+            Saved inverse-noise vector name to read from disk. Defaults to
+            ``"Ninv"``.
+
+        Notes
+        -----
+        This contraction is only a visibility-space dot product, so unlike
+        ``T`` and ``T_Ninv_T`` it does not need a separate blockwise builder.
+        """
+        out_path = _dense_matrix_path_impl(self, matrix_name)
+        Ninv = load_matrix_impl(self, ninv_matrix_name)
+        vis_noisy = jnp.asarray(vis_noisy, dtype=jnp.complex128).reshape(-1)
+        d_ninv_d = self.build_d_ninv_d(Ninv, vis_noisy)
+
+        if jax.process_index() == 0:
+            np.save(out_path, np.asarray(d_ninv_d))
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
+
     # --------------------
     # Matrix save/load API
     # --------------------
@@ -1228,6 +1437,44 @@ class BuildMatrices:
 
         # Build and save T_Ninv_T through the blockwise disk-first path.
         self.build_matrix_if_not_here("T_Ninv_T")
+
+    def build_minimum_likelihood_stack(self, vis_noisy: jnp.ndarray) -> int:
+        """
+        Build the minimum saved stack needed by the marginalized likelihood.
+
+        This extends the data-independent matrix stack with the two
+        data-dependent compressed terms:
+
+        - ``dbar = T^H N^{-1} d``
+        - ``d_ninv_d = d^H N^{-1} d``
+
+        Parameters
+        ----------
+        vis_noisy : jnp.ndarray
+            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
+
+        Returns
+        -------
+        int
+            Number of model parameters, i.e. the length of ``dbar``.
+        """
+        self.build_minimum_matrix_stack()
+        if not check_if_matrix_exists_impl(self, "dbar"):
+            _log_build(self, "building and saving dbar")
+            t_start = time.perf_counter()
+            self.save_dbar_from_saved_T(vis_noisy, matrix_name="dbar")
+            elapsed = time.perf_counter() - t_start
+            _log_build(self, f"built and saved dbar in {elapsed:.3f} s")
+
+        if not check_if_matrix_exists_impl(self, "d_ninv_d"):
+            _log_build(self, "building and saving d_ninv_d")
+            t_start = time.perf_counter()
+            self.save_d_ninv_d(vis_noisy, matrix_name="d_ninv_d")
+            elapsed = time.perf_counter() - t_start
+            _log_build(self, f"built and saved d_ninv_d in {elapsed:.3f} s")
+
+        t_matrix = np.load(_dense_matrix_path_impl(self, "T"), mmap_mode="r")
+        return int(t_matrix.shape[1])
     
     
     # @partial(jax.jit, static_argnums=(0,))
