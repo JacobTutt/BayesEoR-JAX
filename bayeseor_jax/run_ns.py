@@ -7,6 +7,7 @@ jax.config.update("jax_enable_x64", True)
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -195,13 +196,14 @@ def run_multinest(
     avg_iters: int = 10,
     file_root: str = "data-",
     resume: bool | None = None,
-    verbose: bool | None = None,
+    verbose: bool = False,
     importance_nested_sampling: bool | None = None,
     multimodal: bool | None = None,
     const_efficiency_mode: bool | None = None,
     evidence_tolerance: float | None = None,
     sampling_efficiency: float | None = None,
     max_iter: int | None = None,
+    print_rate: int = 100,
 ) -> dict[str, Any]:
     """
     Run posterior inference with the Python MultiNest wrapper.
@@ -248,12 +250,33 @@ def run_multinest(
             avg_iters=avg_iters,
         )
 
+    instantiation_time = time.time()
+    loglikelihood_count = 0
+
     def prior_transform(cube):
         return prior_class.transform_unit_cube(cube)
 
     def loglikelihood(theta):
+        nonlocal loglikelihood_count
+        loglikelihood_count += 1
+        start_call = time.time()
         value = likelihood_class.log_likelihood(theta)
-        return float(np.asarray(block_until_ready(value)))
+        value = float(np.asarray(block_until_ready(value)))
+        if print_rate > 0 and loglikelihood_count % int(print_rate) == 0:
+            print("count", loglikelihood_count, flush=True)
+            print(
+                "0 : Time since class instantiation: {}".format(
+                    time.time() - instantiation_time
+                ),
+                flush=True,
+            )
+            print(
+                "0 : Time for this likelihood call: {}".format(
+                    time.time() - start_call
+                ),
+                flush=True,
+            )
+        return value
 
     solve_kwargs: dict[str, Any] = {
         "LogLikelihood": loglikelihood,
@@ -266,8 +289,7 @@ def run_multinest(
         solve_kwargs["seed"] = int(random_key)
     if resume is not None:
         solve_kwargs["resume"] = bool(resume)
-    if verbose is not None:
-        solve_kwargs["verbose"] = bool(verbose)
+    solve_kwargs["verbose"] = bool(verbose)
     if importance_nested_sampling is not None:
         solve_kwargs["importance_nested_sampling"] = bool(importance_nested_sampling)
     if multimodal is not None:
@@ -302,8 +324,7 @@ def run_multinest(
         summary["random_key"] = int(random_key)
     if resume is not None:
         summary["resume"] = bool(resume)
-    if verbose is not None:
-        summary["verbose"] = bool(verbose)
+    summary["verbose"] = bool(verbose)
     if importance_nested_sampling is not None:
         summary["importance_nested_sampling"] = bool(importance_nested_sampling)
     if multimodal is not None:
@@ -316,6 +337,8 @@ def run_multinest(
         summary["sampling_efficiency"] = float(sampling_efficiency)
     if max_iter is not None:
         summary["max_iter"] = int(max_iter)
+    summary["print_rate"] = int(print_rate)
+    summary["loglikelihood_calls"] = int(loglikelihood_count)
     if isinstance(result, dict):
         if "logZ" in result:
             summary["logZ"] = float(result["logZ"])
