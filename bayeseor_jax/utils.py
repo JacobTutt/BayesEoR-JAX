@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,41 @@ def parse_uprior_inds(upriors_str: str, nkbins: int) -> jnp.ndarray:
         uprior_inds = uprior_inds.at[int(upriors_str)].set(True)
 
     return uprior_inds
+
+
+def _resolve_uv_spacing(
+    *,
+    fov_deg: float,
+    du: float | None,
+    dv: float | None,
+    label: str,
+    rtol: float = 5e-2,
+) -> tuple[float, float]:
+    """Resolve uv-grid spacings from FoV and warn on explicit mismatches."""
+    fov_deg = float(fov_deg)
+    if fov_deg <= 0:
+        raise ValueError(f"{label}: fov must be > 0 deg, got {fov_deg}")
+
+    derived = float(1.0 / np.deg2rad(fov_deg))
+    du_val = derived if du is None else float(du)
+    dv_val = derived if dv is None else float(dv)
+
+    if not np.isclose(du_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: du={du_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if not np.isclose(dv_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: dv={dv_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return du_val, dv_val
 
 
 def _coerce_args_dict(args: Any) -> dict[str, Any]:
