@@ -706,6 +706,7 @@ def run_setup(
         sigma=sigma,
         effective_noise=effective_noise,
         array_save_directory=str(array_save_directory),
+        clobber=bool(clobber),
     )
 
     # The likelihood stack extends the heavy matrix products with the

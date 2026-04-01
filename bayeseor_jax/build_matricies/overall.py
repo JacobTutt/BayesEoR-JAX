@@ -183,6 +183,9 @@ class BuildMatrices:
     t_ninv_t_right_block_batch : int, optional
         Number of right-hand parameter blocks evaluated together inside one
         local ``T_Ninv_T`` kernel call. Defaults to 4.
+    clobber : bool, optional
+        When ``True``, delete any existing saved matrix products in
+        ``array_save_directory`` before rebuilding them. Defaults to ``False``.
     """
 
 
@@ -230,6 +233,7 @@ class BuildMatrices:
         t_stepwise_fg_uv_chunk: int = 128,
         t_ninv_t_block_cols: int = 16384,
         t_ninv_t_right_block_batch: int = 4,
+        clobber: bool = False,
     ) -> None:
         
         # Store EoR UV-plane parameters.
@@ -306,6 +310,7 @@ class BuildMatrices:
         self.t_stepwise_fg_uv_chunk = int(t_stepwise_fg_uv_chunk)
         self.t_ninv_t_block_cols = int(t_ninv_t_block_cols)
         self.t_ninv_t_right_block_batch = int(t_ninv_t_right_block_batch)
+        self.clobber = bool(clobber)
         if self.t_stepwise_eor_uv_chunk < 1:
             raise ValueError("t_stepwise_eor_uv_chunk must be >= 1")
         if self.t_stepwise_fg_uv_chunk < 1:
@@ -1368,6 +1373,32 @@ class BuildMatrices:
     # Matrix save/load API
     # --------------------
 
+    def _invalidate_saved_outputs(self, matrix_names: Sequence[str]) -> None:
+        """
+        Delete saved outputs so subsequent build calls recompute them.
+
+        Parameters
+        ----------
+        matrix_names : sequence of str
+            Logical saved-array names, e.g. ``["T", "T_Ninv_T"]``.
+        """
+        if not matrix_names:
+            return
+
+        removed = False
+        if jax.process_index() == 0:
+            for matrix_name in matrix_names:
+                path = _dense_matrix_path_impl(self, matrix_name)
+                if path.exists():
+                    path.unlink()
+                    removed = True
+
+        if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
+            multihost_utils.sync_global_devices("build-matrix-clobber")
+
+        if removed:
+            _log_build(self, f"clobbered saved outputs: {', '.join(matrix_names)}")
+
     def build_matrix_if_not_here(self, matrix_name: str) -> None:
         r"""
         Build and save a matrix if it does not already exist on disk.
@@ -1377,6 +1408,16 @@ class BuildMatrices:
         matrix_name : str
             Name of the matrix to build and save.
         """
+        if self.clobber:
+            invalidation_map = {
+                "T": ("T", "T_Ninv_T", "dbar"),
+                "Ninv": ("Ninv", "T_Ninv_T", "dbar", "d_ninv_d"),
+                "T_Ninv_T": ("T_Ninv_T",),
+                "dbar": ("dbar",),
+                "d_ninv_d": ("d_ninv_d",),
+            }
+            self._invalidate_saved_outputs(invalidation_map.get(matrix_name, (matrix_name,)))
+
         if check_if_matrix_exists_impl(self, matrix_name):
             return
         _log_build(self, f"building and saving {matrix_name}")
@@ -1430,6 +1471,9 @@ class BuildMatrices:
         This uses a disk-first workflow to avoid keeping large matrices in
         memory longer than required.
         """
+        if self.clobber:
+            self._invalidate_saved_outputs(("T", "Ninv", "T_Ninv_T", "dbar", "d_ninv_d"))
+
         # Ensure T exists on disk.
         self.build_matrix_if_not_here("T")
         # Ensure Ninv exists on disk.
@@ -1459,6 +1503,8 @@ class BuildMatrices:
             Number of model parameters, i.e. the length of ``dbar``.
         """
         self.build_minimum_matrix_stack()
+        if self.clobber:
+            self._invalidate_saved_outputs(("dbar", "d_ninv_d"))
         if not check_if_matrix_exists_impl(self, "dbar"):
             _log_build(self, "building and saving dbar")
             t_start = time.perf_counter()
