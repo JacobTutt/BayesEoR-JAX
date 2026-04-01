@@ -134,6 +134,71 @@ def write_log_files(
             args_file.write_text(json.dumps(args_dict, indent=2, default=str) + "\n")
 
 
+def write_analysis_metadata(
+    *,
+    output_dir: Path | str,
+    args: Any,
+    k_vals: Any,
+    mod_k_vo: Any,
+    bin_id_per_k_mode: Any,
+    valid_mask: Any,
+    clobber: bool = False,
+    version: str | None = None,
+) -> None:
+    """
+    Write old-style analysis metadata files into one output directory.
+
+    This consolidates the metadata layout expected by the legacy BayesEoR
+    analysis tooling:
+    - `args.json`
+    - `version.txt` (optional)
+    - `k-vals.txt`
+    - `k-vals-bins.txt`
+    - `k-vals-nsamples.txt`
+    """
+    if not isinstance(output_dir, Path):
+        output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    write_log_files(
+        parser=None,
+        args=args,
+        out_dir=output_dir,
+        version=version,
+    )
+
+    k_vals_path = output_dir / "k-vals.txt"
+    k_bins_path = output_dir / "k-vals-bins.txt"
+    k_counts_path = output_dir / "k-vals-nsamples.txt"
+    if not clobber and all(p.exists() for p in (k_vals_path, k_bins_path, k_counts_path)):
+        return
+
+    k_vals_np = np.asarray(k_vals, dtype=np.float64).reshape(-1)
+    mod_k_np = np.asarray(mod_k_vo, dtype=np.float64).reshape(-1)
+    bid_np = np.asarray(bin_id_per_k_mode, dtype=np.int32).reshape(-1)
+    valid_np = np.asarray(valid_mask, dtype=bool).reshape(-1)
+
+    if k_vals_np.size == 0:
+        raise ValueError("Cannot save k-bin metadata with zero non-empty bins.")
+
+    kbin_edges: list[float] = []
+    nsamples: list[int] = []
+    last_max = None
+    for i_bin in range(k_vals_np.size):
+        in_bin = valid_np & (bid_np == i_bin)
+        bin_vals = mod_k_np[in_bin]
+        if bin_vals.size == 0:
+            raise ValueError(f"Compact k-bin {i_bin} has no assigned modes.")
+        kbin_edges.append(float(bin_vals.min()))
+        nsamples.append(int(bin_vals.size))
+        last_max = float(bin_vals.max())
+    kbin_edges.append(last_max)
+
+    np.savetxt(k_vals_path, k_vals_np)
+    np.savetxt(k_bins_path, np.asarray(kbin_edges, dtype=np.float64))
+    np.savetxt(k_counts_path, np.asarray(nsamples, dtype=np.int64), fmt="%d")
+
+
 def validate_multinest_output_path(
     out_dir: Path,
     file_root: str,

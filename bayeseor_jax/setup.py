@@ -32,7 +32,7 @@ from .model.k_cube import (
     mask_k_cube,
 )
 from .model.noise import generate_gaussian_noise
-from .utils import load_numpy_dict, load_sharded_npy
+from .utils import load_numpy_dict, load_sharded_npy, write_analysis_metadata
 from .vis import preprocess_uvdata
 
 jax.config.update("jax_enable_x64", True)
@@ -464,6 +464,7 @@ def run_setup(
     save_vis: bool = False,
     save_model: bool = False,
     save_dir: Path | str = "./",
+    output_dir: Path | str = "./",
     clobber: bool = False,
     effective_noise_path: Path | str | None = None,
     # Prior / likelihood
@@ -496,6 +497,10 @@ def run_setup(
         Optional precomputed noise vector path.
     array_save_directory : pathlib.Path or str, optional
         Directory used to store/load matrix products.
+    output_dir : pathlib.Path or str, optional
+        Directory where analysis-side metadata files are written. The new
+        pipeline saves old-style `k-vals*.txt` products here for downstream
+        analysis compatibility.
 
     n_u_eor, n_v_eor, du_eor, dv_eor : int/float
         EoR model UV grid shape and spacing.
@@ -587,6 +592,74 @@ def run_setup(
     if n_modes_fg > n_powerlaws_fg and n_powerlaws_fg > 0:
         n_modes_fg = n_powerlaws_fg
 
+    output_dir = Path(output_dir).expanduser().resolve()
+    array_save_directory = Path(array_save_directory).expanduser().resolve()
+    save_dir = Path(save_dir).expanduser().resolve()
+
+    setup_args_dict = {
+        "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
+        "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
+        "noise_data_path": None if noise_data_path is None else str(Path(noise_data_path).expanduser().resolve()),
+        "array_save_directory": str(array_save_directory),
+        "output_dir": str(output_dir),
+        "n_u_eor": int(n_u_eor),
+        "n_v_eor": int(n_v_eor),
+        "du_eor": float(du_eor),
+        "dv_eor": float(dv_eor),
+        "n_u_fg": int(n_u_fg),
+        "n_v_fg": int(n_v_fg),
+        "du_fg": float(du_fg),
+        "dv_fg": float(dv_fg),
+        "fit_for_monopole": bool(fit_for_monopole),
+        "n_modes_fg": int(n_modes_fg),
+        "n_powerlaws_fg": int(n_powerlaws_fg),
+        "beta_fg": None if beta_fg is None else list(beta_fg),
+        "n_freq": int(n_freq),
+        "f0_mhz": float(f0_mhz),
+        "df_mhz": float(df_mhz),
+        "n_eta": int(n_eta),
+        "n_t": int(n_t),
+        "d_t": None if d_t is None else float(d_t),
+        "jd_min": None if jd_min is None else float(jd_min),
+        "jd_center": None if jd_center is None else float(jd_center),
+        "nside": int(nside),
+        "fov_eor": float(fov_eor),
+        "fov_fg": float(fov_fg),
+        "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
+        "beam_type": beam_type,
+        "peak_amp": float(peak_amp),
+        "fwhm_deg": None if fwhm_deg is None else float(fwhm_deg),
+        "diam": None if diam is None else float(diam),
+        "cosfreq": None if cosfreq is None else float(cosfreq),
+        "tanh_freq": None if tanh_freq is None else float(tanh_freq),
+        "tanh_sl_red": None if tanh_sl_red is None else float(tanh_sl_red),
+        "pol": pol,
+        "freq_interp_kind": freq_interp_kind,
+        "antenna_selection": antenna_selection,
+        "bl_cutoff": None if bl_cutoff is None else float(bl_cutoff),
+        "freq_idx_min": None if freq_idx_min is None else int(freq_idx_min),
+        "freq_min": None if freq_min is None else float(freq_min),
+        "freq_center": None if freq_center is None else float(freq_center),
+        "n_freqs_select": None if n_freqs_select is None else int(n_freqs_select),
+        "jd_idx_min": None if jd_idx_min is None else int(jd_idx_min),
+        "n_times_select": None if n_times_select is None else int(n_times_select),
+        "form_pi": bool(form_pi),
+        "pi_norm": float(pi_norm),
+        "redundant_avg": bool(redundant_avg),
+        "uniform_redundancy": bool(uniform_redundancy),
+        "calc_noise": bool(calc_noise),
+        "sigma": None if sigma is None else float(sigma),
+        "noise_seed": int(noise_seed),
+        "save_vis": bool(save_vis),
+        "save_model": bool(save_model),
+        "save_dir": str(save_dir),
+        "clobber": bool(clobber),
+        "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
+        "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
+        "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
+        "inverse_lw_power": float(inverse_lw_power),
+        "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
+    }
     vis_dict = get_vis_data(
         data_path=data_path,
         inst_model=inst_model,
@@ -676,6 +749,18 @@ def run_setup(
         bin_id_per_k_mode=bid_full,
         valid_mask=valid_full,
     )
+    if jax.process_index() == 0:
+        write_analysis_metadata(
+            output_dir=output_dir,
+            args=setup_args_dict,
+            k_vals=k_vals,
+            mod_k_vo=mod_k_vo,
+            bin_id_per_k_mode=bid_compact,
+            valid_mask=valid_compact,
+            clobber=clobber,
+        )
+    if jax.process_count() > 1:
+        multihost_utils.sync_global_devices("k-vals-metadata-saved")
 
     # Optional per-visibility effective-noise model.
     # If provided, this overrides sigma/redundancy-based covariance construction.
