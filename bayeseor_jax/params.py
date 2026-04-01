@@ -82,6 +82,9 @@ class BayesEoRParser(ArgumentParser):
         ``beta_fg`` when foreground modes are enabled.
     beta_fg : list of float, optional
         Foreground power-law spectral indices. Defaults to ``[2.63, 2.82]``.
+    fg_non_monopole_parameterization : {"uv", "image"}, optional
+        Spatial basis used for the non-monopole foreground ``[eta0 | LSSM]``
+        block. Defaults to ``"uv"``.
 
     Frequency / LoS Parameters
 
@@ -227,6 +230,13 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--n-modes-fg", type=int, default=0, help="Number of FG/LSSM modes.")
         self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
         self.add_argument("--beta-fg", type=list[float], default=[2.63, 2.82], help="FG power-law indices.")
+        self.add_argument(
+            "--fg-non-monopole-parameterization",
+            type=str,
+            choices=("uv", "image"),
+            default="uv",
+            help="Spatial basis for the non-monopole FG [eta0 | LSSM] block.",
+        )
 
         # Frequency / eta
         self.add_argument("--n-freq", type=int, required=True, help="Number of frequency channels.")

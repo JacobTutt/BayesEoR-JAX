@@ -79,6 +79,7 @@ def run_setup(
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
+    fg_non_monopole_parameterization: str = "uv",
     # Frequency / time
     n_freq: int | None = None,
     f0_mhz: float | None = None,
@@ -327,6 +328,7 @@ def run_setup(
         "n_modes_fg": int(n_modes_fg),
         "n_powerlaws_fg": int(n_powerlaws_fg),
         "beta_fg": None if beta_fg is None else list(beta_fg),
+        "fg_non_monopole_parameterization": str(fg_non_monopole_parameterization),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
         "df_mhz": float(df_mhz),
@@ -470,6 +472,7 @@ def run_setup(
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
+        fg_non_monopole_parameterization=str(fg_non_monopole_parameterization),
         n_t=int(n_t),
         d_t=float(d_t),
         beam_type=beam_type,

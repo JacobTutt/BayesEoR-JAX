@@ -91,6 +91,10 @@ class BuildMatrices:
         large spectral scale model. Can be a single spectral index, e.g.
         [2.63], or multiple spectral indices, e.g. [2.63, 2.82]. Defaults to
         [2.63, 2.82].
+    fg_non_monopole_parameterization : {"uv", "image"}, optional
+        Spatial basis for the non-monopole foreground ``[eta0 | LSSM]`` block.
+        ``"uv"`` preserves the current behavior. ``"image"`` uses one smooth
+        foreground coefficient set per FG image pixel. Defaults to ``"uv"``.
 
     Frequency and line of sight Fourier mode parameters
     n_freq : int
@@ -177,6 +181,10 @@ class BuildMatrices:
     t_stepwise_fg_uv_chunk : int, optional
         Foreground UV chunk size used by the stepwise `.npy` T writer.
         Defaults to 128.
+    t_stepwise_fg_img_chunk : int, optional
+        Foreground image-pixel chunk size used by the stepwise `.npy` T writer
+        when the non-monopole FG block is parameterized in image space.
+        Defaults to 128.
     t_ninv_t_block_cols : int, optional
         Parameter-space block width used by the blockwise `.npy`
         ``T_Ninv_T`` writer. Defaults to 16384.
@@ -202,6 +210,7 @@ class BuildMatrices:
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
+        fg_non_monopole_parameterization: str = "uv",
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
@@ -231,6 +240,7 @@ class BuildMatrices:
         array_save_directory: str = "./matrices/",
         t_stepwise_eor_uv_chunk: int = 128,
         t_stepwise_fg_uv_chunk: int = 128,
+        t_stepwise_fg_img_chunk: int = 128,
         t_ninv_t_block_cols: int = 16384,
         t_ninv_t_right_block_batch: int = 4,
         clobber: bool = False,
@@ -257,6 +267,12 @@ class BuildMatrices:
             self.beta_fg = [float(beta_fg)]
         else:
             self.beta_fg = list(beta_fg)
+        self.fg_non_monopole_parameterization = str(fg_non_monopole_parameterization)
+        if self.fg_non_monopole_parameterization not in {"uv", "image"}:
+            raise ValueError(
+                "fg_non_monopole_parameterization must be one of {'uv', 'image'}, "
+                f"got {self.fg_non_monopole_parameterization!r}."
+            )
         self.fit_for_monopole = fit_for_monopole
         # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
@@ -308,6 +324,7 @@ class BuildMatrices:
         self.array_save_directory.mkdir(parents=True, exist_ok=True)
         self.t_stepwise_eor_uv_chunk = int(t_stepwise_eor_uv_chunk)
         self.t_stepwise_fg_uv_chunk = int(t_stepwise_fg_uv_chunk)
+        self.t_stepwise_fg_img_chunk = int(t_stepwise_fg_img_chunk)
         self.t_ninv_t_block_cols = int(t_ninv_t_block_cols)
         self.t_ninv_t_right_block_batch = int(t_ninv_t_right_block_batch)
         self.clobber = bool(clobber)
@@ -315,6 +332,8 @@ class BuildMatrices:
             raise ValueError("t_stepwise_eor_uv_chunk must be >= 1")
         if self.t_stepwise_fg_uv_chunk < 1:
             raise ValueError("t_stepwise_fg_uv_chunk must be >= 1")
+        if self.t_stepwise_fg_img_chunk < 1:
+            raise ValueError("t_stepwise_fg_img_chunk must be >= 1")
         if self.t_ninv_t_block_cols < 1:
             raise ValueError("t_ninv_t_block_cols must be >= 1")
         if self.t_ninv_t_right_block_batch < 1:
@@ -365,6 +384,13 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
+        self.n_fg_non_monopole_spatial_modes = self._fg_non_monopole_mode_count()
+
+    def _fg_non_monopole_mode_count(self) -> int:
+        """Return the spatial width of the non-monopole foreground block."""
+        if self.fg_non_monopole_parameterization == "uv":
+            return int(self.n_uv_fg - int(self.fit_for_monopole))
+        return int(self.lmn_model_space.n_pix_fg)
 
 
     # ---------------------------
@@ -459,6 +485,56 @@ class BuildMatrices:
         beam_it = self.beam_response[i_f, i_t, :]
         return nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]
 
+    def _build_beam_weighted_lmn_to_uvw_blocks(self) -> jnp.ndarray:
+        """
+        Build dense per-frequency/per-time beam-weighted LMN -> UVW blocks.
+
+        Returns
+        -------
+        jnp.ndarray
+            Tensor with shape ``(n_freq, n_t, n_bls, n_pix_fg)``.
+        """
+        t_idx = jnp.arange(self.n_t, dtype=jnp.int32)
+        f_idx = jnp.arange(self.n_freq, dtype=jnp.int32)
+        f_grid = jnp.repeat(f_idx, self.n_t)
+        t_grid = jnp.tile(t_idx, self.n_freq)
+
+        flat_blocks = jax.vmap(
+            lambda i_f, i_t: self._beam_weighted_nudft_lmn_to_uvw_block(i_f, i_t),
+            in_axes=(0, 0),
+            out_axes=0,
+        )(f_grid, t_grid)
+        return flat_blocks.reshape(
+            self.n_freq,
+            self.n_t,
+            self.nbls,
+            self.lmn_model_space.n_pix_fg,
+        )
+
+    def _build_full_eor_blocks_from_beam(self, beam_blocks: jnp.ndarray) -> jnp.ndarray:
+        """Project beam-weighted image blocks into the EoR UV grid."""
+        nuidft_uv_to_lm_eor = self._uv_to_lm_eor()
+        beam_blocks_eor = beam_blocks[..., self.lmn_model_space.eor_fg_shared_axis]
+        return jnp.einsum("ftbp,pu->ftbu", beam_blocks_eor, nuidft_uv_to_lm_eor)
+
+    def _build_full_fg_uv_blocks_from_beam(self, beam_blocks: jnp.ndarray) -> jnp.ndarray:
+        """Project beam-weighted image blocks into the FG UV grid."""
+        nuidft_uv_to_lm_fg = self._uv_to_lm_fg()
+        return jnp.einsum("ftbp,pu->ftbu", beam_blocks, nuidft_uv_to_lm_fg)
+
+    def _build_fg_monopole_blocks_from_beam(self, beam_blocks: jnp.ndarray) -> jnp.ndarray:
+        """
+        Build the FG monopole spatial block from the constant-image template.
+
+        The ``(u, v) = (0, 0)`` FG mode corresponds to a constant image vector,
+        so we do not need the full UV -> LM kernel to build this one block.
+        """
+        monopole_template = jnp.ones(
+            (self.lmn_model_space.n_pix_fg,),
+            dtype=beam_blocks.dtype,
+        ) * (self.du_fg * self.dv_fg)
+        return jnp.einsum("ftbp,p->ftb", beam_blocks, monopole_template)
+
     def _build_finv_fprime_blocks(self):
         """
         Build dense per-frequency/per-time Finv_Fprime blocks.
@@ -509,11 +585,17 @@ class BuildMatrices:
 
         Intuition
         ---------
-        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense UV response
-        block over ``(t, bl, uv)``:
+        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense spatial
+        response block over ``(t, bl, spatial_mode)``.
+
+        The EoR block always uses UV-space spatial modes:
 
         - ``full_eor[f, t, bl, u_eor]``
-        - ``full_fg[f,  t, bl, u_fg]``
+
+        The non-monopole FG block can use either:
+
+        - UV-space modes ``full_fg[f, t, bl, u_fg]``, or
+        - image-space modes ``beam_blocks[f, t, bl, pix_fg]``
 
         ``F_z`` then only applies 1D spectral basis expansions per UV mode:
 
@@ -534,7 +616,8 @@ class BuildMatrices:
             n_vis = n_freq * n_t * n_bls and
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
-        full_eor, full_fg = self._build_finv_fprime_blocks()
+        beam_blocks = self._build_beam_weighted_lmn_to_uvw_blocks()
+        full_eor = self._build_full_eor_blocks_from_beam(beam_blocks)
 
         # ------------------------
         # EoR contribution to T
@@ -559,14 +642,20 @@ class BuildMatrices:
         # -----------------------
         # FG contribution to T
         # -----------------------
-        n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
-        fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
+        if self.fg_non_monopole_parameterization == "uv":
+            full_fg = self._build_full_fg_uv_blocks_from_beam(beam_blocks)
+            n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
+            fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
+        else:
+            full_fg = None
+            n_non_mp = self.n_fg_non_monopole_spatial_modes
+            fg_non_mp = beam_blocks
 
         n_rows = self.n_t * self.n_freq * self.nbls
 
         # FG eta0 columns for each non-monopole UV mode.
         eta0_basis = (
-            jnp.ones((self.n_freq, 1), dtype=full_fg.dtype)
+            jnp.ones((self.n_freq, 1), dtype=beam_blocks.dtype)
             * self.d_eta
             * self.n_eta
         )  # (n_freq, 1)
@@ -593,7 +682,7 @@ class BuildMatrices:
                 n_non_mp * self.n_modes_fg,
             )
         else:
-            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
+            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=beam_blocks.dtype)
 
         # FG monopole block (eta + LSSM), if enabled.
         if self.fit_for_monopole:
@@ -609,15 +698,17 @@ class BuildMatrices:
             mp_basis = mp_basis * self.d_eta
             mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
             mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
-
-            fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
+            if self.fg_non_monopole_parameterization == "uv":
+                fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
+            else:
+                fg_mp = self._build_fg_monopole_blocks_from_beam(beam_blocks)
             t_fg_mp = fg_mp[..., None] * mp_basis[:, None, None, :]
             t_fg_mp = jnp.transpose(t_fg_mp, (1, 0, 2, 3)).reshape(
                 n_rows,
                 mp_basis.shape[1],
             )
         else:
-            t_fg_mp = jnp.zeros((n_rows, 0), dtype=full_fg.dtype)
+            t_fg_mp = jnp.zeros((n_rows, 0), dtype=beam_blocks.dtype)
 
         # Legacy FG column ordering.
         t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
@@ -655,6 +746,7 @@ class BuildMatrices:
         matrix_name: str = "T",
         eor_uv_chunk: Optional[int] = None,
         fg_uv_chunk: Optional[int] = None,
+        fg_img_chunk: Optional[int] = None,
     ) -> None:
         """
         Build and save ``T`` block-by-block over ``(time, frequency)`` row slices.
@@ -669,6 +761,10 @@ class BuildMatrices:
         fg_uv_chunk : int, optional
             Number of foreground UV modes evaluated per local chunk. If omitted,
             the instance default ``t_stepwise_fg_uv_chunk`` is used.
+        fg_img_chunk : int, optional
+            Number of foreground image pixels evaluated per local chunk when
+            the non-monopole FG block is parameterized in image space. If
+            omitted, the instance default ``t_stepwise_fg_img_chunk`` is used.
 
         Notes
         -----
@@ -685,6 +781,7 @@ class BuildMatrices:
         n_cols = int(layout["fg_monopole"]["col_stop"])
         eor_uv_chunk = max(1, int(self.t_stepwise_eor_uv_chunk if eor_uv_chunk is None else eor_uv_chunk))
         fg_uv_chunk = max(1, int(self.t_stepwise_fg_uv_chunk if fg_uv_chunk is None else fg_uv_chunk))
+        fg_img_chunk = max(1, int(self.t_stepwise_fg_img_chunk if fg_img_chunk is None else fg_img_chunk))
 
         mm = _prepare_memmap_output_impl(
             self,
@@ -697,7 +794,7 @@ class BuildMatrices:
         # Assign disjoint `(time, frequency)` row blocks across processes.
         process_index = int(jax.process_index())
         process_count = int(jax.process_count())
-        n_non_mp = int(self.n_uv_fg - int(self.fit_for_monopole))
+        n_non_mp = int(self.n_fg_non_monopole_spatial_modes)
         eor_eta_count = int(self.n_eta - 1)
         lssm_mode_count = int(self.n_modes_fg)
 
@@ -753,7 +850,14 @@ class BuildMatrices:
                 sign=-1,
             ) * (self.du_fg * self.dv_fg)
 
-        fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if self.fit_for_monopole else None
+        fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if (
+            self.fit_for_monopole and self.fg_non_monopole_parameterization == "uv"
+        ) else None
+        fg_mp_template = (
+            jnp.ones((self.lmn_model_space.n_pix_fg,), dtype=jnp.complex128) * (self.du_fg * self.dv_fg)
+            if self.fit_for_monopole and self.fg_non_monopole_parameterization == "image"
+            else None
+        )
 
         total_blocks = int(self.n_t * self.n_freq)
         for block_index in range(process_index, total_blocks, process_count):
@@ -787,33 +891,57 @@ class BuildMatrices:
                 col1 = col0 + (uv1 - uv0) * eor_eta_count
                 mm[row0:row1, col0:col1] = np.asarray(t_eor_rows)
 
-            # Foreground non-monopole columns are also streamed in UV chunks.
-            # For each chunk we write both the eta0 and LSSM contributions before
-            # discarding the temporary block.
-            for uv0 in range(0, n_non_mp, fg_uv_chunk):
-                uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
-                fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
+            # Foreground non-monopole columns are streamed over the active
+            # spatial basis. In UV mode this is the FG UV grid; in image mode
+            # this is the FG pixel set.
+            if self.fg_non_monopole_parameterization == "uv":
+                for uv0 in range(0, n_non_mp, fg_uv_chunk):
+                    uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
+                    fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
 
-                eta0_rows = fg_block * eta0_basis[i_f, 0]
-                eta0_col0 = int(layout["fg_eta0"]["col_start"]) + uv0
-                eta0_col1 = eta0_col0 + (uv1 - uv0)
-                mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
+                    eta0_rows = fg_block * eta0_basis[i_f, 0]
+                    eta0_col0 = int(layout["fg_eta0"]["col_start"]) + uv0
+                    eta0_col1 = eta0_col0 + (uv1 - uv0)
+                    mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
 
-                if lssm_mode_count > 0:
-                    t_fg_lssm_rows = (
-                        fg_block[..., None] * lssm_basis[i_f][None, None, :]
-                    ).reshape(
-                        self.nbls,
-                        (uv1 - uv0) * lssm_mode_count,
-                    )
-                    lssm_col0 = int(layout["fg_lssm"]["col_start"]) + uv0 * lssm_mode_count
-                    lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
-                    mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
+                    if lssm_mode_count > 0:
+                        t_fg_lssm_rows = (
+                            fg_block[..., None] * lssm_basis[i_f][None, None, :]
+                        ).reshape(
+                            self.nbls,
+                            (uv1 - uv0) * lssm_mode_count,
+                        )
+                        lssm_col0 = int(layout["fg_lssm"]["col_start"]) + uv0 * lssm_mode_count
+                        lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
+                        mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
+            else:
+                for pix0 in range(0, n_non_mp, fg_img_chunk):
+                    pix1 = min(pix0 + fg_img_chunk, n_non_mp)
+                    fg_block = beam_block[:, pix0:pix1]
+
+                    eta0_rows = fg_block * eta0_basis[i_f, 0]
+                    eta0_col0 = int(layout["fg_eta0"]["col_start"]) + pix0
+                    eta0_col1 = eta0_col0 + (pix1 - pix0)
+                    mm[row0:row1, eta0_col0:eta0_col1] = np.asarray(eta0_rows)
+
+                    if lssm_mode_count > 0:
+                        t_fg_lssm_rows = (
+                            fg_block[..., None] * lssm_basis[i_f][None, None, :]
+                        ).reshape(
+                            self.nbls,
+                            (pix1 - pix0) * lssm_mode_count,
+                        )
+                        lssm_col0 = int(layout["fg_lssm"]["col_start"]) + pix0 * lssm_mode_count
+                        lssm_col1 = lssm_col0 + (pix1 - pix0) * lssm_mode_count
+                        mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
 
             # The monopole block is a separate last-column FG mode and therefore
             # only requires one small extra contraction per row block.
-            if self.fit_for_monopole and fg_mp_kernel is not None:
-                fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
+            if self.fit_for_monopole and (fg_mp_kernel is not None or fg_mp_template is not None):
+                if fg_mp_kernel is not None:
+                    fg_mp_block = jnp.dot(beam_block, fg_mp_kernel).block_until_ready()
+                else:
+                    fg_mp_block = jnp.dot(beam_block, fg_mp_template[:, None]).block_until_ready()
                 t_fg_mp_rows = fg_mp_block * mp_basis[i_f][None, :]
                 mp_col0 = int(layout["fg_monopole"]["col_start"])
                 mp_col1 = int(layout["fg_monopole"]["col_stop"])
