@@ -13,10 +13,7 @@ from .build_matricies import (
     # sparse_block_diag_repeat,
     # sparse_block_diag_two,
 )
-from .analyze import (
-    DataContainer,
-    MaximumAPosteriori,
-)
+from .analyze import DataContainer
 from .inference import (
     FullLikelihood,
     MarginalisedLikelihood,
@@ -31,16 +28,17 @@ from .model import (
     InstrumentModel,
 )
 from .params import BayesEoRParser
+from .maxaposteriori import MaximumAPosteriori
 from .run_ns import run_blackjaxns, run_multinest, run_nestedsampling
 from .run_hmc import run_full_nuts, run_marginalised_nuts
-from .setup import SetupResult, get_vis_data, run_setup
+from .setup import SetupResult, run_setup
 from .utils import (
     load_numpy_dict,
     parse_uprior_inds,
     save_numpy_dict,
     write_log_files,
 )
-from .vis import form_pI_vis, jy_to_ksr, preprocess_uvdata, uvd_to_vector
+from .vis import form_pI_vis, get_vis_data, jy_to_ksr, preprocess_uvdata, uvd_to_vector
 
 __all__ = [
     "Beam_Model",

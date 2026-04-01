@@ -1,21 +1,22 @@
 """
-Visibility preprocessing helpers.
+Visibility loading and preprocessing helpers.
 
-Global motivation
------------------
-Downstream matrix/posterior code expects a very specific visibility layout:
-1) one flattened complex vector with explicit Hermitian baseline doubling;
-2) matching instrument-model arrays (`uvws`, `redundancy`, `antpairs`) in the
-   same baseline ordering.
+This module owns the translation from either raw interferometric datasets or
+preprocessed visibility vectors into the likelihood-ready representation used
+by the setup and inference code. In practice that means:
 
-This module is the translation layer from raw pyuvdata objects to that
-likelihood-ready representation.
+1) loading visibilities and associated metadata via ``get_vis_data``;
+2) preprocessing raw pyuvdata inputs into the flattened complex visibility
+   vector plus matching instrument-model arrays expected downstream.
 """
 
 import warnings
 from pathlib import Path
 import logging
+from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from astropy import units
 from astropy.time import Time
@@ -23,9 +24,195 @@ from astropy.units import Quantity
 from pyuvdata import UVData
 from pyuvdata import __version__ as pyuvdata_version
 from pyuvdata.utils import polstr2num
-from .utils import save_numpy_dict
+
+from .model.instrument import InstrumentModel
+from .model.noise import generate_gaussian_noise
+from .utils import load_numpy_dict, save_numpy_dict
 
 LOGGER = logging.getLogger(__name__)
+
+def get_vis_data(
+    *,
+    data_path: Path | str,
+    inst_model: Path | str | None = None,
+    noise_data_path: Path | str | None = None,
+    sigma: float | None = None,
+    noise_seed: int = 742123,
+    calc_noise: bool = False,
+    # Raw-uvdata preprocessing controls.
+    antenna_selection: str = "cross",
+    bl_cutoff: float | None = None,
+    freq_idx_min: int | None = None,
+    freq_min: float | None = None,
+    freq_center: float | None = None,
+    n_freqs_select: int | None = None,
+    jd_idx_min: int | None = None,
+    jd_min: float | None = None,
+    jd_center: float | None = None,
+    n_times_select: int | None = None,
+    form_pi: bool = True,
+    pi_norm: float = 1.0,
+    pol: str = "xx",
+    redundant_avg: bool = False,
+    uniform_redundancy: bool = False,
+    # For preprocessed vectors.
+    n_freq: int | None = None,
+    f0_mhz: float | None = None,
+    df_mhz: float | None = None,
+    n_t: int | None = None,
+    d_t: float | None = None,
+    # Save hooks for raw preprocessing.
+    save_vis: bool = False,
+    save_model: bool = False,
+    save_dir: Path | str = "./",
+    clobber: bool = False,
+) -> dict[str, Any]:
+    """
+    Load visibilities and associated instrument/noise arrays.
+
+    Supports two input modes:
+    1. Raw pyuvdata file (`.uvh5`, `.uvfits`, `.ms`) via `preprocess_uvdata`.
+    2. Preprocessed `.npy` visibility vector plus an instrument-model directory.
+    """
+    # Normalize and validate the input data path once at the boundary.
+    if not isinstance(data_path, Path):
+        data_path = Path(data_path)
+    if not data_path.exists():
+        raise FileNotFoundError(f"{data_path} does not exist")
+
+    vis: jax.Array
+    noise_est: jax.Array | None
+    antpairs: Any | None
+    uvd = None
+
+    if data_path.suffix in {".uvh5", ".uvfits", ".ms"}:
+        # Raw-file mode:
+        # - select frequencies/times/baselines in vis.preprocess_uvdata
+        # - build Hermitian-expanded data vector + instrument arrays
+        # - optionally estimate empirical noise from even/odd differencing
+        out = preprocess_uvdata(
+            filepath=data_path,
+            antenna_selection=antenna_selection,
+            bl_cutoff=bl_cutoff,
+            freq_idx_min=freq_idx_min,
+            freq_min=freq_min,
+            freq_center=freq_center,
+            n_freqs_select=n_freqs_select,
+            jd_idx_min=jd_idx_min,
+            jd_min=jd_min,
+            jd_center=jd_center,
+            n_times_select=n_times_select,
+            form_pi=form_pi,
+            pi_norm=pi_norm,
+            pol=pol,
+            redundant_avg=redundant_avg,
+            uniform_redundancy=uniform_redundancy,
+            calc_noise=calc_noise,
+            return_uvd=True,
+            save_vis=save_vis,
+            save_model=save_model,
+            save_dir=save_dir,
+            clobber=clobber,
+        )
+        vis_np, antpairs, uvws_np, red_np, noise_np, uvd = out
+        vis = jnp.asarray(vis_np, dtype=jnp.complex128)
+        uvws = jnp.asarray(uvws_np, dtype=jnp.float64)
+        redundancy = jnp.asarray(red_np)
+        noise_est = None if noise_np is None else jnp.asarray(noise_np, dtype=jnp.complex128)
+
+        # Extract frequency/time metadata directly from the selected UVData.
+        freqs_hz = uvd.freq_array
+        if freqs_hz.ndim > 1:
+            freqs_hz = freqs_hz[0]
+        freqs_hz = np.asarray(freqs_hz, dtype=float)
+        jds = np.unique(uvd.time_array)
+        if jds.size > 1:
+            dt = float((Time(jds[1], format="jd") - Time(jds[0], format="jd")).to("s").value)
+        else:
+            dt = float(d_t) if d_t is not None else 0.0
+    elif data_path.suffix == ".npy":
+        # Preprocessed-vector mode:
+        # - load visibilities from disk
+        # - load instrument model from an instrument directory
+        # - construct frequency/time axes from parser inputs
+        if inst_model is None:
+            raise ValueError("inst_model is required when loading a preprocessed .npy vector")
+        if n_freq is None or f0_mhz is None or df_mhz is None or n_t is None or d_t is None:
+            raise ValueError(
+                "n_freq, f0_mhz, df_mhz, n_t, and d_t are required for preprocessed .npy inputs"
+            )
+
+        vis = jnp.asarray(load_numpy_dict(data_path, as_jax=True), dtype=jnp.complex128).reshape(-1)
+        inst = InstrumentModel(inst_model)
+        uvws = jnp.asarray(inst.uvw_array_m, dtype=jnp.float64)
+        redundancy = jnp.asarray(inst.bl_red_array)
+        antpairs = inst.antpairs
+        noise_est = None
+
+        # In this mode, `n_freq/f0/df` define the analysis band explicitly.
+        freqs_hz = (float(f0_mhz) + float(df_mhz) * np.arange(int(n_freq), dtype=float)) * 1e6
+        if jd_min is not None:
+            # Old-pipeline compatible mode: construct times from lower bound.
+            jds = Time(float(jd_min), format="jd") + np.arange(int(n_t), dtype=float) * (
+                float(d_t) / 86400.0
+            )
+            jds = jds.jd
+        elif jd_center is not None:
+            # Centered-window mode around jd_center.
+            jds = Time(float(jd_center), format="jd") + np.arange(
+                -(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2
+            ) * (float(d_t) / 86400.0)
+            jds = jds.jd
+        else:
+            raise ValueError(
+                "One of jd_min or jd_center is required for preprocessed .npy inputs"
+            )
+        dt = float(d_t)
+    else:
+        raise ValueError(f"Unsupported data_path suffix '{data_path.suffix}'")
+
+    # Optional external noise vector.
+    if noise_data_path is not None:
+        # If a noise vector is supplied, treat input visibilities as already noisy.
+        noise = jnp.asarray(load_numpy_dict(noise_data_path, as_jax=True), dtype=jnp.complex128).reshape(-1)
+        vis_noisy = vis
+        bl_conj_pairs_map: dict[int, int] = {}
+    elif noise_est is not None:
+        # Reuse empirical noise estimated during raw UVData preprocessing.
+        noise = noise_est
+        vis_noisy = vis
+        bl_conj_pairs_map = {}
+    else:
+        # Otherwise inject synthetic Gaussian noise using the instrument redundancy model.
+        if sigma is None:
+            raise ValueError("sigma is required when no noise vector is supplied/estimated")
+        vis_noisy, noise, bl_conj_pairs_map = generate_gaussian_noise(
+            sigma=float(sigma),
+            s=vis,
+            n_freq=int(freqs_hz.size),
+            n_t=int(np.unique(jds).size),
+            uvw_array_m=uvws,
+            bl_red_array=redundancy,
+            random_seed=noise_seed,
+        )
+
+    df_hz = float(freqs_hz[1] - freqs_hz[0]) if freqs_hz.size > 1 else float(df_mhz) * 1e6
+
+    return {
+        "vis": vis,
+        "vis_noisy": vis_noisy,
+        "noise": noise,
+        "bl_conj_pairs_map": bl_conj_pairs_map,
+        "uvws": uvws,
+        "redundancy": redundancy,
+        "antpairs": antpairs,
+        "freqs_hz": jnp.asarray(freqs_hz, dtype=jnp.float64),
+        "df_hz": float(df_hz),
+        "jds": jnp.asarray(jds, dtype=jnp.float64),
+        "dt": float(dt),
+        "uvd": uvd,
+    }
+
 
 
 def preprocess_uvdata(
@@ -641,3 +828,5 @@ def jy_to_ksr(data, freqs, mK=False):
         conv_factor = (1 * units.Jy).to(units.K, equivalencies=equiv)
     conv_factor *= units.sr / units.Jy
     return data * conv_factor[np.newaxis, :].value
+
+
