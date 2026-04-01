@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 
@@ -19,6 +20,13 @@ def generate_gaussian_noise(
 ) -> tuple[jnp.ndarray, jnp.ndarray, dict[int, int]]:
     """
     Generate and add Hermitian complex Gaussian noise to a noiseless vector.
+
+    The random draw intentionally follows the old BayesEoR NumPy
+    implementation so the realized noise matches the original pipeline for the
+    same ``sigma`` and ``random_seed``:
+
+    - real part seeded with ``random_seed``
+    - imaginary part seeded with ``random_seed * 123``
 
     Parameters
     ----------
@@ -37,7 +45,7 @@ def generate_gaussian_noise(
         Baseline redundancy array with shape ``(n_t, n_bls)``,
         ``(n_t, n_bls, 1)``, ``(n_bls,)``, or ``(n_bls, 1)``.
     random_seed : int or None, optional
-        Seed for deterministic noise generation.
+        Seed for deterministic noise generation. 
 
     Returns
     -------
@@ -49,35 +57,34 @@ def generate_gaussian_noise(
         Map from baseline index to its conjugate baseline index.
     """
     # Normalize UVW and redundancy shapes so later indexing logic is stable.
-    uvw_ref = _normalise_uvw_for_pairing(uvw_array_m)
+    uvw_ref = np.asarray(_normalise_uvw_for_pairing(uvw_array_m), dtype=np.float64)
     n_bls = int(uvw_ref.shape[0])
     n_data = n_t * n_freq * n_bls
 
     # Flatten and validate the noiseless input vector against expected size.
-    s = jnp.asarray(s, dtype=jnp.complex128).reshape(-1)
+    s = np.asarray(s, dtype=np.complex128).reshape(-1)
     if s.size != n_data:
         raise ValueError(f"s has size {s.size}, expected {n_data} (= n_t*n_freq*n_bls)")
 
     # Redundancy is used as a per-baseline noise scaling factor.
-    red_tf = _normalise_redundancy(bl_red_array, n_t=n_t, n_bls=n_bls)
+    red_tf = np.asarray(_normalise_redundancy(bl_red_array, n_t=n_t, n_bls=n_bls))
 
     if sigma == 0.0:
         # Fast path: deterministic zero-noise output.
-        complex_noise_hermitian = jnp.zeros(n_data, dtype=jnp.complex128)
+        complex_noise_hermitian = np.zeros(n_data, dtype=np.complex128)
     else:
-        # Draw real/imaginary Gaussian components with identical RMS.
-        key = jax.random.PRNGKey(0 if random_seed is None else int(random_seed))
-        key_real, key_imag = jax.random.split(key)
-        std = float(sigma) / jnp.sqrt(2.0)
-        real_noise = jax.random.normal(key_real, (n_data,), dtype=jnp.float64) * std
-        imag_noise = jax.random.normal(key_imag, (n_data,), dtype=jnp.float64) * std
-        complex_noise = (real_noise + 1j * imag_noise).astype(jnp.complex128)
-        # Match the realized complex-noise std to the requested sigma.
-        noise_std = jnp.std(complex_noise)
-        complex_noise_hermitian = jnp.where(noise_std == 0.0,
-            complex_noise,
-            complex_noise * (float(sigma) / noise_std),
-        )
+        # Real and imaginary parts use separate NumPy seeds rather than a 
+        # split JAX key.
+        std = float(sigma) / np.sqrt(2.0)
+        if random_seed:
+            np.random.seed(int(random_seed))
+        real_noise = np.random.normal(0.0, std, n_data)
+
+        if random_seed:
+            np.random.seed(int(random_seed) * 123)
+        imag_noise = np.random.normal(0.0, std, n_data)
+        complex_noise = (real_noise + 1j * imag_noise).astype(np.complex128)
+        complex_noise_hermitian = complex_noise * (float(sigma) / complex_noise.std())
 
     # Build mapping between each baseline and its (-u,-v) conjugate partner.
     bl_conjugate_pairs_dict: dict[tuple[float, float], int] = {}
@@ -92,18 +99,27 @@ def generate_gaussian_noise(
         else:
             bl_conjugate_pairs_dict[uv] = i
 
-    # Hermitian enforcement and redundancy scaling over time/frequency.
-    noise_tfbl = complex_noise_hermitian.reshape(n_t, n_freq, n_bls)
-    if bl_conjugate_pairs_map:
-        pair_i = jnp.asarray(list(bl_conjugate_pairs_map.keys()), dtype=jnp.int32)
-        pair_j = jnp.asarray(list(bl_conjugate_pairs_map.values()), dtype=jnp.int32)
-        noise_tfbl = noise_tfbl.at[:, :, pair_j].set(jnp.conjugate(noise_tfbl[:, :, pair_i]))
-    noise_tfbl = noise_tfbl / jnp.sqrt(red_tf)[:, jnp.newaxis, :]
-    complex_noise_hermitian = noise_tfbl.reshape(-1)
+    # Hermitian enforcement and redundancy scaling follow the old nested-loop
+    # implementation so baseline ordering and conjugate placement remain
+    # identical between pipelines.
+    for i_t in range(n_t):
+        time_ind = i_t * n_bls * n_freq
+        for i_freq in range(n_freq):
+            freq_ind = i_freq * n_bls
+            start_ind = time_ind + freq_ind
+            for bl_ind, conj_bl_ind in bl_conjugate_pairs_map.items():
+                complex_noise_hermitian[start_ind + conj_bl_ind] = np.conjugate(
+                    complex_noise_hermitian[start_ind + bl_ind]
+                )
+            complex_noise_hermitian[start_ind : start_ind + n_bls] /= np.sqrt(red_tf[i_t])
 
     # Compose final noisy data vector.
     d = s + complex_noise_hermitian
-    return d, complex_noise_hermitian, bl_conjugate_pairs_map
+    return (
+        jnp.asarray(d, dtype=jnp.complex128),
+        jnp.asarray(complex_noise_hermitian, dtype=jnp.complex128),
+        bl_conjugate_pairs_map,
+    )
 
 
 def _normalise_uvw_for_pairing(uvw_array_m: jnp.ndarray) -> jnp.ndarray:
