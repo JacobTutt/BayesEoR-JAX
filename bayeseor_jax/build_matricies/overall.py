@@ -1582,7 +1582,12 @@ class BuildMatrices:
         if removed:
             _log_build(self, f"clobbered saved outputs: {', '.join(matrix_names)}")
 
-    def build_matrix_if_not_here(self, matrix_name: str) -> None:
+    def build_matrix_if_not_here(
+        self,
+        matrix_name: str,
+        *,
+        invalidate_existing: bool | None = None,
+    ) -> None:
         r"""
         Build and save a matrix if it does not already exist on disk.
 
@@ -1590,8 +1595,15 @@ class BuildMatrices:
         ----------
         matrix_name : str
             Name of the matrix to build and save.
+        invalidate_existing : bool, optional
+            When ``True``, remove any existing saved products invalidated by
+            ``matrix_name`` before checking whether a rebuild is required.
+            Defaults to ``self.clobber``.
         """
-        if self.clobber:
+        if invalidate_existing is None:
+            invalidate_existing = self.clobber
+
+        if invalidate_existing:
             invalidation_map = {
                 "T": ("T", "T_Ninv_T", "dbar"),
                 "Ninv": ("Ninv", "T_Ninv_T", "dbar", "d_ninv_d"),
@@ -1608,8 +1620,8 @@ class BuildMatrices:
         if matrix_name == "T":
             self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
         elif matrix_name == "T_Ninv_T":
-            self.build_matrix_if_not_here("T")
-            self.build_matrix_if_not_here("Ninv")
+            self.build_matrix_if_not_here("T", invalidate_existing=False)
+            self.build_matrix_if_not_here("Ninv", invalidate_existing=False)
             self.save_T_Ninv_T_blockwise_memmap(matrix_name=matrix_name)
         else:
             matrix = self._build_matrix_by_name(matrix_name)
@@ -1658,12 +1670,12 @@ class BuildMatrices:
             self._invalidate_saved_outputs(("T", "Ninv", "T_Ninv_T", "dbar", "d_ninv_d"))
 
         # Ensure T exists on disk.
-        self.build_matrix_if_not_here("T")
+        self.build_matrix_if_not_here("T", invalidate_existing=False)
         # Ensure Ninv exists on disk.
-        self.build_matrix_if_not_here("Ninv")
+        self.build_matrix_if_not_here("Ninv", invalidate_existing=False)
 
         # Build and save T_Ninv_T through the blockwise disk-first path.
-        self.build_matrix_if_not_here("T_Ninv_T")
+        self.build_matrix_if_not_here("T_Ninv_T", invalidate_existing=False)
 
     def build_minimum_likelihood_stack(self, vis_noisy: jnp.ndarray) -> int:
         """
