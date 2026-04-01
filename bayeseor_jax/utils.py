@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+import warnings
 from pathlib import Path
 from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.sharding import NamedSharding
 
 jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)
+
+
+def block_until_ready(value: Any) -> Any:
+    """Synchronize a JAX-backed value and return the realized object."""
+    if hasattr(value, "block_until_ready"):
+        return value.block_until_ready()
+    return value
 
 
 def mpiprint(*args: Any, rank: int = 0, **kwargs: Any) -> None:
@@ -73,6 +83,41 @@ def parse_uprior_inds(upriors_str: str, nkbins: int) -> jnp.ndarray:
     return uprior_inds
 
 
+def _resolve_uv_spacing(
+    *,
+    fov_deg: float,
+    du: float | None,
+    dv: float | None,
+    label: str,
+    rtol: float = 5e-2,
+) -> tuple[float, float]:
+    """Resolve uv-grid spacings from FoV and warn on explicit mismatches."""
+    fov_deg = float(fov_deg)
+    if fov_deg <= 0:
+        raise ValueError(f"{label}: fov must be > 0 deg, got {fov_deg}")
+
+    derived = float(1.0 / np.deg2rad(fov_deg))
+    du_val = derived if du is None else float(du)
+    dv_val = derived if dv is None else float(dv)
+
+    if not np.isclose(du_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: du={du_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if not np.isclose(dv_val, derived, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: dv={dv_val:.6g} is inconsistent with FoV-derived value "
+            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return du_val, dv_val
+
+
 def _coerce_args_dict(args: Any) -> dict[str, Any]:
     """Convert parser output or mapping-like object to a JSON-serializable dict."""
     if args is None:
@@ -123,6 +168,130 @@ def write_log_files(
         else:
             args_dict = _coerce_args_dict(args)
             args_file.write_text(json.dumps(args_dict, indent=2, default=str) + "\n")
+
+
+def write_analysis_metadata(
+    *,
+    output_dir: Path | str,
+    args: Any,
+    k_vals: Any,
+    mod_k_vo: Any,
+    bin_id_per_k_mode: Any,
+    valid_mask: Any,
+    clobber: bool = False,
+    version: str | None = None,
+) -> None:
+    """
+    Write old-style analysis metadata files into one output directory.
+
+    This consolidates the metadata layout expected by the legacy BayesEoR
+    analysis tooling:
+    - `args.json`
+    - `version.txt` (optional)
+    - `k-vals.txt`
+    - `k-vals-bins.txt`
+    - `k-vals-nsamples.txt`
+    """
+    if not isinstance(output_dir, Path):
+        output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    write_log_files(
+        parser=None,
+        args=args,
+        out_dir=output_dir,
+        version=version,
+    )
+
+    k_vals_path = output_dir / "k-vals.txt"
+    k_bins_path = output_dir / "k-vals-bins.txt"
+    k_counts_path = output_dir / "k-vals-nsamples.txt"
+    if not clobber and all(p.exists() for p in (k_vals_path, k_bins_path, k_counts_path)):
+        return
+
+    k_vals_np = np.asarray(k_vals, dtype=np.float64).reshape(-1)
+    mod_k_np = np.asarray(mod_k_vo, dtype=np.float64).reshape(-1)
+    bid_np = np.asarray(bin_id_per_k_mode, dtype=np.int32).reshape(-1)
+    valid_np = np.asarray(valid_mask, dtype=bool).reshape(-1)
+
+    if k_vals_np.size == 0:
+        raise ValueError("Cannot save k-bin metadata with zero non-empty bins.")
+
+    kbin_edges: list[float] = []
+    nsamples: list[int] = []
+    last_max = None
+    for i_bin in range(k_vals_np.size):
+        in_bin = valid_np & (bid_np == i_bin)
+        bin_vals = mod_k_np[in_bin]
+        if bin_vals.size == 0:
+            raise ValueError(f"Compact k-bin {i_bin} has no assigned modes.")
+        kbin_edges.append(float(bin_vals.min()))
+        nsamples.append(int(bin_vals.size))
+        last_max = float(bin_vals.max())
+    kbin_edges.append(last_max)
+
+    np.savetxt(k_vals_path, k_vals_np)
+    np.savetxt(k_bins_path, np.asarray(kbin_edges, dtype=np.float64))
+    np.savetxt(k_counts_path, np.asarray(nsamples, dtype=np.int64), fmt="%d")
+
+
+def validate_multinest_output_path(
+    out_dir: Path,
+    file_root: str,
+    longest_suffix: str = "post_equal_weights.dat",
+) -> str:
+    """
+    Validate a MultiNest output prefix against the 100-character path limit.
+
+    Parameters
+    ----------
+    out_dir : pathlib.Path
+        Directory that will contain the MultiNest output files.
+    file_root : str
+        Filename prefix passed to MultiNest, for example ``"data-"``.
+    longest_suffix : str, optional
+        Longest expected suffix emitted by MultiNest. Defaults to
+        ``"post_equal_weights.dat"``.
+
+    Returns
+    -------
+    str
+        The full ``outputfiles_basename`` string to pass to MultiNest.
+    """
+    outputfiles_basename = (out_dir / file_root).as_posix()
+    longest_path = f"{outputfiles_basename}{longest_suffix}"
+    if len(longest_path) > 100:
+        raise ValueError(
+            "MultiNest requires output file paths of length <= 100 characters. "
+            f"The derived path '{longest_path}' has length {len(longest_path)}."
+        )
+    return outputfiles_basename
+
+
+def estimate_average_eval_time(
+    likelihood_fn,
+    theta_ref: np.ndarray,
+    avg_iters: int,
+) -> float:
+    """
+    Estimate the average scalar likelihood evaluation time.
+
+    Parameters
+    ----------
+    likelihood_fn : callable
+        Scalar log-likelihood callback.
+    theta_ref : numpy.ndarray
+        Reference parameter vector used for repeated timing calls.
+    avg_iters : int
+        Number of repeated evaluations.
+    """
+    start = time.perf_counter()
+    for _ in range(int(avg_iters)):
+        value = likelihood_fn(theta_ref)
+        value = block_until_ready(value)
+        if not np.isfinite(float(np.asarray(value))):
+            raise ValueError("Non-finite likelihood value encountered during timing.")
+    return (time.perf_counter() - start) / max(1, int(avg_iters))
 
 
 def save_numpy_dict(
@@ -208,3 +377,40 @@ def load_numpy_dict(fp: Path | str, as_jax: bool = False) -> Any:
         except (TypeError, ValueError):
             return loaded
     return loaded
+
+
+def load_sharded_npy(
+    fp: Path | str,
+    sharding: NamedSharding,
+    *,
+    dtype: np.dtype | None = None,
+) -> jax.Array:
+    """
+    Load a dense ``.npy`` array directly into a sharded JAX array.
+
+    Parameters
+    ----------
+    fp : pathlib.Path or str
+        Path to the ``.npy`` file.
+    sharding : jax.sharding.NamedSharding
+        Target sharding for the returned global array.
+    dtype : numpy.dtype or None, optional
+        Optional dtype override applied shard-by-shard while loading.
+
+    Returns
+    -------
+    jax.Array
+        Global array whose addressable shards are read lazily from the file.
+    """
+    if not isinstance(fp, Path):
+        fp = Path(fp)
+    if not fp.exists():
+        raise FileNotFoundError(f"{fp} does not exist")
+
+    mm = np.load(fp, mmap_mode="r")
+    out_dtype = np.dtype(mm.dtype if dtype is None else dtype)
+
+    def _callback(index):
+        return np.asarray(mm[index], dtype=out_dtype)
+
+    return jax.make_array_from_callback(mm.shape, sharding, _callback)

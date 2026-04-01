@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import warnings
+import time
 
 import jax
 import jax.numpy as jnp
 # from jax.experimental import sparse
 import numpy as np
-from astropy.time import Time
+from jax.experimental import multihost_utils
 
 from .build_matricies import BuildMatrices
-from .inference.likelihood import Likelihood
-from .inference.prior import PhiInverse, Prior
+from .inference.likelihood_marg import MarginalisedLikelihood
+from .inference.phi import PhiInverse
+from .inference.prior import Prior
 from .model.cosmology_transforms import Cosmology
-from .model.instrument import InstrumentModel
 from .model.k_cube import (
     calc_mean_binned_k_vals,
     compress_to_nonempty_k_bins,
@@ -24,9 +24,8 @@ from .model.k_cube import (
     generate_k_cube_model_spherical_binning,
     mask_k_cube,
 )
-from .model.noise import generate_gaussian_noise
-from .utils import load_numpy_dict
-from .vis import preprocess_uvdata
+from .utils import _resolve_uv_spacing, load_numpy_dict, write_analysis_metadata
+from .vis import get_vis_data
 
 jax.config.update("jax_enable_x64", True)
 
@@ -60,230 +59,6 @@ class SetupResult:
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
 
-
-def _get_freqs_from_uvd(uvd: Any) -> np.ndarray:
-    """Extract frequency array in Hz from pyuvdata object."""
-    freqs = uvd.freq_array
-    if len(freqs.shape) > 1:
-        freqs = freqs[0]
-    return np.asarray(freqs, dtype=float)
-
-
-def _resolve_uv_spacing(
-    *,
-    fov_deg: float,
-    du: float | None,
-    dv: float | None,
-    label: str,
-    rtol: float = 5e-2,
-) -> tuple[float, float]:
-    """Resolve uv spacings, deriving from FoV when omitted and warning on mismatch."""
-    fov_deg = float(fov_deg)
-    if fov_deg <= 0:
-        raise ValueError(f"{label}: fov must be > 0 deg, got {fov_deg}")
-
-    derived = float(1.0 / np.deg2rad(fov_deg))
-    du_val = derived if du is None else float(du)
-    dv_val = derived if dv is None else float(dv)
-
-    if du is not None and not np.isclose(du_val, derived, rtol=rtol, atol=0.0):
-        warnings.warn(
-            f"{label}: du={du_val:.6g} is inconsistent with FoV-derived value "
-            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    if dv is not None and not np.isclose(dv_val, derived, rtol=rtol, atol=0.0):
-        warnings.warn(
-            f"{label}: dv={dv_val:.6g} is inconsistent with FoV-derived value "
-            f"{derived:.6g} (=1/deg2rad({fov_deg:.6g})).",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-
-    return du_val, dv_val
-
-
-def get_vis_data(
-    *,
-    data_path: Path | str,
-    inst_model: Path | str | None = None,
-    noise_data_path: Path | str | None = None,
-    sigma: float | None = None,
-    noise_seed: int = 742123,
-    calc_noise: bool = False,
-    # Raw-uvdata preprocessing controls.
-    antenna_selection: str = "cross",
-    bl_cutoff: float | None = None,
-    freq_idx_min: int | None = None,
-    freq_min: float | None = None,
-    freq_center: float | None = None,
-    n_freqs_select: int | None = None,
-    jd_idx_min: int | None = None,
-    jd_min: float | None = None,
-    jd_center: float | None = None,
-    n_times_select: int | None = None,
-    form_pi: bool = True,
-    pi_norm: float = 1.0,
-    pol: str = "xx",
-    redundant_avg: bool = False,
-    uniform_redundancy: bool = False,
-    # For preprocessed vectors.
-    n_freq: int | None = None,
-    f0_mhz: float | None = None,
-    df_mhz: float | None = None,
-    n_t: int | None = None,
-    d_t: float | None = None,
-    # Save hooks for raw preprocessing.
-    save_vis: bool = False,
-    save_model: bool = False,
-    save_dir: Path | str = "./",
-    clobber: bool = False,
-) -> dict[str, Any]:
-    """
-    Load visibilities and associated instrument/noise arrays.
-
-    Supports two input modes:
-    1. Raw pyuvdata file (`.uvh5`, `.uvfits`, `.ms`) via `preprocess_uvdata`.
-    2. Preprocessed `.npy` visibility vector plus an instrument-model directory.
-    """
-    # Normalize and validate the input data path once at the boundary.
-    if not isinstance(data_path, Path):
-        data_path = Path(data_path)
-    if not data_path.exists():
-        raise FileNotFoundError(f"{data_path} does not exist")
-
-    vis: jax.Array
-    noise_est: jax.Array | None
-    antpairs: Any | None
-    uvd = None
-
-    if data_path.suffix in {".uvh5", ".uvfits", ".ms"}:
-        # Raw-file mode:
-        # - select frequencies/times/baselines in vis.preprocess_uvdata
-        # - build Hermitian-expanded data vector + instrument arrays
-        # - optionally estimate empirical noise from even/odd differencing
-        out = preprocess_uvdata(
-            filepath=data_path,
-            antenna_selection=antenna_selection,
-            bl_cutoff=bl_cutoff,
-            freq_idx_min=freq_idx_min,
-            freq_min=freq_min,
-            freq_center=freq_center,
-            n_freqs_select=n_freqs_select,
-            jd_idx_min=jd_idx_min,
-            jd_min=jd_min,
-            jd_center=jd_center,
-            n_times_select=n_times_select,
-            form_pi=form_pi,
-            pi_norm=pi_norm,
-            pol=pol,
-            redundant_avg=redundant_avg,
-            uniform_redundancy=uniform_redundancy,
-            calc_noise=calc_noise,
-            return_uvd=True,
-            save_vis=save_vis,
-            save_model=save_model,
-            save_dir=save_dir,
-            clobber=clobber,
-        )
-        vis_np, antpairs, uvws_np, red_np, noise_np, uvd = out
-        vis = jnp.asarray(vis_np, dtype=jnp.complex128)
-        uvws = jnp.asarray(uvws_np, dtype=jnp.float64)
-        redundancy = jnp.asarray(red_np)
-        noise_est = None if noise_np is None else jnp.asarray(noise_np, dtype=jnp.complex128)
-
-        # Extract frequency/time metadata directly from the selected UVData.
-        freqs_hz = _get_freqs_from_uvd(uvd)
-        jds = np.unique(uvd.time_array)
-        if jds.size > 1:
-            dt = float((Time(jds[1], format="jd") - Time(jds[0], format="jd")).to("s").value)
-        else:
-            dt = float(d_t) if d_t is not None else 0.0
-    elif data_path.suffix == ".npy":
-        # Preprocessed-vector mode:
-        # - load visibilities from disk
-        # - load instrument model from an instrument directory
-        # - construct frequency/time axes from parser inputs
-        if inst_model is None:
-            raise ValueError("inst_model is required when loading a preprocessed .npy vector")
-        if n_freq is None or f0_mhz is None or df_mhz is None or n_t is None or d_t is None:
-            raise ValueError(
-                "n_freq, f0_mhz, df_mhz, n_t, and d_t are required for preprocessed .npy inputs"
-            )
-
-        vis = jnp.asarray(load_numpy_dict(data_path, as_jax=True), dtype=jnp.complex128).reshape(-1)
-        inst = InstrumentModel(inst_model)
-        uvws = jnp.asarray(inst.uvw_array_m, dtype=jnp.float64)
-        redundancy = jnp.asarray(inst.bl_red_array)
-        antpairs = inst.antpairs
-        noise_est = None
-
-        # In this mode, `n_freq/f0/df` define the analysis band explicitly.
-        freqs_hz = (float(f0_mhz) + float(df_mhz) * np.arange(int(n_freq), dtype=float)) * 1e6
-        if jd_min is not None:
-            # Old-pipeline compatible mode: construct times from lower bound.
-            jds = Time(float(jd_min), format="jd") + np.arange(int(n_t), dtype=float) * (
-                float(d_t) / 86400.0
-            )
-            jds = jds.jd
-        elif jd_center is not None:
-            # Centered-window mode around jd_center.
-            jds = Time(float(jd_center), format="jd") + np.arange(
-                -(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2
-            ) * (float(d_t) / 86400.0)
-            jds = jds.jd
-        else:
-            raise ValueError(
-                "One of jd_min or jd_center is required for preprocessed .npy inputs"
-            )
-        dt = float(d_t)
-    else:
-        raise ValueError(f"Unsupported data_path suffix '{data_path.suffix}'")
-
-    # Optional external noise vector.
-    if noise_data_path is not None:
-        # If a noise vector is supplied, treat input visibilities as already noisy.
-        noise = jnp.asarray(load_numpy_dict(noise_data_path, as_jax=True), dtype=jnp.complex128).reshape(-1)
-        vis_noisy = vis
-        bl_conj_pairs_map: dict[int, int] = {}
-    elif noise_est is not None:
-        # Reuse empirical noise estimated during raw UVData preprocessing.
-        noise = noise_est
-        vis_noisy = vis
-        bl_conj_pairs_map = {}
-    else:
-        # Otherwise inject synthetic Gaussian noise using the instrument redundancy model.
-        if sigma is None:
-            raise ValueError("sigma is required when no noise vector is supplied/estimated")
-        vis_noisy, noise, bl_conj_pairs_map = generate_gaussian_noise(
-            sigma=float(sigma),
-            s=vis,
-            n_freq=int(freqs_hz.size),
-            n_t=int(np.unique(jds).size),
-            uvw_array_m=uvws,
-            bl_red_array=redundancy,
-            random_seed=noise_seed,
-        )
-
-    df_hz = float(freqs_hz[1] - freqs_hz[0]) if freqs_hz.size > 1 else float(df_mhz) * 1e6
-
-    return {
-        "vis": vis,
-        "vis_noisy": vis_noisy,
-        "noise": noise,
-        "bl_conj_pairs_map": bl_conj_pairs_map,
-        "uvws": uvws,
-        "redundancy": redundancy,
-        "antpairs": antpairs,
-        "freqs_hz": jnp.asarray(freqs_hz, dtype=jnp.float64),
-        "df_hz": float(df_hz),
-        "jds": jnp.asarray(jds, dtype=jnp.float64),
-        "dt": float(dt),
-        "uvd": uvd,
-    }
-
-
 def run_setup(
     *,
     # IO
@@ -304,6 +79,7 @@ def run_setup(
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
+    fg_model_domain: str = "uv",
     # Frequency / time
     n_freq: int | None = None,
     f0_mhz: float | None = None,
@@ -346,6 +122,7 @@ def run_setup(
     save_vis: bool = False,
     save_model: bool = False,
     save_dir: Path | str = "./",
+    output_dir: Path | str = "./",
     clobber: bool = False,
     effective_noise_path: Path | str | None = None,
     # Prior / likelihood
@@ -358,7 +135,7 @@ def run_setup(
     """
     Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    This is the main setup entry point used by :mod:`bayeseor_jax.run_fit`. It:
+    This is the main setup entry point used by :mod:`bayeseor_jax.run_ns`. It:
 
     1. Loads or preprocesses visibilities/noise metadata.
     2. Builds matrix products (`T`, `Ninv`, `T_Ninv_T`) needed by the
@@ -378,6 +155,10 @@ def run_setup(
         Optional precomputed noise vector path.
     array_save_directory : pathlib.Path or str, optional
         Directory used to store/load matrix products.
+    output_dir : pathlib.Path or str, optional
+        Directory where analysis-side metadata files are written. The new
+        pipeline saves old-style `k-vals*.txt` products here for downstream
+        analysis compatibility.
 
     n_u_eor, n_v_eor, du_eor, dv_eor : int/float
         EoR model UV grid shape and spacing.
@@ -411,9 +192,10 @@ def run_setup(
         Power-spectrum prior bounds with shape ``(n_power_params, 2)`` in
         log10 space.
     uniform_priors : array-like of bool, optional
-        Boolean mask of length ``n_power_params`` where True bins are sampled
-        directly in linear power space and False bins are sampled in log10
-        space. If None, all bins are sampled in log10 space.
+        Boolean mask of length ``n_power_params`` where True bins use the
+        old BayesEoR linear-uniform physical prior implemented via a Jacobian
+        correction inside the likelihood. Sampler coordinates remain in
+        log10-power space for all bins.
     inverse_lw_power : float, optional
         Inverse prior power assigned to FG/LSSM latent coefficients.
     use_intrinsic_noise_fitting : bool, optional
@@ -447,18 +229,25 @@ def run_setup(
         fov_fg = fov_eor
     if len(telescope_latlonalt) != 3:
         raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
+
+    # Resolve uv-grid spacings from the requested FoV when they are omitted.
+    # If explicit du/dv values are provided, keep them but warn when they are
+    # inconsistent with the standard FoV-derived choice 1 / deg2rad(FoV).
+    fov_eor = float(fov_eor)
+    fov_fg = float(fov_fg)
     du_eor, dv_eor = _resolve_uv_spacing(
-        fov_deg=float(fov_eor),
+        fov_deg=fov_eor,
         du=du_eor,
         dv=dv_eor,
         label="EoR uv grid spacing",
     )
     du_fg, dv_fg = _resolve_uv_spacing(
-        fov_deg=float(fov_fg),
+        fov_deg=fov_fg,
         du=du_fg,
         dv=dv_fg,
         label="FG uv grid spacing",
     )
+
     if n_eta is None:
         if n_freq is None:
             raise ValueError("n_eta is None and n_freq is None; one must be provided")
@@ -467,6 +256,10 @@ def run_setup(
         n_powerlaws_fg = len(beta_fg) if (beta_fg is not None and n_modes_fg > 0) else 0
     if n_modes_fg > n_powerlaws_fg and n_powerlaws_fg > 0:
         n_modes_fg = n_powerlaws_fg
+
+    output_dir = Path(output_dir).expanduser().resolve()
+    array_save_directory = Path(array_save_directory).expanduser().resolve()
+    save_dir = Path(save_dir).expanduser().resolve()
 
     vis_dict = get_vis_data(
         data_path=data_path,
@@ -517,6 +310,72 @@ def run_setup(
     if n_eta is None:
         n_eta = n_freq
 
+    setup_args_dict = {
+        "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
+        "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
+        "noise_data_path": None if noise_data_path is None else str(Path(noise_data_path).expanduser().resolve()),
+        "array_save_directory": str(array_save_directory),
+        "output_dir": str(output_dir),
+        "n_u_eor": int(n_u_eor),
+        "n_v_eor": int(n_v_eor),
+        "du_eor": float(du_eor),
+        "dv_eor": float(dv_eor),
+        "n_u_fg": int(n_u_fg),
+        "n_v_fg": int(n_v_fg),
+        "du_fg": float(du_fg),
+        "dv_fg": float(dv_fg),
+        "fit_for_monopole": bool(fit_for_monopole),
+        "n_modes_fg": int(n_modes_fg),
+        "n_powerlaws_fg": int(n_powerlaws_fg),
+        "beta_fg": None if beta_fg is None else list(beta_fg),
+        "fg_model_domain": str(fg_model_domain),
+        "n_freq": int(n_freq),
+        "f0_mhz": float(f0_mhz),
+        "df_mhz": float(df_mhz),
+        "n_eta": int(n_eta),
+        "n_t": int(n_t),
+        "d_t": None if d_t is None else float(d_t),
+        "jd_min": None if jd_min is None else float(jd_min),
+        "jd_center": None if jd_center is None else float(jd_center),
+        "nside": int(nside),
+        "fov_eor": float(fov_eor),
+        "fov_fg": float(fov_fg),
+        "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
+        "beam_type": beam_type,
+        "peak_amp": float(peak_amp),
+        "fwhm_deg": None if fwhm_deg is None else float(fwhm_deg),
+        "diam": None if diam is None else float(diam),
+        "cosfreq": None if cosfreq is None else float(cosfreq),
+        "tanh_freq": None if tanh_freq is None else float(tanh_freq),
+        "tanh_sl_red": None if tanh_sl_red is None else float(tanh_sl_red),
+        "pol": pol,
+        "freq_interp_kind": freq_interp_kind,
+        "antenna_selection": antenna_selection,
+        "bl_cutoff": None if bl_cutoff is None else float(bl_cutoff),
+        "freq_idx_min": None if freq_idx_min is None else int(freq_idx_min),
+        "freq_min": None if freq_min is None else float(freq_min),
+        "freq_center": None if freq_center is None else float(freq_center),
+        "n_freqs_select": None if n_freqs_select is None else int(n_freqs_select),
+        "jd_idx_min": None if jd_idx_min is None else int(jd_idx_min),
+        "n_times_select": None if n_times_select is None else int(n_times_select),
+        "form_pi": bool(form_pi),
+        "pi_norm": float(pi_norm),
+        "redundant_avg": bool(redundant_avg),
+        "uniform_redundancy": bool(uniform_redundancy),
+        "calc_noise": bool(calc_noise),
+        "sigma": None if sigma is None else float(sigma),
+        "noise_seed": int(noise_seed),
+        "save_vis": bool(save_vis),
+        "save_model": bool(save_model),
+        "save_dir": str(save_dir),
+        "clobber": bool(clobber),
+        "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
+        "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
+        "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
+        "inverse_lw_power": float(inverse_lw_power),
+        "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
+    }
+
     # Cosmology-derived physical cube dimensions.
     # These map the instrumental coordinate extents to comoving Mpc scales and
     # are required for k-bin definitions and power normalization.
@@ -557,6 +416,18 @@ def run_setup(
         bin_id_per_k_mode=bid_full,
         valid_mask=valid_full,
     )
+    if jax.process_index() == 0:
+        write_analysis_metadata(
+            output_dir=output_dir,
+            args=setup_args_dict,
+            k_vals=k_vals,
+            mod_k_vo=mod_k_vo,
+            bin_id_per_k_mode=bid_compact,
+            valid_mask=valid_compact,
+            clobber=clobber,
+        )
+    if jax.process_count() > 1:
+        multihost_utils.sync_global_devices("k-vals-metadata-saved")
 
     # Optional per-visibility effective-noise model.
     # If provided, this overrides sigma/redundancy-based covariance construction.
@@ -601,6 +472,7 @@ def run_setup(
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
+        fg_model_domain=str(fg_model_domain),
         n_t=int(n_t),
         d_t=float(d_t),
         beam_type=beam_type,
@@ -617,34 +489,17 @@ def run_setup(
         sigma=sigma,
         effective_noise=effective_noise,
         array_save_directory=str(array_save_directory),
+        clobber=bool(clobber),
     )
-    bm.build_minimum_matrix_stack()
 
-    # Load compressed matrix terms and form:
-    #   dbar = T^H N^-1 d
-    #   d_Ninv_d = d^H N^-1 d
-    # using sparse matvecs upstream to avoid unnecessary dense materialization.
-    T = bm.load_matrix("T")
-    Ninv = bm.load_matrix("Ninv")
-    T_Ninv_T = bm.load_matrix("T_Ninv_T")
-    if hasattr(T, "todense"):
-        T = T.todense()
-    T = jnp.asarray(T)
-
+    # The likelihood stack extends the heavy matrix products with the
+    # data-dependent compressed terms needed by the marginalized Gaussian path.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    Ninv = jnp.asarray(Ninv)
-    if Ninv.ndim == 1:
-        Ninv_d = Ninv * vis_noisy
-    elif Ninv.ndim == 2:
-        Ninv_d = Ninv @ vis_noisy
-    else:
-        raise ValueError("Loaded Ninv must be 1D (diag vector) or 2D (matrix).")
-    dbar = jnp.conj(T).T @ Ninv_d
-    d_ninv_d = jnp.real(jnp.vdot(vis_noisy, Ninv_d))
+    n_params = bm.build_minimum_likelihood_stack(vis_noisy)
 
     # Assemble sampler-space prior and latent-space precision configs.
-    # `Prior` now receives log-space bounds and constructs sampler-space bounds.
-    # `PhiInverse` maps sampled power amplitudes to latent precision diag.
+    # `Prior` now works directly in log10(power) sampler coordinates.
+    # `PhiInverse` maps linearized power amplitudes to latent precision diag.
     if priors is None:
         raise ValueError("priors must be provided")
 
@@ -669,7 +524,6 @@ def run_setup(
 
     prior_class = Prior(
         bounds_log=bounds_log,
-        uniform_priors=uniform_priors_mask,
         power_param_start=0,
         n_power_params=n_power_params,
     )
@@ -682,14 +536,12 @@ def run_setup(
         ps_box_size_dec_mpc=ps_box_size_dec_mpc,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
         inst_to_cosmo_vol=float(cosmo.inst_to_cosmo_vol(z)),
-        n_par=int(T_Ninv_T.shape[0]),
+        n_par=int(n_params),
         inverse_lw_power=float(inverse_lw_power),
     )
     
-    likelihood_class = Likelihood(
-        t_ninv_t=jnp.asarray(T_Ninv_T),
-        dbar=jnp.asarray(dbar),
-        d_ninv_d=jnp.asarray(d_ninv_d),
+    likelihood_class = MarginalisedLikelihood(
+        matrix_dir=str(array_save_directory),
         n_data=int(vis_noisy.size),
         phi_inv_class=phi_inverse_class,
         prior_class=prior_class,
@@ -699,7 +551,8 @@ def run_setup(
         n_power_params=n_power_params,
     )
 
-    # Return one object containing both configs and diagnostics needed by run_inference.
+    # Return one object containing both configs and diagnostics needed by
+    # run_nestedsampling.
     return SetupResult(
         likelihood_class=likelihood_class,
         prior_class=prior_class,

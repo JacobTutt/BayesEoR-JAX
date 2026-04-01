@@ -1,4 +1,4 @@
-"""Class and functions for reading/analyzing BayesEoR-JAX output files."""
+"""Class and functions for reading/analyzing BayesEoR output files."""
 import numpy as np
 import scipy as sp
 from pathlib import Path
@@ -21,8 +21,11 @@ class DataContainer(object):
         Prefix to append to `dirnames`. Defaults to None, i.e. the entries in
         `dirnames` are assumed to be valid paths to BayesEoR output
         directories.
-        Each directory is expected to contain the BlackJAX chain file
-        ``nested_sampling_results.csv`` written in Anesthetic CSV format.
+    sampler : str, optional
+        Case insensitive sampler name. Supported values are ``"multinest"``
+        (default) and ``"blackjax"``. The former reads the classic
+        MultiNest ``data-.txt`` outputs, while the latter reads the
+        Anesthetic-style ``nested_sampling_results.csv`` file.
     store_samples : bool, optional
         If `store_samples` is True, store all samples as an attribute,
         `self.samples`.  Defaults to False.
@@ -43,6 +46,11 @@ class DataContainer(object):
         shape ``(len(dirnames), Nkbins)``.  If ``Nkbins`` varies in each file,
         each entry in `uplims` must have ``len(uplims[i]) == Nkbins`` for that
         particular file.
+    posterior_weighted : bool, optional
+        If `posterior_weighted` is True, use the sampler weights in the
+        calculation of the individual power spectrum coefficient posteriors
+        and the associated estimates, uncertainties, and upper limits.
+        Defaults to True.
     Nhistbins : int, optional
         Number of histogram bins for each k bin's posterior distribution.
     density : bool, optional
@@ -78,15 +86,61 @@ class DataContainer(object):
         Defaults to None (no labels).
     
     """
+    @staticmethod
+    def _resolve_multinest_chain_path(path: Path) -> Path:
+        """
+        Resolve the main MultiNest weighted chain file inside an output directory.
+
+        The old pipeline hard-coded ``data-.txt``. Some newer runs used shorter
+        file roots such as ``d-`` to satisfy MultiNest's path-length limit. When
+        ``summary.json`` is present, prefer its recorded
+        ``outputfiles_basename``. Otherwise, fall back to the classic
+        ``data-.txt`` name and finally to a unique ``*- .txt`` style chain file
+        in the directory.
+        """
+        default_path = path / "data-.txt"
+        if default_path.exists():
+            return default_path
+
+        summary_path = path / "summary.json"
+        if summary_path.exists():
+            with open(summary_path, "r") as f:
+                summary = json.load(f)
+            outputfiles_basename = summary.get("outputfiles_basename")
+            if outputfiles_basename:
+                candidate = path / f"{Path(outputfiles_basename).name}.txt"
+                if candidate.exists():
+                    return candidate
+
+        candidates = sorted(
+            p
+            for p in path.glob("*-.txt")
+            if p.is_file()
+            and not p.name.endswith("summary.txt")
+            and not p.name.endswith("stats.txt")
+        )
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise FileNotFoundError(
+                "Found multiple MultiNest chain files and could not choose one: "
+                + ", ".join(p.name for p in candidates)
+            )
+        raise FileNotFoundError(
+            f"Could not find a MultiNest weighted chain file in {path}."
+        )
+
     def __init__(
         self,
         dirnames,
         dir_prefix=None,
+        sampler="multinest",
         store_samples=False,
         cred_intervals=[68, 95],
         calc_uplims=True,
         uplim_quantile=0.95,
         uplim_inds=None,
+        posterior_weighted=True,
         Nhistbins=31,
         density=False,
         calc_kurtosis=False,
@@ -102,8 +156,16 @@ class DataContainer(object):
         if not isinstance(dir_prefix, Path) and dir_prefix is not None:
             dir_prefix = Path(dir_prefix)
         self.dir_prefix = dir_prefix
-        self.sampler = "blackjax"
-        self.sampler_filename = "nested_sampling_results.csv"
+        self.sampler = sampler.lower()
+        if self.sampler == "multinest":
+            self.sampler_filename = "data-.txt"
+        elif self.sampler == "blackjax":
+            self.sampler_filename = "nested_sampling_results.csv"
+        else:
+            raise ValueError(
+                "Unsupported sampler. Expected 'multinest' or 'blackjax', "
+                f"got {sampler!r}."
+            )
         self.labels = labels
 
         if not isinstance(cred_intervals, Iterable):
@@ -175,23 +237,32 @@ class DataContainer(object):
                 with open(args_path, "r") as f:
                     args = Namespace(**json.load(f))
             else:
-                args = Namespace(log_priors=True)
+                args = Namespace()
 
             if k_vals is None:
                 if hasattr(args, "priors") and args.priors is not None:
                     k_vals = np.arange(1, len(args.priors) + 1, dtype=float)
                 else:
-                    sampler_data_path = path / self.sampler_filename
-                    raw = np.genfromtxt(
-                        sampler_data_path,
-                        delimiter=",",
-                        names=True,
-                        dtype=float,
-                        encoding=None,
-                    )
-                    col_names = list(raw.dtype.names or [])
-                    param_cols = [c for c in col_names if str(c).startswith("theta_")]
-                    nkbins = len(param_cols)
+                    if self.sampler == "multinest":
+                        sampler_data_path = self._resolve_multinest_chain_path(path)
+                    else:
+                        sampler_data_path = path / self.sampler_filename
+                    if self.sampler == "multinest":
+                        raw = np.loadtxt(sampler_data_path)
+                        if raw.ndim == 1:
+                            raw = raw.reshape(1, -1)
+                        nkbins = int(raw.shape[1] - 2)
+                    else:
+                        raw = np.genfromtxt(
+                            sampler_data_path,
+                            delimiter=",",
+                            names=True,
+                            dtype=float,
+                            encoding=None,
+                        )
+                        col_names = list(raw.dtype.names or [])
+                        param_cols = [c for c in col_names if str(c).startswith("theta_")]
+                        nkbins = len(param_cols)
                     k_vals = np.arange(1, nkbins + 1, dtype=float)
             if k_vals_bins is None:
                 k_vals_bins = np.arange(k_vals.size + 1, dtype=float)
@@ -205,13 +276,15 @@ class DataContainer(object):
             # standard deviation, 95th percentile (optional), and kurtosis
             # (optional) of each k bin's posterior distribution.
             out = self.get_posterior_data(
-                path / self.sampler_filename,
+                self._resolve_multinest_chain_path(path)
+                if self.sampler == "multinest"
+                else path / self.sampler_filename,
                 int(len(k_vals)),
+                posterior_weighted=posterior_weighted,
                 cred_intervals=cred_intervals,
                 uplim_quantile=self.uplim_quantile,
                 Nhistbins=Nhistbins,
                 density=density,
-                log_priors=getattr(args, "log_priors", True),
                 return_samples=store_samples
             )
             self.posteriors.append(out[0])
@@ -245,11 +318,11 @@ class DataContainer(object):
         self,
         fp,
         Nkbins,
+        posterior_weighted=True,
         cred_intervals=[68, 95],
         uplim_quantile=0.95,
         Nhistbins=31,
         density=False,
-        log_priors=True,
         return_samples=False
     ):
         """
@@ -261,6 +334,11 @@ class DataContainer(object):
             Path to sampler output file.
         Nkbins : int
             Number of spherically averaged k bins.
+        posterior_weighted : bool, optional
+            If `posterior_weighted` is True, use sampler weights in the
+            calculation of the individual power spectrum coefficient
+            posteriors and the associated estimates, uncertainties, and upper
+            limits. Defaults to True.
         cred_intervals : float or list of floats, optional
             Credibility intervals as percentages.  Defaults to [68, 95], i.e.
             compute 68% and 95% credibility intervals.
@@ -273,11 +351,6 @@ class DataContainer(object):
         density : bool, optional
             If `density` is True, compute the posterior as a probability
             density function.  Defaults to False, i.e. plot counts.
-        log_priors : bool, optional
-            If `log_priors` is True (default), power spectrum samples are
-            assumed to be in log10 units and are first linearized prior to
-            calculating e.g. upper limits.  Otherwise, the power spectrum
-            samples are assumed to be in linear units.
         return_samples : bool, optional
             If `return_samples` is True, return all samples. Defaults to False.
         
@@ -311,52 +384,71 @@ class DataContainer(object):
         if not isinstance(fp, Path):
             fp = Path(fp)
 
-        raw = np.genfromtxt(
-            fp,
-            delimiter=",",
-            names=True,
-            dtype=float,
-            encoding=None,
-        )
-        if raw.ndim == 0:
-            raw = np.array([raw], dtype=raw.dtype)
-
-        col_names = list(raw.dtype.names or [])
-        param_cols = [c for c in col_names if str(c).startswith("theta_")]
-        if not param_cols:
-            excluded = {"logL", "logL_birth", "weights", "logw", "logvol"}
-            param_cols = [c for c in col_names if c not in excluded]
-        if len(param_cols) < Nkbins:
-            raise ValueError(
-                f"Found {len(param_cols)} sampled parameter columns, expected at least {Nkbins}."
+        if self.sampler == "multinest":
+            data = np.loadtxt(fp)
+            if len(data.shape) == 1:
+                data = data.reshape(1, -1)
+            samples_for_stats = np.asarray(data[:, 2:], dtype=float)
+            samples_for_stats = 10**samples_for_stats
+            weights = np.asarray(data[:, 0], dtype=float) if posterior_weighted else None
+            sample_table = data
+        elif self.sampler == "blackjax":
+            raw = np.genfromtxt(
+                fp,
+                delimiter=",",
+                names=True,
+                dtype=float,
+                encoding=None,
             )
-        param_cols = param_cols[:Nkbins]
+            if raw.ndim == 0:
+                raw = np.array([raw], dtype=raw.dtype)
 
-        samples_for_stats = np.column_stack([raw[c] for c in param_cols])
-        if log_priors:
+            col_names = list(raw.dtype.names or [])
+            param_cols = [c for c in col_names if str(c).startswith("theta_")]
+            if not param_cols:
+                excluded = {"logL", "logL_birth", "weights", "logw", "logvol"}
+                param_cols = [c for c in col_names if c not in excluded]
+            if len(param_cols) < Nkbins:
+                raise ValueError(
+                    f"Found {len(param_cols)} sampled parameter columns, expected at least {Nkbins}."
+                )
+            param_cols = param_cols[:Nkbins]
+
+            samples_for_stats = np.column_stack([raw[c] for c in param_cols])
             samples_for_stats = 10**samples_for_stats
 
-        if "weights" in col_names:
-            weights = np.asarray(raw["weights"], dtype=float)
-        elif "logw" in col_names:
-            logw = np.asarray(raw["logw"], dtype=float)
-            logw = logw - np.nanmax(logw)
-            weights = np.exp(logw)
-        else:
-            raise ValueError(
-                "Expected weighted nested-sampling chains: "
-                "missing 'weights' and 'logw' columns in nested_sampling_results.csv."
+            if posterior_weighted:
+                if "weights" in col_names:
+                    weights = np.asarray(raw["weights"], dtype=float)
+                elif "logw" in col_names:
+                    logw = np.asarray(raw["logw"], dtype=float)
+                    logw = logw - np.nanmax(logw)
+                    weights = np.exp(logw)
+                else:
+                    raise ValueError(
+                        "Expected weighted nested-sampling chains: "
+                        "missing 'weights' and 'logw' columns in nested_sampling_results.csv."
+                    )
+                bad = ~np.isfinite(weights)
+                if np.any(bad):
+                    weights = weights.copy()
+                    weights[bad] = 0.0
+            else:
+                weights = None
+
+            logl = (
+                np.asarray(raw["logL"], dtype=float)
+                if "logL" in col_names
+                else np.zeros(samples_for_stats.shape[0], dtype=float)
             )
-
-        if weights is not None:
-            bad = ~np.isfinite(weights)
-            if np.any(bad):
-                weights = weights.copy()
-                weights[bad] = 0.0
-
-        logl = np.asarray(raw["logL"], dtype=float) if "logL" in col_names else np.zeros(samples_for_stats.shape[0], dtype=float)
-        leading_weight_col = np.asarray(weights)
-        sample_table = np.column_stack([leading_weight_col, logl, samples_for_stats])
+            leading_weight_col = (
+                np.asarray(weights, dtype=float)
+                if weights is not None
+                else np.ones(samples_for_stats.shape[0], dtype=float)
+            )
+            sample_table = np.column_stack([leading_weight_col, logl, samples_for_stats])
+        else:
+            raise ValueError(f"Unsupported sampler: {self.sampler}")
 
         avgs = np.average(samples_for_stats, axis=0, weights=weights)
         medians = self._weighted_quantiles(samples_for_stats, 0.5, weights=weights)
@@ -383,9 +475,8 @@ class DataContainer(object):
         for i_k in range(samples_for_stats.shape[1]):
             bins_min = samples_for_stats[:, i_k].min()
             bins_max = samples_for_stats[:, i_k].max()
-            if log_priors:
-                bins_min = np.log10(bins_min)
-                bins_max = np.log10(bins_max)
+            bins_min = np.log10(bins_min)
+            bins_max = np.log10(bins_max)
             bins[i_k] = np.logspace(bins_min, bins_max, Nhistbins + 1)
             posteriors[i_k], bins[i_k] = np.histogram(
                 samples_for_stats[:, i_k],
@@ -834,9 +925,8 @@ class DataContainer(object):
                     label_priors = None
                 priors_lo = np.array(self.args[i_dir].priors)[:, 0]
                 priors_hi = np.array(self.args[i_dir].priors)[:, 1]
-                if self.args[i_dir].log_priors:
-                    priors_lo = 10**priors_lo
-                    priors_hi = 10**priors_hi
+                priors_lo = 10**priors_lo
+                priors_hi = 10**priors_hi
                 ax.stairs(
                     priors_hi,
                     self.k_vals_bins[i_dir],
@@ -1032,9 +1122,8 @@ class DataContainer(object):
                 if plot_priors:
                     prior_lo = self.args[i_dir].priors[i_k][0]
                     prior_hi = self.args[i_dir].priors[i_k][1]
-                    if self.args[i_dir].log_priors:
-                        prior_lo = 10**prior_lo
-                        prior_hi = 10**prior_hi
+                    prior_lo = 10**prior_lo
+                    prior_hi = 10**prior_hi
                     ax.axvspan(
                         prior_lo,
                         prior_hi,

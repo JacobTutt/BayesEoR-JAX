@@ -40,9 +40,10 @@ class BayesEoRParser(ArgumentParser):
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
     uniform_priors : list of bool/int, optional
-        Boolean mask over k bins where True indicates uniform prior in linear
-        power (sampled directly in linear space). False bins are sampled in
-        log10 space.
+        Boolean mask over k bins where True indicates a linear-uniform
+        physical prior implemented through a Jacobian correction in the
+        likelihood. Sampler coordinates remain in log10-power space for all
+        bins.
     inverse_lw_power : float, optional
         Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
     use_intrinsic_noise_fitting : bool, optional
@@ -81,6 +82,9 @@ class BayesEoRParser(ArgumentParser):
         ``beta_fg`` when foreground modes are enabled.
     beta_fg : list of float, optional
         Foreground power-law spectral indices. Defaults to ``[2.63, 2.82]``.
+    fg_model_domain : {"uv", "image"}, optional
+        Spatial basis used for the non-monopole foreground ``[eta0 | LSSM]``
+        block. Defaults to ``"uv"``.
 
     Frequency / LoS Parameters
 
@@ -226,6 +230,13 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--n-modes-fg", type=int, default=0, help="Number of FG/LSSM modes.")
         self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
         self.add_argument("--beta-fg", type=list[float], default=[2.63, 2.82], help="FG power-law indices.")
+        self.add_argument(
+            "--fg-model-domain",
+            type=str,
+            choices=("uv", "image"),
+            default="uv",
+            help="Spatial basis for the non-monopole FG [eta0 | LSSM] block.",
+        )
 
         # Frequency / eta
         self.add_argument("--n-freq", type=int, required=True, help="Number of frequency channels.")
