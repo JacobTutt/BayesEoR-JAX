@@ -434,42 +434,6 @@ class BuildMatrices:
         
         return nuidft_uv_to_lm_fg
     
-    def _build_Finv_Fprime_block(self, nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t):
-        """
-        Build the ``(i_f, i_t)`` block of ``Finv_Fprime``.
-
-        This maps the FG image pixel set at time ``i_t`` into sampled
-        visibilities at frequency ``i_f`` through ``Finv = F^{-1}P``, then
-        projects that image-domain response into the model UV grids used by the
-        EoR and UV-domain FG blocks through ``Fprime``.
-        """
-        # LMN coordinates for time step i_t (FG pixel set).
-        lmn_fg_it = self.lmn_model_space.lmn_fg[i_t, :, :]  # (3, n_pix_fg)
-        # UVW coordinates for frequency i_f.
-        uvw_irad_if = self.inst_uvw_irad[i_f, :, :]  # (3, n_bls)
-        # NUDFT: LMN -> UVW at this (i_f, i_t).
-        nudft_lmn_to_uvw = build_nudft_matrix(
-            lmn_fg_it,  # (3, n_pix_fg)
-            uvw_irad_if,  # (3, n_bls)
-            sign=+1,
-        )
-        # Pixel area normalization in image domain.
-        nudft_lmn_to_uvw *= self.lmn_model_space.pixel_area_sr  # (n_bls, n_pix_fg)
-
-        # Beam response for this time/frequency.
-        beam_it = self.beam_response[i_f, i_t, :]  # (n_pix_fg,)
-
-        # Apply beam weighting in LMN.
-        finv_block = nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]  # (n_bls, n_pix_fg)
-
-        # Project into FG and EoR uv grids.
-        Finv_Fprime_block_fg = jnp.dot(finv_block, nuidft_uv_to_lm_fg)  # (n_bls, n_uv_fg)
-        Finv_Fprime_block_eor = jnp.dot(
-            finv_block[:, self.lmn_model_space.eor_fg_shared_axis],
-            nuidft_uv_to_lm_eor,
-        )  # (n_bls, n_uv_eor)
-
-        return Finv_Fprime_block_eor, Finv_Fprime_block_fg
 
     def _build_Finv_block(self, i_f: int, i_t: int) -> jnp.ndarray:
         """
@@ -590,45 +554,6 @@ class BuildMatrices:
         # Contract the image-domain axis against the monopole template.
         return jnp.tensordot(finv_blocks, monopole_template, axes=([-1], [0]))
 
-    def _build_finv_fprime_blocks(self):
-        """
-        Build dense per-frequency/per-time Finv_Fprime blocks.
-
-        Notes
-        -----
-        This function is written as local vectorized batching over a flattened
-        (frequency, time) index grid. When called inside a ``pjit`` context,
-        cross-device distribution is handled by ``pjit``/mesh sharding, while
-        this ``vmap`` handles per-device batching.
-
-        Returns
-        -------
-        full_eor, full_fg : tuple[jnp.ndarray, jnp.ndarray]
-            Tensors with shapes:
-            - full_eor: (n_freq, n_t, n_bls, n_uv_eor)
-            - full_fg:  (n_freq, n_t, n_bls, n_uv_fg)
-        """
-        # Precompute NUDFT kernels (UV -> LM).
-        nuidft_uv_to_lm_eor = self._uv_to_lm_eor()
-        nuidft_uv_to_lm_fg = self._uv_to_lm_fg()
-
-        # Vectorized construction over a flattened (frequency, time) grid.
-        t_idx = jnp.arange(self.n_t, dtype=jnp.int32)
-        f_idx = jnp.arange(self.n_freq, dtype=jnp.int32)
-        f_grid = jnp.repeat(f_idx, self.n_t)
-        t_grid = jnp.tile(t_idx, self.n_freq)
-
-        def block_fn(i_f, i_t):
-            return self._build_Finv_Fprime_block(
-                nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
-            )
-
-        flat_eor, flat_fg = jax.vmap(block_fn, in_axes=(0, 0), out_axes=(0, 0))(f_grid, t_grid)
-        
-        full_eor = flat_eor.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_eor)
-        full_fg = flat_fg.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_fg)
-
-        return full_eor, full_fg
 
     # ------------------------
     # Direct construction of T 
@@ -1717,6 +1642,83 @@ class BuildMatrices:
         t_matrix = np.load(_dense_matrix_path_impl(self, "T"), mmap_mode="r")
         return int(t_matrix.shape[1])
     
+
+    # def _build_Finv_Fprime_block(self, nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t):
+    #     """
+    #     Build the ``(i_f, i_t)`` block of ``Finv_Fprime``.
+
+    #     This maps the FG image pixel set at time ``i_t`` into sampled
+    #     visibilities at frequency ``i_f`` through ``Finv = F^{-1}P``, then
+    #     projects that image-domain response into the model UV grids used by the
+    #     EoR and UV-domain FG blocks through ``Fprime``.
+    #     """
+    #     # LMN coordinates for time step i_t (FG pixel set).
+    #     lmn_fg_it = self.lmn_model_space.lmn_fg[i_t, :, :]  # (3, n_pix_fg)
+    #     # UVW coordinates for frequency i_f.
+    #     uvw_irad_if = self.inst_uvw_irad[i_f, :, :]  # (3, n_bls)
+    #     # NUDFT: LMN -> UVW at this (i_f, i_t).
+    #     nudft_lmn_to_uvw = build_nudft_matrix(
+    #         lmn_fg_it,  # (3, n_pix_fg)
+    #         uvw_irad_if,  # (3, n_bls)
+    #         sign=+1,
+    #     )
+    #     # Pixel area normalization in image domain.
+    #     nudft_lmn_to_uvw *= self.lmn_model_space.pixel_area_sr  # (n_bls, n_pix_fg)
+
+    #     # Beam response for this time/frequency.
+    #     beam_it = self.beam_response[i_f, i_t, :]  # (n_pix_fg,)
+
+    #     # Apply beam weighting in LMN.
+    #     finv_block = nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]  # (n_bls, n_pix_fg)
+
+    #     # Project into FG and EoR uv grids.
+    #     Finv_Fprime_block_fg = jnp.dot(finv_block, nuidft_uv_to_lm_fg)  # (n_bls, n_uv_fg)
+    #     Finv_Fprime_block_eor = jnp.dot(
+    #         finv_block[:, self.lmn_model_space.eor_fg_shared_axis],
+    #         nuidft_uv_to_lm_eor,
+    #     )  # (n_bls, n_uv_eor)
+
+    #     return Finv_Fprime_block_eor, Finv_Fprime_block_fg
+    
+    # def _build_finv_fprime_blocks(self):
+    #     """
+    #     Build dense per-frequency/per-time Finv_Fprime blocks.
+
+    #     Notes
+    #     -----
+    #     This function is written as local vectorized batching over a flattened
+    #     (frequency, time) index grid. When called inside a ``pjit`` context,
+    #     cross-device distribution is handled by ``pjit``/mesh sharding, while
+    #     this ``vmap`` handles per-device batching.
+
+    #     Returns
+    #     -------
+    #     full_eor, full_fg : tuple[jnp.ndarray, jnp.ndarray]
+    #         Tensors with shapes:
+    #         - full_eor: (n_freq, n_t, n_bls, n_uv_eor)
+    #         - full_fg:  (n_freq, n_t, n_bls, n_uv_fg)
+    #     """
+    #     # Precompute NUDFT kernels (UV -> LM).
+    #     nuidft_uv_to_lm_eor = self._uv_to_lm_eor()
+    #     nuidft_uv_to_lm_fg = self._uv_to_lm_fg()
+
+    #     # Vectorized construction over a flattened (frequency, time) grid.
+    #     t_idx = jnp.arange(self.n_t, dtype=jnp.int32)
+    #     f_idx = jnp.arange(self.n_freq, dtype=jnp.int32)
+    #     f_grid = jnp.repeat(f_idx, self.n_t)
+    #     t_grid = jnp.tile(t_idx, self.n_freq)
+
+    #     def block_fn(i_f, i_t):
+    #         return self._build_Finv_Fprime_block(
+    #             nuidft_uv_to_lm_eor, nuidft_uv_to_lm_fg, i_f, i_t
+    #         )
+
+    #     flat_eor, flat_fg = jax.vmap(block_fn, in_axes=(0, 0), out_axes=(0, 0))(f_grid, t_grid)
+        
+    #     full_eor = flat_eor.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_eor)
+    #     full_fg = flat_fg.reshape(self.n_freq, self.n_t, self.nbls, self.n_uv_fg)
+
+    #     return full_eor, full_fg
     
     # @partial(jax.jit, static_argnums=(0,))
     # def build_Finv_Fprime(self) -> jnp.ndarray:
