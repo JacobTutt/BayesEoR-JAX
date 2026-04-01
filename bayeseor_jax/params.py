@@ -82,7 +82,7 @@ class BayesEoRParser(ArgumentParser):
         ``beta_fg`` when foreground modes are enabled.
     beta_fg : list of float, optional
         Foreground power-law spectral indices. Defaults to ``[2.63, 2.82]``.
-    fg_non_monopole_parameterization : {"uv", "image"}, optional
+    fg_model_domain : {"uv", "image"}, optional
         Spatial basis used for the non-monopole foreground ``[eta0 | LSSM]``
         block. Defaults to ``"uv"``.
 
@@ -231,7 +231,7 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
         self.add_argument("--beta-fg", type=list[float], default=[2.63, 2.82], help="FG power-law indices.")
         self.add_argument(
-            "--fg-non-monopole-parameterization",
+            "--fg-model-domain",
             type=str,
             choices=("uv", "image"),
             default="uv",

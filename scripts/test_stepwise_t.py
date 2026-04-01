@@ -223,7 +223,7 @@ def _build_matrices_only(args) -> BuildMatrices:
         n_eta=n_eta,
         d_eta=float(1.0 / bandwidth_hz),
         fit_for_monopole=bool(args.fit_for_monopole),
-        fg_non_monopole_parameterization=str(args.fg_non_monopole_parameterization),
+        fg_model_domain=str(args.fg_model_domain),
         telescope_latlonalt=tuple(float(x) for x in args.telescope_latlonalt),
         jd_center=jd_center,
         nside=int(args.nside),

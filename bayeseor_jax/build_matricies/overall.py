@@ -91,7 +91,7 @@ class BuildMatrices:
         large spectral scale model. Can be a single spectral index, e.g.
         [2.63], or multiple spectral indices, e.g. [2.63, 2.82]. Defaults to
         [2.63, 2.82].
-    fg_non_monopole_parameterization : {"uv", "image"}, optional
+    fg_model_domain : {"uv", "image"}, optional
         Spatial basis for the non-monopole foreground ``[eta0 | LSSM]`` block.
         ``"uv"`` preserves the current behavior. ``"image"`` uses one smooth
         foreground coefficient set per FG image pixel. Defaults to ``"uv"``.
@@ -210,7 +210,7 @@ class BuildMatrices:
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
-        fg_non_monopole_parameterization: str = "uv",
+        fg_model_domain: str = "uv",
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
@@ -267,11 +267,11 @@ class BuildMatrices:
             self.beta_fg = [float(beta_fg)]
         else:
             self.beta_fg = list(beta_fg)
-        self.fg_non_monopole_parameterization = str(fg_non_monopole_parameterization)
-        if self.fg_non_monopole_parameterization not in {"uv", "image"}:
+        self.fg_model_domain = str(fg_model_domain)
+        if self.fg_model_domain not in {"uv", "image"}:
             raise ValueError(
-                "fg_non_monopole_parameterization must be one of {'uv', 'image'}, "
-                f"got {self.fg_non_monopole_parameterization!r}."
+                "fg_model_domain must be one of {'uv', 'image'}, "
+                f"got {self.fg_model_domain!r}."
             )
         self.fit_for_monopole = fit_for_monopole
         # Total FG uv modes (optional monopole exclusion).
@@ -388,7 +388,7 @@ class BuildMatrices:
 
     def _fg_non_monopole_mode_count(self) -> int:
         """Return the spatial width of the non-monopole foreground block."""
-        if self.fg_non_monopole_parameterization == "uv":
+        if self.fg_model_domain == "uv":
             return int(self.n_uv_fg - int(self.fit_for_monopole))
         return int(self.lmn_model_space.n_pix_fg)
 
@@ -642,7 +642,7 @@ class BuildMatrices:
         # -----------------------
         # FG contribution to T
         # -----------------------
-        if self.fg_non_monopole_parameterization == "uv":
+        if self.fg_model_domain == "uv":
             full_fg = self._build_full_fg_uv_blocks_from_beam(beam_blocks)
             n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
             fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
@@ -698,7 +698,7 @@ class BuildMatrices:
             mp_basis = mp_basis * self.d_eta
             mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
             mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
-            if self.fg_non_monopole_parameterization == "uv":
+            if self.fg_model_domain == "uv":
                 fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
             else:
                 fg_mp = self._build_fg_monopole_blocks_from_beam(beam_blocks)
@@ -851,11 +851,11 @@ class BuildMatrices:
             ) * (self.du_fg * self.dv_fg)
 
         fg_mp_kernel = fg_uv_kernel(self.n_uv_fg - 1, self.n_uv_fg) if (
-            self.fit_for_monopole and self.fg_non_monopole_parameterization == "uv"
+            self.fit_for_monopole and self.fg_model_domain == "uv"
         ) else None
         fg_mp_template = (
             jnp.ones((self.lmn_model_space.n_pix_fg,), dtype=jnp.complex128) * (self.du_fg * self.dv_fg)
-            if self.fit_for_monopole and self.fg_non_monopole_parameterization == "image"
+            if self.fit_for_monopole and self.fg_model_domain == "image"
             else None
         )
 
@@ -894,7 +894,7 @@ class BuildMatrices:
             # Foreground non-monopole columns are streamed over the active
             # spatial basis. In UV mode this is the FG UV grid; in image mode
             # this is the FG pixel set.
-            if self.fg_non_monopole_parameterization == "uv":
+            if self.fg_model_domain == "uv":
                 for uv0 in range(0, n_non_mp, fg_uv_chunk):
                     uv1 = min(uv0 + fg_uv_chunk, n_non_mp)
                     fg_block = jnp.dot(beam_block, fg_uv_kernel(uv0, uv1)).block_until_ready()
