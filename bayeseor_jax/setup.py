@@ -538,6 +538,21 @@ def run_setup(
         inst_to_cosmo_vol=float(cosmo.inst_to_cosmo_vol(z)),
         n_par=int(n_params),
         inverse_lw_power=float(inverse_lw_power),
+        fg_model_domain=str(fg_model_domain),
+        n_nonmp_fg=(
+            int(bm.lmn_model_space.n_pix_fg) * (1 + int(n_modes_fg))
+            if str(fg_model_domain) == "image"
+            else 0
+        ),
+        n_nonmp_uv=int(n_u_fg) * int(n_v_fg) - int(bool(fit_for_monopole)),
+        du_fg=float(du_fg),
+        dv_fg=float(dv_fg),
+    )
+
+    setup_args_dict["fg_nonmp_image_inverse_prior"] = (
+        None
+        if phi_inverse_class.fg_nonmp_image_inverse_prior is None
+        else float(phi_inverse_class.fg_nonmp_image_inverse_prior)
     )
     
     likelihood_class = MarginalisedLikelihood(
