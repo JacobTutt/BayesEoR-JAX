@@ -53,6 +53,20 @@ class PhiInverse:
         Total number of latent linear coefficients (EoR + FG/LSSM).
     inverse_lw_power : float, optional
         Prior precision assigned to FG/LSSM amplitudes.
+    fg_model_domain : {"uv", "image"}, optional
+        Spatial basis used for the non-monopole foreground block. When set to
+        ``"image"``, the leading non-monopole image-domain FG slice uses the
+        pushed-forward precision implied by the current UV prior and FG
+        ``UV -> LM`` embedding.
+    n_nonmp_fg : int, optional
+        Number of leading FG coefficients belonging to the non-monopole
+        foreground block. These coefficients immediately follow the EoR block
+        in the latent vector. Only used when ``fg_model_domain="image"``.
+    n_nonmp_uv : int, optional
+        Number of non-monopole FG UV modes used in the pushed-forward image
+        prior calculation.
+    du_fg, dv_fg : float, optional
+        FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
     """
 
     def __init__(
@@ -66,6 +80,11 @@ class PhiInverse:
         inst_to_cosmo_vol: float | jax.Array,
         n_par: int,
         inverse_lw_power: float = 1e-16,
+        fg_model_domain: str = "uv",
+        n_nonmp_fg: int = 0,
+        n_nonmp_uv: int = 0,
+        du_fg: float | None = None,
+        dv_fg: float | None = None,
     ) -> None:
         self.kbin_index_per_voxel = build_kbin_index_per_voxel(
             bin_id_per_k_mode=bin_id_per_k_mode,
@@ -81,6 +100,28 @@ class PhiInverse:
         self.n_par = n_par
         self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
         self.inverse_lw_power = inverse_lw_power
+        self.fg_model_domain = str(fg_model_domain)
+        self.n_nonmp_fg = int(n_nonmp_fg)
+        self.n_nonmp_uv = int(n_nonmp_uv)
+        self.du_fg = None if du_fg is None else float(du_fg)
+        self.dv_fg = None if dv_fg is None else float(dv_fg)
+        self.fg_nonmp_image_inverse_prior = None
+        if self.fg_model_domain == "image":
+            if self.n_nonmp_uv <= 0:
+                raise ValueError("image-domain FG prior requires n_nonmp_uv > 0")
+            if self.du_fg is None or self.dv_fg is None:
+                raise ValueError("image-domain FG prior requires du_fg and dv_fg")
+            self.fg_nonmp_image_inverse_prior = float(self.inverse_lw_power) / (
+                float(self.n_nonmp_uv) * (self.du_fg * self.dv_fg) ** 2
+            )
+        self.use_fg_nonmp_image_override = (
+            self.fg_model_domain == "image"
+            and self.n_nonmp_fg > 0
+        )
+        self.n_nonmp_fg_override = min(
+            self.n_nonmp_fg,
+            self.n_par - self.n_eor_voxels,
+        )
 
     def evaluate(self, theta_power_linear: jax.Array) -> jax.Array:
         """
@@ -109,6 +150,10 @@ class PhiInverse:
 
         n_fg = self.n_par - self.n_eor_voxels
         phi_fg = jnp.full((n_fg,), self.inverse_lw_power, dtype=phi_eor.dtype)
+        if self.use_fg_nonmp_image_override:
+            phi_fg = phi_fg.at[: self.n_nonmp_fg_override].set(
+                self.fg_nonmp_image_inverse_prior
+            )
         return jnp.concatenate([phi_eor, phi_fg], axis=0)
 
 
