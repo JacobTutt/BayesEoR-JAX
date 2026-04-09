@@ -79,6 +79,7 @@ def run_setup(
     du_fg: float | None = None,
     dv_fg: float | None = None,
     fit_for_monopole: bool = False,
+    image_domain_trim: bool = False,
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
@@ -95,6 +96,8 @@ def run_setup(
     nside: int = 256,
     fov_eor: float = 10.0,
     fov_fg: float | None = None,
+    fg_core_fov: float | None = None,
+    fg_outer_nside: int | None = None,
     telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0),
     beam_type: str = "uniform",
     peak_amp: float = 1.0,
@@ -351,6 +354,9 @@ def run_setup(
         "du_fg": float(du_fg),
         "dv_fg": float(dv_fg),
         "fit_for_monopole": bool(fit_for_monopole),
+        "image_domain_trim": bool(image_domain_trim),
+        "fg_core_fov": None if fg_core_fov is None else float(fg_core_fov),
+        "fg_outer_nside": None if fg_outer_nside is None else int(fg_outer_nside),
         "n_modes_fg": int(n_modes_fg),
         "n_powerlaws_fg": int(n_powerlaws_fg),
         "beta_fg": None if beta_fg is None else list(beta_fg),
@@ -506,12 +512,15 @@ def run_setup(
         n_eta=int(n_eta),
         d_eta=float(1.0 / bandwidth_hz),
         fit_for_monopole=fit_for_monopole,
+        image_domain_trim=bool(image_domain_trim),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
         fg_model_domain=str(fg_model_domain),
+        fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
+        fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         n_t=int(n_t),
         d_t=float(d_t),
         beam_type=beam_type,
@@ -535,6 +544,14 @@ def run_setup(
     # data-dependent compressed terms needed by the marginalized Gaussian path.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     n_params = bm.build_minimum_likelihood_stack(vis_noisy)
+    setup_args_dict["n_fg_pixels_trimmed"] = int(bm.n_fg_pixels_trimmed)
+    setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
+    setup_args_dict["use_multires_fg"] = bool(bm.lmn_model_space.use_multires_fg)
+    setup_args_dict["n_fg_groups"] = int(bm.lmn_model_space.n_fg_groups)
+    setup_args_dict["n_fg_group_highres"] = int(jnp.sum(bm.lmn_model_space.fg_group_is_highres))
+    setup_args_dict["n_fg_group_lowres"] = int(
+        bm.lmn_model_space.n_fg_groups - jnp.sum(bm.lmn_model_space.fg_group_is_highres)
+    )
 
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.
@@ -579,19 +596,33 @@ def run_setup(
         inverse_lw_power=float(inverse_lw_power),
         fg_model_domain=str(fg_model_domain),
         n_nonmp_fg=(
-            int(bm.lmn_model_space.n_pix_fg) * (1 + int(n_modes_fg))
+            int(bm.n_fg_non_monopole_spatial_modes) * (1 + int(n_modes_fg))
             if str(fg_model_domain) == "image"
             else 0
         ),
         n_nonmp_uv=int(n_u_fg) * int(n_v_fg) - int(bool(fit_for_monopole)),
         du_fg=float(du_fg),
         dv_fg=float(dv_fg),
+        fg_group_pixel_counts=(
+            bm.lmn_model_space.fg_group_pixel_counts
+            if str(fg_model_domain) == "image"
+            else None
+        ),
+        n_modes_fg=int(n_modes_fg),
     )
 
     setup_args_dict["fg_nonmp_image_inverse_prior"] = (
         None
         if phi_inverse_class.fg_nonmp_image_inverse_prior is None
-        else float(phi_inverse_class.fg_nonmp_image_inverse_prior)
+        else (
+            float(phi_inverse_class.fg_nonmp_image_inverse_prior)
+            if np.ndim(phi_inverse_class.fg_nonmp_image_inverse_prior) == 0
+            else {
+                "size": int(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).size),
+                "min": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).min()),
+                "max": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).max()),
+            }
+        )
     )
     
     likelihood_class = MarginalisedLikelihood(
