@@ -69,6 +69,8 @@ class LMN_ModelSpace:
         self,
         fov_eor: float,
         fov_fg: Optional[float] = None,
+        fg_core_fov: Optional[float] = None,
+        fg_outer_nside: Optional[int] = None,
         nside: int = 256,
         telescope_latlonalt: Tuple[float, float, float] = hera_location,
         jd_center: float = 2461040.5,
@@ -80,6 +82,8 @@ class LMN_ModelSpace:
         self.fov_eor = fov_eor
         # If not foreground FoV is provided, use the EoR FoV as default.
         self.fov_fg = fov_fg if fov_fg is not None else fov_eor
+        self.fg_core_fov = fg_core_fov
+        self.fg_outer_nside = fg_outer_nside
         # Check if the EoR and foreground FoVs are the same.
         self.fovs_match = bool(self.fov_fg == self.fov_eor)
 
@@ -113,6 +117,7 @@ class LMN_ModelSpace:
 
         # Compute the (l, m, n) coordinates and (az, za) for FG pixels.
         self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
+        self._refresh_fg_multiresolution()
 
         self.angular_lm_extent_fg = self._angular_lm_extent(
             self.lmn_fg[self.time_ind_center]
@@ -124,6 +129,7 @@ class LMN_ModelSpace:
         self.fov_m_angle_eor = self.angular_lm_extent_eor["m_angle_range_padded"]
         self.fov_l_angle_fg = self.angular_lm_extent_fg["l_angle_range_padded"]
         self.fov_m_angle_fg = self.angular_lm_extent_fg["m_angle_range_padded"]
+        self.n_fg_pixels_trimmed = 0
 
 
     def _construct_time_array(self, jd_center: float, n_t: int, d_t: float) -> Tuple[np.ndarray, np.ndarray, int]:
@@ -164,6 +170,32 @@ class LMN_ModelSpace:
         pointing_center_icrs = pointing_center_altaz.transform_to("icrs")
         return (float(pointing_center_icrs.ra.deg), float(pointing_center_icrs.dec.deg))
 
+    def _query_disc_union(
+        self,
+        field_centers: Sequence[Tuple[float, float]],
+        radius_rad: jnp.ndarray,
+    ) -> np.ndarray:
+        """Return the union of HEALPix pixels inside a disc at all supplied times."""
+        indices: list[np.ndarray] = []
+        for field_center in field_centers:
+            ra_rad = jnp.radians(field_center[0])
+            dec_rad = jnp.radians(field_center[1])
+            x = jnp.cos(dec_rad) * jnp.cos(ra_rad)
+            y = jnp.cos(dec_rad) * jnp.sin(ra_rad)
+            z = jnp.sin(dec_rad)
+            vec_center = jnp.array([x, y, z])
+            pix = jhp.query_disc(
+                nside=self.nside,
+                vec=vec_center,
+                radius=radius_rad,
+                inclusive=False,
+            )
+            pix = np.asarray(pix[pix < self.npix], dtype=np.int64)
+            indices.append(pix)
+        if not indices:
+            return np.asarray([], dtype=np.int64)
+        return np.unique(np.concatenate(indices))
+
     def _healpix_pixels_fov(
         self,
         field_centers: Sequence[Tuple[float, float]],
@@ -188,43 +220,101 @@ class LMN_ModelSpace:
         eor_fg_shared_axis : jnp.ndarray
             Boolean mask over FG pixels indicating which are also in EoR FoV.
         """
-        def _query_disc_union(radius_rad: jnp.ndarray) -> np.ndarray:
-            indices: list[np.ndarray] = []
-            for field_center in field_centers:
-                # Convert the field center from (RA, Dec) to a unit vector.
-                ra_rad = jnp.radians(field_center[0])
-                dec_rad = jnp.radians(field_center[1])
-                x = jnp.cos(dec_rad) * jnp.cos(ra_rad)
-                y = jnp.cos(dec_rad) * jnp.sin(ra_rad)
-                z = jnp.sin(dec_rad)
-                vec_center = jnp.array([x, y, z])
-                pix = jhp.query_disc(
-                    nside=self.nside,
-                    vec=vec_center,
-                    radius=radius_rad,
-                    inclusive=False,
-                )
-                # jax_healpy pads query_disc output with the sentinel index `npix`.
-                pix = np.asarray(pix[pix < self.npix], dtype=np.int64)
-                indices.append(pix)
-            if not indices:
-                return np.asarray([], dtype=np.int64)
-            return np.unique(np.concatenate(indices))
-
         # Compute the angular radius of the FoV in radians for the EoR and FG models.
         radius_rad_eor = jnp.radians(fov_deg[0] / 2)
         radius_rad_fg = jnp.radians(fov_deg[1] / 2)
 
-        pix_indices_eor_np = _query_disc_union(radius_rad_eor)
+        pix_indices_eor_np = self._query_disc_union(field_centers, radius_rad_eor)
         if self.fovs_match:
             pix_indices_fg_np = pix_indices_eor_np
         else: 
-            pix_indices_fg_np = _query_disc_union(radius_rad_fg)
+            pix_indices_fg_np = self._query_disc_union(field_centers, radius_rad_fg)
 
         pix_indices_eor = jnp.asarray(pix_indices_eor_np, dtype=jnp.int64)
         pix_indices_fg = jnp.asarray(pix_indices_fg_np, dtype=jnp.int64)
         eor_fg_shared_axis = jnp.isin(pix_indices_fg, pix_indices_eor)
         return pix_indices_eor, pix_indices_fg, eor_fg_shared_axis
+
+    def _refresh_fg_multiresolution(self) -> None:
+        """Build multiresolution FG grouping labels on the current high-res FG mask."""
+        pix_fg = np.asarray(self.pix_indices_fg, dtype=np.int64)
+        n_pix_fg = int(pix_fg.size)
+        self.pix_indices_fg_core = jnp.asarray([], dtype=jnp.int64)
+        self.fg_group_labels = jnp.arange(n_pix_fg, dtype=jnp.int64)
+        self.fg_group_pixel_counts = jnp.ones((n_pix_fg,), dtype=jnp.int32)
+        self.fg_group_is_highres = jnp.ones((n_pix_fg,), dtype=bool)
+        self.n_fg_groups = int(n_pix_fg)
+        self.use_multires_fg = False
+
+        if (
+            self.fg_core_fov is None
+            or self.fg_outer_nside is None
+            or int(self.fg_outer_nside) >= int(self.nside)
+            or float(self.fg_core_fov) >= float(self.fov_fg)
+        ):
+            return
+
+        nside_lo = int(self.fg_outer_nside)
+        nside_hi = int(self.nside)
+        if nside_hi % nside_lo != 0:
+            raise ValueError(
+                f"fg_outer_nside={nside_lo} must divide nside={nside_hi}."
+            )
+        ratio = nside_hi // nside_lo
+        if ratio & (ratio - 1):
+            raise ValueError(
+                "fg_outer_nside must differ from nside by a power-of-two factor "
+                f"(got nside={nside_hi}, fg_outer_nside={nside_lo})."
+            )
+
+        radius_rad_core = jnp.radians(float(self.fg_core_fov) / 2.0)
+        pix_indices_core_np = self._query_disc_union(self.field_centers, radius_rad_core)
+        core_mask = np.isin(pix_fg, pix_indices_core_np)
+        self.pix_indices_fg_core = jnp.asarray(
+            pix_fg[core_mask],
+            dtype=jnp.int64,
+        )
+
+        child_per_parent = int(ratio * ratio)
+        pix_fg_nested = np.asarray(jhp.ring2nest(nside_hi, pix_fg), dtype=np.int64)
+        parent_nested = pix_fg_nested // child_per_parent
+        parent_ids_with_core = np.unique(parent_nested[core_mask])
+        core_touched_mask = np.isin(parent_nested, parent_ids_with_core)
+
+        labels = np.full((n_pix_fg,), -1, dtype=np.int64)
+        group_is_highres: list[bool] = []
+        next_label = 0
+
+        hi_axis = np.flatnonzero(core_touched_mask)
+        if hi_axis.size:
+            labels[hi_axis] = np.arange(next_label, next_label + hi_axis.size, dtype=np.int64)
+            group_is_highres.extend([True] * int(hi_axis.size))
+            next_label += int(hi_axis.size)
+
+        outer_axis = np.flatnonzero(~core_touched_mask)
+        if outer_axis.size:
+            outer_parents = parent_nested[outer_axis]
+            unique_outer_parents = np.unique(outer_parents)
+            parent_to_label = {
+                int(parent): int(next_label + i)
+                for i, parent in enumerate(unique_outer_parents.tolist())
+            }
+            labels[outer_axis] = np.asarray(
+                [parent_to_label[int(parent)] for parent in outer_parents],
+                dtype=np.int64,
+            )
+            group_is_highres.extend([False] * int(unique_outer_parents.size))
+            next_label += int(unique_outer_parents.size)
+
+        if np.any(labels < 0):
+            raise ValueError("Failed to assign all FG pixels to multiresolution groups.")
+
+        group_counts = np.bincount(labels, minlength=next_label).astype(np.int32)
+        self.fg_group_labels = jnp.asarray(labels, dtype=jnp.int64)
+        self.fg_group_pixel_counts = jnp.asarray(group_counts, dtype=jnp.int32)
+        self.fg_group_is_highres = jnp.asarray(np.asarray(group_is_highres, dtype=bool))
+        self.n_fg_groups = int(next_label)
+        self.use_multires_fg = True
 
     def _angular_lm_extent(self, lmn_coords: jnp.ndarray) -> dict[str, float]:
         """
@@ -327,3 +417,103 @@ class LMN_ModelSpace:
             az_za_fg = az_za_fg.at[i_t].set(jnp.stack([az_fg, za_fg], axis=0))
 
         return lmn_fg, az_za_fg
+    
+
+    def _refresh_fg_state(self) -> None:
+        """Recompute all FG-dependent cached quantities after a pixel trim."""
+        self.n_pix_fg = len(self.pix_indices_fg)
+        self.eor_fg_shared_axis = jnp.isin(self.pix_indices_fg, self.pix_indices_eor)
+        self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
+        self._refresh_fg_multiresolution()
+        self.angular_lm_extent_fg = self._angular_lm_extent(
+            self.lmn_fg[self.time_ind_center]
+        )
+        self.angular_lm_extent_eor = self._angular_lm_extent(
+            self.lmn_fg[self.time_ind_center, :, self.eor_fg_shared_axis]
+        )
+        self.fov_l_angle_eor = self.angular_lm_extent_eor["l_angle_range_padded"]
+        self.fov_m_angle_eor = self.angular_lm_extent_eor["m_angle_range_padded"]
+        self.fov_l_angle_fg = self.angular_lm_extent_fg["l_angle_range_padded"]
+        self.fov_m_angle_fg = self.angular_lm_extent_fg["m_angle_range_padded"]
+
+    def trim_fg_outer_pixels(self, n_trim: int) -> int:
+        """
+        Remove ``n_trim`` FG pixels furthest from the central FoV centre.
+
+        Pixels are ranked in the central-time image chart by ``l^2 + m^2`` and
+        the largest values are removed. This gives the simple "trim the outer
+        edge of the circular FoV" behavior desired for image-domain FG runs.
+        """
+        n_trim = int(n_trim)
+        if n_trim <= 0:
+            return 0
+        if n_trim >= int(self.n_pix_fg):
+            raise ValueError(
+                f"Cannot trim {n_trim} FG pixels from a mask with only {int(self.n_pix_fg)} pixels."
+            )
+
+        lmn_center = np.asarray(self.lmn_fg[self.time_ind_center], dtype=float)
+        r2 = np.square(lmn_center[0]) + np.square(lmn_center[1])
+        order = np.argsort(r2)[::-1]
+        drop_axis = np.sort(order[:n_trim])
+
+        keep_mask = np.ones((int(self.n_pix_fg),), dtype=bool)
+        keep_mask[drop_axis] = False
+        self.pix_indices_fg = jnp.asarray(
+            np.asarray(self.pix_indices_fg, dtype=np.int64)[keep_mask],
+            dtype=jnp.int64,
+        )
+        self.n_fg_pixels_trimmed = n_trim
+        self._refresh_fg_state()
+        return n_trim
+
+    def trim_fg_outer_pixels_for_total_param_divisibility(
+        self,
+        *,
+        n_modes_fg: int,
+        n_uv_eor: int,
+        n_eta: int,
+        fit_for_monopole: bool,
+        divisor: int = 4,
+    ) -> int:
+        """
+        Trim outer FG pixels until the total linear parameter count is divisible.
+
+        Parameters
+        ----------
+        n_modes_fg : int
+            Number of FG/LSSM spectral modes coupled to each non-monopole FG
+            pixel.
+        n_uv_eor : int
+            Number of EoR UV modes.
+        n_eta : int
+            Number of line-of-sight Fourier modes.
+        fit_for_monopole : bool
+            Whether the FG monopole block is present.
+        divisor : int, optional
+            Required divisor for the total linear parameter count. Defaults to 4.
+        """
+        divisor = int(divisor)
+        if divisor < 1:
+            raise ValueError("divisor must be >= 1")
+
+        per_pixel_width = 1 + int(n_modes_fg)
+        eor_width = int(n_uv_eor) * (int(n_eta) - 1)
+        fg_mp_width = (int(n_eta) + int(n_modes_fg)) if fit_for_monopole else 0
+        total_width = eor_width + int(self.n_pix_fg) * per_pixel_width + fg_mp_width
+
+        trim_count = None
+        for candidate in range(0, int(self.n_pix_fg) + 1):
+            if (total_width - candidate * per_pixel_width) % divisor == 0:
+                trim_count = candidate
+                break
+
+        if trim_count is None:
+            raise ValueError(
+                "Unable to make the total linear parameter count divisible by "
+                f"{divisor} by trimming FG pixels. "
+                f"Current total={total_width}, per-pixel width={per_pixel_width}."
+            )
+
+        return self.trim_fg_outer_pixels(int(trim_count))
+

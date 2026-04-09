@@ -208,6 +208,8 @@ class BuildMatrices:
         du_fg: float,
         n_v_fg: int,
         dv_fg: float,
+        fg_core_fov: Optional[float] = None,
+        fg_outer_nside: Optional[int] = None,
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
@@ -218,6 +220,7 @@ class BuildMatrices:
         n_eta: int = 0,
         d_eta: float = 0.0,
         fit_for_monopole: bool = False,
+        image_domain_trim: bool = False,
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         jd_center: float = 2461040.5,
         nside: Optional[int] = None,
@@ -261,6 +264,8 @@ class BuildMatrices:
         self.n_v_fg = n_v_fg
         self.dv_fg = dv_fg
         self.n_modes_fg = n_modes_fg
+        self.fg_core_fov = fg_core_fov
+        self.fg_outer_nside = fg_outer_nside
         self.n_powerlaws_fg = n_powerlaws_fg
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
@@ -275,6 +280,7 @@ class BuildMatrices:
                 f"got {self.fg_model_domain!r}."
             )
         self.fit_for_monopole = fit_for_monopole
+        self.image_domain_trim = bool(image_domain_trim)
         # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
@@ -357,12 +363,25 @@ class BuildMatrices:
         self.lmn_model_space = LMN_ModelSpace(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
+            fg_core_fov=self.fg_core_fov,
+            fg_outer_nside=self.fg_outer_nside,
             nside=self.nside,
             telescope_latlonalt=self.telescope_latlonalt,
             jd_center=self.jd_center,
             n_t=self.n_t,
             d_t=self.d_t,
         )
+        self.n_fg_pixels_trimmed = 0
+        if self.fg_model_domain == "image" and self.image_domain_trim:
+            self.n_fg_pixels_trimmed = int(
+                self.lmn_model_space.trim_fg_outer_pixels_for_total_param_divisibility(
+                    n_modes_fg=int(self.n_modes_fg),
+                    n_uv_eor=int(self.n_uv_eor),
+                    n_eta=int(self.n_eta),
+                    fit_for_monopole=bool(self.fit_for_monopole),
+                    divisor=4,
+                )
+            )
 
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
@@ -391,7 +410,32 @@ class BuildMatrices:
         """Return the spatial width of the non-monopole foreground block."""
         if self.fg_model_domain == "uv":
             return int(self.n_uv_fg - int(self.fit_for_monopole))
-        return int(self.lmn_model_space.n_pix_fg)
+        return int(self.lmn_model_space.n_fg_groups)
+
+    def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
+        """
+        Aggregate the high-resolution FG pixel axis into multiresolution groups.
+
+        Parameters
+        ----------
+        fg_response : jnp.ndarray
+            Array whose final axis is the high-resolution FG pixel axis.
+
+        Returns
+        -------
+        jnp.ndarray
+            Array with the same leading axes and grouped FG spatial modes on
+            the final axis.
+        """
+        if self.fg_model_domain != "image" or not self.lmn_model_space.use_multires_fg:
+            return fg_response
+        labels = self.lmn_model_space.fg_group_labels
+        n_groups = int(self.lmn_model_space.n_fg_groups)
+        grouped = jnp.zeros(
+            fg_response.shape[:-1] + (n_groups,),
+            dtype=fg_response.dtype,
+        )
+        return grouped.at[..., labels].add(fg_response)
 
 
     # ---------------------------
@@ -629,7 +673,7 @@ class BuildMatrices:
         else:
             full_fg = None
             n_non_mp = self.n_fg_non_monopole_spatial_modes
-            fg_non_mp = finv_blocks
+            fg_non_mp = self._aggregate_fg_image_response(finv_blocks)
 
         n_rows = self.n_t * self.n_freq * self.nbls
 
@@ -895,9 +939,10 @@ class BuildMatrices:
                         lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
                         mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
             else:
+                fg_block_grouped = self._aggregate_fg_image_response(finv_block)
                 for pix0 in range(0, n_non_mp, fg_img_chunk):
                     pix1 = min(pix0 + fg_img_chunk, n_non_mp)
-                    fg_block = finv_block[:, pix0:pix1]
+                    fg_block = fg_block_grouped[:, pix0:pix1]
 
                     eta0_rows = fg_block * eta0_basis[i_f, 0]
                     eta0_col0 = int(layout["fg_eta0"]["col_start"]) + pix0
