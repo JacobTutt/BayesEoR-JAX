@@ -14,6 +14,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.sharding import NamedSharding
 
+from .build_matricies.beam_model import Beam_Model
+
 jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +118,192 @@ def _resolve_uv_spacing(
         )
 
     return du_val, dv_val
+
+
+def _resolve_uv_spacing_from_image_extents(
+    *,
+    extent_u: float,
+    extent_v: float,
+    du: float | None,
+    dv: float | None,
+    label: str,
+    rtol: float = 5e-2,
+) -> tuple[float, float]:
+    """
+    Resolve anisotropic uv-grid spacings from local angular chart widths.
+
+    The input extents are expected to be angular widths in radians along the
+    two transverse axes of the fixed image-domain chart. In the current
+    wide-field setup these are built from the full ``(l, m, n)`` vectors using
+    ``atan2(l, n)`` and ``atan2(m, n)`` so that the widths remain true angular
+    offsets even when the raw direction cosines become strongly non-linear.
+    """
+    extent_u = float(extent_u)
+    extent_v = float(extent_v)
+    if extent_u <= 0 or extent_v <= 0:
+        raise ValueError(
+            f"{label}: extent_u and extent_v must both be > 0, got "
+            f"{extent_u} and {extent_v}"
+        )
+
+    derived_du = float(1.0 / extent_u)
+    derived_dv = float(1.0 / extent_v)
+    du_val = derived_du if du is None else float(du)
+    dv_val = derived_dv if dv is None else float(dv)
+
+    if not np.isclose(du_val, derived_du, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: du={du_val:.6g} is inconsistent with the local-image "
+            f"extent-derived value {derived_du:.6g} (=1/{extent_u:.6g}).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if not np.isclose(dv_val, derived_dv, rtol=rtol, atol=0.0):
+        warnings.warn(
+            f"{label}: dv={dv_val:.6g} is inconsistent with the local-image "
+            f"extent-derived value {derived_dv:.6g} (=1/{extent_v:.6g}).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return du_val, dv_val
+
+
+def _resolve_model_grid_size(
+    *,
+    value: int | None,
+    required: int,
+    label: str,
+) -> int:
+    """Resolve one uv-axis model size, warning when explicit overrides differ."""
+    if required < 1:
+        required = 1
+
+    if value is None:
+        return int(required)
+
+    resolved = int(value)
+    if resolved < 1:
+        raise ValueError(f"{label} must be >= 1, got {resolved}")
+    if resolved < required:
+        warnings.warn(
+            f"{label}={resolved} is smaller than the auto-resolved requirement "
+            f"{required} for the selected data, FoV, and beam model.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    elif resolved > required:
+        warnings.warn(
+            f"{label}={resolved} is larger than the auto-resolved requirement "
+            f"{required}; the run will use the explicit larger value.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return resolved
+
+
+def _resolve_uv_grid_from_extents(
+    *,
+    extent_u_eor: float,
+    extent_v_eor: float,
+    extent_u_fg: float,
+    extent_v_fg: float,
+    freqs_hz: np.ndarray,
+    uvws_m: np.ndarray,
+    beam_type: str | None,
+    fwhm_deg: float | None,
+    diam: float | None,
+    n_u_eor: int | None,
+    n_v_eor: int | None,
+    du_eor: float | None,
+    dv_eor: float | None,
+    n_u_fg: int | None,
+    n_v_fg: int | None,
+    du_fg: float | None,
+    dv_fg: float | None,
+) -> dict[str, float | int]:
+    """
+    Resolve anisotropic uv-grid spacings and required axis sizes.
+
+    The fixed central-time angular chart widths set the uv sampling through
+    ``du = 1 / extent_u`` and ``dv = 1 / extent_v``. The grid extents are then
+    chosen to cover the instrument support plus half the beam-aperture width on
+    each side, following the old elongated-FoV validation logic.
+    """
+    du_eor_val, dv_eor_val = _resolve_uv_spacing_from_image_extents(
+        extent_u=extent_u_eor,
+        extent_v=extent_v_eor,
+        du=du_eor,
+        dv=dv_eor,
+        label="EoR uv grid spacing",
+    )
+    du_fg_val, dv_fg_val = _resolve_uv_spacing_from_image_extents(
+        extent_u=extent_u_fg,
+        extent_v=extent_v_fg,
+        du=du_fg,
+        dv=dv_fg,
+        label="FG uv grid spacing",
+    )
+
+    uvws_m = np.asarray(uvws_m, dtype=float).reshape(-1, 3)
+    freqs_hz = np.asarray(freqs_hz, dtype=float).reshape(-1)
+    if uvws_m.size == 0:
+        raise ValueError("uvws_m must contain at least one baseline sample")
+
+    wavelength_min = float(299792458.0 / freqs_hz.max())
+    uvs = uvws_m[:, :2] / wavelength_min
+    u_max_inst_model = float(np.abs(uvs[:, 0]).max())
+    v_max_inst_model = float(np.abs(uvs[:, 1]).max())
+
+    beam = Beam_Model(
+        beam_type=beam_type,
+        fwhm_deg=fwhm_deg,
+        diam=diam,
+    )
+    aperture_width = beam.aperture_width_uv(freqs_hz=freqs_hz)
+    u_extent = u_max_inst_model + 0.5 * aperture_width
+    v_extent = v_max_inst_model + 0.5 * aperture_width
+
+    n_u_eor_required = int(np.ceil(u_extent / du_eor_val)) * 2 + 1
+    n_v_eor_required = int(np.ceil(v_extent / dv_eor_val)) * 2 + 1
+    n_u_fg_required = int(np.ceil(u_extent / du_fg_val)) * 2 + 1
+    n_v_fg_required = int(np.ceil(v_extent / dv_fg_val)) * 2 + 1
+
+    return {
+        "du_eor": float(du_eor_val),
+        "dv_eor": float(dv_eor_val),
+        "du_fg": float(du_fg_val),
+        "dv_fg": float(dv_fg_val),
+        "n_u_eor_required": int(n_u_eor_required),
+        "n_v_eor_required": int(n_v_eor_required),
+        "n_u_fg_required": int(n_u_fg_required),
+        "n_v_fg_required": int(n_v_fg_required),
+        "n_u_eor": _resolve_model_grid_size(
+            value=n_u_eor,
+            required=n_u_eor_required,
+            label="n_u_eor",
+        ),
+        "n_v_eor": _resolve_model_grid_size(
+            value=n_v_eor,
+            required=n_v_eor_required,
+            label="n_v_eor",
+        ),
+        "n_u_fg": _resolve_model_grid_size(
+            value=n_u_fg,
+            required=n_u_fg_required,
+            label="n_u_fg",
+        ),
+        "n_v_fg": _resolve_model_grid_size(
+            value=n_v_fg,
+            required=n_v_fg_required,
+            label="n_v_fg",
+        ),
+        "u_max_inst_model": float(u_max_inst_model),
+        "v_max_inst_model": float(v_max_inst_model),
+        "beam_aperture_width_uv": float(aperture_width),
+        "u_extent_with_buffer": float(u_extent),
+        "v_extent_with_buffer": float(v_extent),
+    }
 
 
 def _coerce_args_dict(args: Any) -> dict[str, Any]:

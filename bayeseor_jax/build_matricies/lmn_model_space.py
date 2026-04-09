@@ -2,8 +2,9 @@
 HEALPix-based image-domain model for constructing (l, m, n) and (az, za) over time.
 
 For wide-field interferometric data, sky pixels are mapped into direction cosines
-for each time step. This module selects HEALPix pixels within EoR/FG fields of view,
-then computes (l, m, n) and (az, za) for those fixed pixel sets across time.
+for each time step. This module selects HEALPix pixels that enter the EoR/FG
+fields of view at any configured time, then computes (l, m, n) and (az, za) for
+those fixed pixel sets across time.
 """
 
 import jax
@@ -54,6 +55,12 @@ class LMN_ModelSpace:
     eor_fg_shared_axis : jnp.ndarray
         Boolean mask over FG pixels indicating which are also in the EoR FoV,
         shape (n_pix_fg,).
+    angular_lm_extent_eor, angular_lm_extent_fg : dict
+        Central-time local angular-offset extent summaries on the fixed
+        HEALPix pixel sets. These are built from the full ``(l, m, n)``
+        vectors using ``atan2(l, n)`` and ``atan2(m, n)`` so that wide-field
+        support is measured as an angular width rather than a direction-cosine
+        width.
     """
     # Default Location for Telescope (lat_deg, lon_deg, alt_m): HERA site in South Africa
     hera_location = (-30.72152777777791, 21.428305555555557, 1073.0000000093132)  
@@ -92,17 +99,31 @@ class LMN_ModelSpace:
         # Telescope location in ICRS transforms.
         lat, lon, alt = telescope_latlonalt
         self.telescope_location = EarthLocation.from_geodetic(lon=lon * u.deg, lat=lat * u.deg, height=alt * u.m)
-        # Determine the RA and Dec of the pointing center for the central time step (used for defining the FoV).
+        # Determine the RA and Dec of the pointing center for the central time step.
         self.field_center = self._observation_field_center(self.jd_center)
-        # Compute the HEALPix pixel indices within the EoR and foreground FoVs
+        self.field_centers = [self._observation_field_center(float(jd)) for jd in self.times_jd]
+        # Compute the HEALPix pixel indices that enter the EoR and foreground
+        # FoVs at any configured time. This gives a single fixed sky pixel set
+        # for basis definitions while Finv handles the time-dependent response.
         self.pix_indices_eor, self.pix_indices_fg, self.eor_fg_shared_axis = self._healpix_pixels_fov(
-            self.field_center, (self.fov_eor, self.fov_fg)
+            self.field_centers, (self.fov_eor, self.fov_fg)
         )
         self.n_pix_eor = len(self.pix_indices_eor)
         self.n_pix_fg = len(self.pix_indices_fg)
 
         # Compute the (l, m, n) coordinates and (az, za) for FG pixels.
         self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
+
+        self.angular_lm_extent_fg = self._angular_lm_extent(
+            self.lmn_fg[self.time_ind_center]
+        )
+        self.angular_lm_extent_eor = self._angular_lm_extent(
+            self.lmn_fg[self.time_ind_center, :, self.eor_fg_shared_axis]
+        )
+        self.fov_l_angle_eor = self.angular_lm_extent_eor["l_angle_range_padded"]
+        self.fov_m_angle_eor = self.angular_lm_extent_eor["m_angle_range_padded"]
+        self.fov_l_angle_fg = self.angular_lm_extent_fg["l_angle_range_padded"]
+        self.fov_m_angle_fg = self.angular_lm_extent_fg["m_angle_range_padded"]
 
 
     def _construct_time_array(self, jd_center: float, n_t: int, d_t: float) -> Tuple[np.ndarray, np.ndarray, int]:
@@ -143,14 +164,18 @@ class LMN_ModelSpace:
         pointing_center_icrs = pointing_center_altaz.transform_to("icrs")
         return (float(pointing_center_icrs.ra.deg), float(pointing_center_icrs.dec.deg))
 
-    def _healpix_pixels_fov(self, field_center: Tuple[float, float], fov_deg: Tuple[float, float]) -> jnp.ndarray:
+    def _healpix_pixels_fov(
+        self,
+        field_centers: Sequence[Tuple[float, float]],
+        fov_deg: Tuple[float, float],
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
-        Return HEALPix pixel indices within the EoR and FG circular FoVs.
+        Return HEALPix pixel indices within the time-union EoR and FG FoVs.
 
         Parameters
         ----------
-        field_center : tuple
-            (ra_deg, dec_deg) center of the FoV.
+        field_centers : sequence of tuple
+            ``(ra_deg, dec_deg)`` FoV centers for each configured time.
         fov_deg : tuple
             (fov_eor_deg, fov_fg_deg) full diameters in degrees.
 
@@ -163,38 +188,103 @@ class LMN_ModelSpace:
         eor_fg_shared_axis : jnp.ndarray
             Boolean mask over FG pixels indicating which are also in EoR FoV.
         """
-        # Convert the field center from (RA, Dec) to a unit vector in Cartesian coordinates.
-        ra_rad = jnp.radians(field_center[0])
-        dec_rad = jnp.radians(field_center[1])
-        x = jnp.cos(dec_rad) * jnp.cos(ra_rad)
-        y = jnp.cos(dec_rad) * jnp.sin(ra_rad)
-        z = jnp.sin(dec_rad)
-        vec_center = jnp.array([x, y, z])
+        def _query_disc_union(radius_rad: jnp.ndarray) -> np.ndarray:
+            indices: list[np.ndarray] = []
+            for field_center in field_centers:
+                # Convert the field center from (RA, Dec) to a unit vector.
+                ra_rad = jnp.radians(field_center[0])
+                dec_rad = jnp.radians(field_center[1])
+                x = jnp.cos(dec_rad) * jnp.cos(ra_rad)
+                y = jnp.cos(dec_rad) * jnp.sin(ra_rad)
+                z = jnp.sin(dec_rad)
+                vec_center = jnp.array([x, y, z])
+                pix = jhp.query_disc(
+                    nside=self.nside,
+                    vec=vec_center,
+                    radius=radius_rad,
+                    inclusive=False,
+                )
+                # jax_healpy pads query_disc output with the sentinel index `npix`.
+                pix = np.asarray(pix[pix < self.npix], dtype=np.int64)
+                indices.append(pix)
+            if not indices:
+                return np.asarray([], dtype=np.int64)
+            return np.unique(np.concatenate(indices))
 
-        # Compute the angular radius of the FoV in radians for the FG and EoR models, respectively.
+        # Compute the angular radius of the FoV in radians for the EoR and FG models.
         radius_rad_eor = jnp.radians(fov_deg[0] / 2)
         radius_rad_fg = jnp.radians(fov_deg[1] / 2)
 
-        # Use healpy to query the pixel indices within the specified radius of the field center.
-        pix_indices_eor = jhp.query_disc(
-            nside=self.nside, vec=vec_center, radius=radius_rad_eor, inclusive=False
-        )
-        # jax_healpy pads query_disc output with the sentinel index `npix`.
-        # Keep only valid HEALPix pixel indices.
-        pix_indices_eor = pix_indices_eor[pix_indices_eor < self.npix]
-        # If the EoR and foreground FoVs are the same, we can skip the second query and just reuse the pixel indices.
-        # Also determine a boolean mask over the foreground pixels indicating which are also in the EoR FoV (i.e., shared axis).
+        pix_indices_eor_np = _query_disc_union(radius_rad_eor)
         if self.fovs_match:
-            pix_indices_fg = pix_indices_eor
-            eor_fg_shared_axis = jnp.ones_like(pix_indices_fg, dtype=bool)
+            pix_indices_fg_np = pix_indices_eor_np
         else: 
-            pix_indices_fg = jhp.query_disc(
-                nside=self.nside, vec=vec_center, radius=radius_rad_fg, inclusive=False
-            )
-            pix_indices_fg = pix_indices_fg[pix_indices_fg < self.npix]
-            eor_fg_shared_axis = jnp.isin(pix_indices_fg, pix_indices_eor)
+            pix_indices_fg_np = _query_disc_union(radius_rad_fg)
 
+        pix_indices_eor = jnp.asarray(pix_indices_eor_np, dtype=jnp.int64)
+        pix_indices_fg = jnp.asarray(pix_indices_fg_np, dtype=jnp.int64)
+        eor_fg_shared_axis = jnp.isin(pix_indices_fg, pix_indices_eor)
         return pix_indices_eor, pix_indices_fg, eor_fg_shared_axis
+
+    def _angular_lm_extent(self, lmn_coords: jnp.ndarray) -> dict[str, float]:
+        """
+        Summarize central-time angular support along the local ``l`` and ``m`` axes.
+
+        The current wide-field image chart is still anchored to the central-time
+        local frame, but the raw direction cosines ``l`` and ``m`` compress large
+        angular offsets through the sine projection. To recover angular widths
+        that remain comparable to the spherical FoV, we define angular offsets
+        along the two local transverse axes as:
+
+        ``l_angle = atan2(l, n)``
+        ``m_angle = atan2(m, n)``
+
+        where ``n`` is the local line-of-sight component. For small fields these
+        reduce to the usual flat-sky coordinates, while for wide fields they
+        retain the correct angular scaling. A single HEALPix pixel length in
+        radians is added in total, equivalent to padding by half a pixel on
+        either side.
+        """
+        lmn = np.asarray(lmn_coords, dtype=float)
+        if lmn.ndim != 2:
+            raise ValueError(
+                f"lmn_coords must be two-dimensional, got {lmn.shape}"
+            )
+        if lmn.shape[0] != 3 and lmn.shape[1] == 3:
+            lmn = lmn.T
+        if lmn.shape[0] != 3:
+            raise ValueError(
+                f"lmn_coords must have shape (3, n_pix), got {lmn.shape}"
+            )
+
+        l = lmn[0]
+        m = lmn[1]
+        n = lmn[2]
+        l_angle = np.arctan2(l, n)
+        m_angle = np.arctan2(m, n)
+        pixel_angle = float(np.sqrt(float(self.pixel_area_sr)))
+        half_pixel_angle = 0.5 * pixel_angle
+
+        l_angle_min = float(l_angle.min())
+        l_angle_max = float(l_angle.max())
+        m_angle_min = float(m_angle.min())
+        m_angle_max = float(m_angle.max())
+
+        return {
+            "pixel_angle": pixel_angle,
+            "l_angle_min": l_angle_min,
+            "l_angle_max": l_angle_max,
+            "l_angle_range": float(l_angle_max - l_angle_min),
+            "l_angle_min_padded": float(l_angle_min - half_pixel_angle),
+            "l_angle_max_padded": float(l_angle_max + half_pixel_angle),
+            "l_angle_range_padded": float((l_angle_max - l_angle_min) + pixel_angle),
+            "m_angle_min": m_angle_min,
+            "m_angle_max": m_angle_max,
+            "m_angle_range": float(m_angle_max - m_angle_min),
+            "m_angle_min_padded": float(m_angle_min - half_pixel_angle),
+            "m_angle_max_padded": float(m_angle_max + half_pixel_angle),
+            "m_angle_range_padded": float((m_angle_max - m_angle_min) + pixel_angle),
+        }
 
 
     def _lmn_in_fov(

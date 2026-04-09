@@ -2,6 +2,8 @@
 HEALPix-based beam model for evaluating the primary beam response at given
 (za, az) coordinates of the image domain pixels calculated in `lmn_model_space.py`.
 """
+import warnings
+
 import jax
 jax.config.update("jax_enable_x64", True)
 
@@ -364,3 +366,81 @@ class Beam_Model:
         wavelength = self.c_ms / freq
         sigma = jnp.arcsin(2.2150894 * wavelength / (jnp.pi * diam))
         return sigma * jnp.sqrt(2) / 2.355
+    
+    def aperture_width_uv(
+        self,
+        freqs_hz: np.ndarray,
+        gaussian_nsigma: float = 5.0,
+    ) -> float:
+        """
+        Estimate the beam support width in uv space.
+
+        This quantity is used only for automatic uv-grid sizing. It mirrors the
+        old elongated-FoV validation logic: Airy-like beams contribute an
+        aperture width equal to the effective dish diameter in wavelengths,
+        while Gaussian-like beams contribute ``Nsigma / (2πσ)`` using the
+        broadest angular width at the lowest observing frequency.
+
+        Parameters
+        ----------
+        freqs_hz : array-like
+            One-dimensional observing-frequency array in Hz.
+        gaussian_nsigma : float, optional
+            Number of Gaussian standard deviations used to define the beam
+            support in uv space. Defaults to 5.
+
+        Returns
+        -------
+        float
+            Approximate beam-support width in uv units. Returns ``0.0`` for
+            uniform beams and UVBeam file inputs, where no simple analytic
+            aperture-width estimate is available.
+        """
+        freqs_hz = np.asarray(freqs_hz, dtype=float).reshape(-1)
+        if freqs_hz.size == 0:
+            raise ValueError("freqs_hz must contain at least one frequency")
+
+        if self.beam_type == "uniform":
+            return 0.0
+
+        if self.beam_type == "uvbeam":
+            warnings.warn(
+                "Automatic uv-grid sizing with a UVBeam file does not have a "
+                "simple analytic aperture-width estimate; using zero beam buffer.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return 0.0
+
+        freq_min_hz = float(freqs_hz.min())
+        freq_max_hz = float(freqs_hz.max())
+        wavelength_max_model = float(self.c_ms / freq_max_hz)
+
+        if self.beam_type in {"airy", "taperairy", "tanhairy"}:
+            if self.diam is not None:
+                diam_eff = float(self.diam)
+            elif self.fwhm_deg is not None:
+                diam_eff = float(self._fwhm_to_diam(float(self.fwhm_deg), freq_min_hz))
+            else:
+                raise ValueError(
+                    f"beam_type={self.beam_type!r} requires one of diam or fwhm_deg "
+                    "for automatic uv-grid sizing."
+                )
+            return float(diam_eff / wavelength_max_model)
+
+        if self.beam_type in {"gaussian", "gausscosine"}:
+            if gaussian_nsigma <= 0:
+                raise ValueError("gaussian_nsigma must be > 0")
+            if self.diam is not None:
+                stddev_eff = float(self._diam_to_stddev(float(self.diam), freq_min_hz))
+            elif self.fwhm_deg is not None:
+                stddev_eff = float(np.deg2rad(self._fwhm_to_stddev(float(self.fwhm_deg))))
+            else:
+                raise ValueError(
+                    f"beam_type={self.beam_type!r} requires one of diam or fwhm_deg "
+                    "for automatic uv-grid sizing."
+                )
+            stddev_uv = 1.0 / (2.0 * np.pi * stddev_eff)
+            return float(stddev_uv * gaussian_nsigma)
+
+        return 0.0

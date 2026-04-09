@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 
-from .build_matricies import BuildMatrices
+from .build_matricies import BuildMatrices, LMN_ModelSpace
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import PhiInverse
 from .inference.prior import Prior
@@ -24,7 +24,11 @@ from .model.k_cube import (
     generate_k_cube_model_spherical_binning,
     mask_k_cube,
 )
-from .utils import _resolve_uv_spacing, load_numpy_dict, write_analysis_metadata
+from .utils import (
+    _resolve_uv_grid_from_extents,
+    load_numpy_dict,
+    write_analysis_metadata,
+)
 from .vis import get_vis_data
 
 jax.config.update("jax_enable_x64", True)
@@ -58,7 +62,6 @@ class SetupResult:
         self.ps_box_size_ra_mpc = ps_box_size_ra_mpc
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
-
 def run_setup(
     *,
     # IO
@@ -67,7 +70,7 @@ def run_setup(
     noise_data_path: Path | str | None = None,
     array_save_directory: Path | str = "./matrices/",
     # UV model
-    n_u_eor: int,
+    n_u_eor: int | None = None,
     n_v_eor: int | None = None,
     du_eor: float | None = None,
     dv_eor: float | None = None,
@@ -160,10 +163,12 @@ def run_setup(
         pipeline saves old-style `k-vals*.txt` products here for downstream
         analysis compatibility.
 
-    n_u_eor, n_v_eor, du_eor, dv_eor : int/float
-        EoR model UV grid shape and spacing.
+    n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
+        EoR model UV grid shape and spacing. When omitted, these are
+        auto-resolved from the time-union FoV widths and instrument support.
     n_u_fg, n_v_fg, du_fg, dv_fg : int/float, optional
-        FG model UV grid shape and spacing.
+        FG model UV grid shape and spacing. When omitted, these are
+        auto-resolved from the time-union FoV widths and instrument support.
     fit_for_monopole : bool, optional
         Whether to include a dedicated FG monopole block.
     n_modes_fg, n_powerlaws_fg, beta_fg : optional
@@ -218,35 +223,16 @@ def run_setup(
         - `ps_box_size_ra_mpc`, `ps_box_size_dec_mpc`, `ps_box_size_para_mpc`:
           cosmological box extents used for power normalization.
     """
-    # Resolve parser-like defaults once so downstream uses a fully-specified config.
-    if n_v_eor is None:
-        n_v_eor = n_u_eor
-    if n_u_fg is None:
-        n_u_fg = n_u_eor
-    if n_v_fg is None:
-        n_v_fg = n_u_fg
+    # Resolve parser-like defaults that are independent of the actual selected
+    # data product. The uv-grid shapes themselves are resolved later from the
+    # time-union FoV extents and instrument uv coverage once vis metadata are
+    # available.
     if fov_fg is None:
         fov_fg = fov_eor
     if len(telescope_latlonalt) != 3:
         raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
-
-    # Resolve uv-grid spacings from the requested FoV when they are omitted.
-    # If explicit du/dv values are provided, keep them but warn when they are
-    # inconsistent with the standard FoV-derived choice 1 / deg2rad(FoV).
     fov_eor = float(fov_eor)
     fov_fg = float(fov_fg)
-    du_eor, dv_eor = _resolve_uv_spacing(
-        fov_deg=fov_eor,
-        du=du_eor,
-        dv=dv_eor,
-        label="EoR uv grid spacing",
-    )
-    du_fg, dv_fg = _resolve_uv_spacing(
-        fov_deg=fov_fg,
-        du=du_fg,
-        dv=dv_fg,
-        label="FG uv grid spacing",
-    )
 
     if n_eta is None:
         if n_freq is None:
@@ -310,6 +296,46 @@ def run_setup(
     if n_eta is None:
         n_eta = n_freq
 
+    # Build the time-union HEALPix FoV model once before the expensive matrix
+    # construction so the spherical-aware local angular widths can define the
+    # uv sampling and automatic n_u/n_v sizing.
+    lmn_model_space = LMN_ModelSpace(
+        fov_eor=float(fov_eor),
+        fov_fg=float(fov_fg),
+        nside=int(nside),
+        telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
+        jd_center=float(jd_center),
+        n_t=int(n_t),
+        d_t=float(d_t),
+    )
+    resolved_grid = _resolve_uv_grid_from_extents(
+        extent_u_eor=float(lmn_model_space.fov_l_angle_eor),
+        extent_v_eor=float(lmn_model_space.fov_m_angle_eor),
+        extent_u_fg=float(lmn_model_space.fov_l_angle_fg),
+        extent_v_fg=float(lmn_model_space.fov_m_angle_fg),
+        freqs_hz=np.asarray(freqs_hz, dtype=float),
+        uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
+        beam_type=beam_type,
+        fwhm_deg=None if fwhm_deg is None else float(fwhm_deg),
+        diam=None if diam is None else float(diam),
+        n_u_eor=n_u_eor,
+        n_v_eor=n_v_eor,
+        du_eor=du_eor,
+        dv_eor=dv_eor,
+        n_u_fg=n_u_fg,
+        n_v_fg=n_v_fg,
+        du_fg=du_fg,
+        dv_fg=dv_fg,
+    )
+    n_u_eor = int(resolved_grid["n_u_eor"])
+    n_v_eor = int(resolved_grid["n_v_eor"])
+    n_u_fg = int(resolved_grid["n_u_fg"])
+    n_v_fg = int(resolved_grid["n_v_fg"])
+    du_eor = float(resolved_grid["du_eor"])
+    dv_eor = float(resolved_grid["dv_eor"])
+    du_fg = float(resolved_grid["du_fg"])
+    dv_fg = float(resolved_grid["dv_fg"])
+
     setup_args_dict = {
         "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
         "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
@@ -340,6 +366,19 @@ def run_setup(
         "nside": int(nside),
         "fov_eor": float(fov_eor),
         "fov_fg": float(fov_fg),
+        "fov_l_angle_eor": float(lmn_model_space.fov_l_angle_eor),
+        "fov_m_angle_eor": float(lmn_model_space.fov_m_angle_eor),
+        "fov_l_angle_fg": float(lmn_model_space.fov_l_angle_fg),
+        "fov_m_angle_fg": float(lmn_model_space.fov_m_angle_fg),
+        "beam_aperture_width_uv": float(resolved_grid["beam_aperture_width_uv"]),
+        "u_max_inst_model": float(resolved_grid["u_max_inst_model"]),
+        "v_max_inst_model": float(resolved_grid["v_max_inst_model"]),
+        "u_extent_with_buffer": float(resolved_grid["u_extent_with_buffer"]),
+        "v_extent_with_buffer": float(resolved_grid["v_extent_with_buffer"]),
+        "n_u_eor_required": int(resolved_grid["n_u_eor_required"]),
+        "n_v_eor_required": int(resolved_grid["n_v_eor_required"]),
+        "n_u_fg_required": int(resolved_grid["n_u_fg_required"]),
+        "n_v_fg_required": int(resolved_grid["n_v_fg_required"]),
         "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
         "beam_type": beam_type,
         "peak_amp": float(peak_amp),
@@ -383,8 +422,8 @@ def run_setup(
     z = float(cosmo.f2z(jnp.mean(freqs_hz)))
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     ps_box_size_para_mpc = float(cosmo.dL_df(z) * bandwidth_hz)
-    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
-    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
+    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_l_angle_eor))
+    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_m_angle_eor))
 
     # Build the EoR k-cube model:
     # 1) generate physical k coordinates

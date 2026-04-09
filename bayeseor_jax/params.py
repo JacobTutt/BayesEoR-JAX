@@ -61,18 +61,24 @@ class BayesEoRParser(ArgumentParser):
 
     UV Model Parameters
 
-    n_u_eor, n_v_eor : int
-        Number of EoR uv pixels along u and v axes. ``n_v_eor`` defaults to
-        ``n_u_eor``.
+    n_u_eor, n_v_eor : int, optional
+        Number of EoR uv pixels along u and v axes. When omitted, they are
+        auto-resolved from the time-union FoV extents and instrument support.
     du_eor, dv_eor : float, optional
         EoR uv-axis spacing in inverse radians. If omitted, each axis defaults
-        to ``1 / deg2rad(fov_eor)``.
+        to the spherical-aware local angular-width values derived from the
+        fixed central-time ``(l, m, n)`` chart, i.e. ``1 / fov_l_angle_eor``
+        and ``1 / fov_m_angle_eor`` where the angular widths are built from
+        ``atan2(l, n)`` and ``atan2(m, n)`` over the time-union pixel support.
     n_u_fg, n_v_fg : int, optional
-        Number of FG uv pixels along u and v axes. ``n_u_fg`` defaults to
-        ``n_u_eor`` and ``n_v_fg`` defaults to ``n_u_fg``.
+        Number of FG uv pixels along u and v axes. When omitted, they are
+        auto-resolved from the time-union FoV extents and instrument support.
     du_fg, dv_fg : float, optional
         FG uv-axis spacing in inverse radians. If omitted, each axis defaults
-        to ``1 / deg2rad(fov_fg)``.
+        to the spherical-aware local angular-width values derived from the
+        fixed central-time ``(l, m, n)`` chart, i.e. ``1 / fov_l_angle_fg``
+        and ``1 / fov_m_angle_fg`` where the angular widths are built from
+        ``atan2(l, n)`` and ``atan2(m, n)`` over the time-union pixel support.
     fit_for_monopole : bool, optional
         Include the uv monopole mode. Defaults to False.
     n_modes_fg : int, optional
@@ -218,14 +224,50 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--random-key", type=int, default=0, help="PRNG seed for nested sampling.")
 
         # UV model grids
-        self.add_argument("--n-u-eor", type=int, required=True, help="Number of EoR uv pixels along u.")
-        self.add_argument("--n-v-eor", type=int, help="Number of EoR uv pixels along v. Defaults to n_u_eor.")
-        self.add_argument("--du-eor", type=float, default=None, help="EoR u spacing in inverse radians. Defaults to 1/deg2rad(fov_eor).")
-        self.add_argument("--dv-eor", type=float, default=None, help="EoR v spacing in inverse radians. Defaults to 1/deg2rad(fov_eor).")
-        self.add_argument("--n-u-fg", type=int, help="Number of FG uv pixels along u. Defaults to n_u_eor.")
-        self.add_argument("--n-v-fg", type=int, help="Number of FG uv pixels along v. Defaults to n_u_fg.")
-        self.add_argument("--du-fg", type=float, default=None, help="FG u spacing in inverse radians. Defaults to 1/deg2rad(fov_fg).")
-        self.add_argument("--dv-fg", type=float, default=None, help="FG v spacing in inverse radians. Defaults to 1/deg2rad(fov_fg).")
+        self.add_argument(
+            "--n-u-eor",
+            type=int,
+            help="Number of EoR uv pixels along u. Defaults to the auto-resolved requirement.",
+        )
+        self.add_argument(
+            "--n-v-eor",
+            type=int,
+            help="Number of EoR uv pixels along v. Defaults to the auto-resolved requirement.",
+        )
+        self.add_argument(
+            "--du-eor",
+            type=float,
+            default=None,
+            help="EoR u spacing in inverse radians. Defaults to 1 / fov_l_angle_eor from the fixed local (l, m, n) chart.",
+        )
+        self.add_argument(
+            "--dv-eor",
+            type=float,
+            default=None,
+            help="EoR v spacing in inverse radians. Defaults to 1 / fov_m_angle_eor from the fixed local (l, m, n) chart.",
+        )
+        self.add_argument(
+            "--n-u-fg",
+            type=int,
+            help="Number of FG uv pixels along u. Defaults to the auto-resolved requirement.",
+        )
+        self.add_argument(
+            "--n-v-fg",
+            type=int,
+            help="Number of FG uv pixels along v. Defaults to the auto-resolved requirement.",
+        )
+        self.add_argument(
+            "--du-fg",
+            type=float,
+            default=None,
+            help="FG u spacing in inverse radians. Defaults to 1 / fov_l_angle_fg from the fixed local (l, m, n) chart.",
+        )
+        self.add_argument(
+            "--dv-fg",
+            type=float,
+            default=None,
+            help="FG v spacing in inverse radians. Defaults to 1 / fov_m_angle_fg from the fixed local (l, m, n) chart.",
+        )
         self.add_argument("--fit-for-monopole", action="store_true", help="Include the uv monopole mode.")
         self.add_argument("--n-modes-fg", type=int, default=0, help="Number of FG/LSSM modes.")
         self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
