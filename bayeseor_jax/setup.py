@@ -80,6 +80,7 @@ def run_setup(
     dv_fg: float | None = None,
     fit_for_monopole: bool = False,
     image_domain_trim: bool = False,
+    sky_mask_time_mode: str = "union",
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
@@ -93,7 +94,7 @@ def run_setup(
     d_t: float | None = None,
     jd_center: float | None = None,
     # Sky / beam
-    nside: int = 256,
+    nside: int = 128,
     fov_eor: float = 10.0,
     fov_fg: float | None = None,
     fg_core_fov: float | None = None,
@@ -168,12 +169,17 @@ def run_setup(
 
     n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
         EoR model UV grid shape and spacing. When omitted, these are
-        auto-resolved from the time-union FoV widths and instrument support.
+        auto-resolved from the configured sky-mask FoV widths and instrument support.
     n_u_fg, n_v_fg, du_fg, dv_fg : int/float, optional
         FG model UV grid shape and spacing. When omitted, these are
-        auto-resolved from the time-union FoV widths and instrument support.
+        auto-resolved from the configured sky-mask FoV widths and instrument support.
     fit_for_monopole : bool, optional
         Whether to include a dedicated FG monopole block.
+    sky_mask_time_mode : {"union", "center"}, optional
+        How the fixed EoR/FG HEALPix masks are selected across time.
+        ``"union"`` uses the drift-scan union over all configured timesteps.
+        ``"center"`` uses only the central timestep FoV when defining the
+        fixed sky mask.
     n_modes_fg, n_powerlaws_fg, beta_fg : optional
         FG large spectral scale model controls.
 
@@ -299,13 +305,14 @@ def run_setup(
     if n_eta is None:
         n_eta = n_freq
 
-    # Build the time-union HEALPix FoV model once before the expensive matrix
+    # Build the configured HEALPix FoV model once before the expensive matrix
     # construction so the spherical-aware local angular widths can define the
     # uv sampling and automatic n_u/n_v sizing.
     lmn_model_space = LMN_ModelSpace(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
         nside=int(nside),
+        sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         n_t=int(n_t),
@@ -355,6 +362,7 @@ def run_setup(
         "dv_fg": float(dv_fg),
         "fit_for_monopole": bool(fit_for_monopole),
         "image_domain_trim": bool(image_domain_trim),
+        "sky_mask_time_mode": str(sky_mask_time_mode),
         "fg_core_fov": None if fg_core_fov is None else float(fg_core_fov),
         "fg_outer_nside": None if fg_outer_nside is None else int(fg_outer_nside),
         "n_modes_fg": int(n_modes_fg),
@@ -513,6 +521,7 @@ def run_setup(
         d_eta=float(1.0 / bandwidth_hz),
         fit_for_monopole=fit_for_monopole,
         image_domain_trim=bool(image_domain_trim),
+        sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         nside=int(nside),

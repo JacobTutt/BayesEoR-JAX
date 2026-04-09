@@ -53,29 +53,36 @@ class PhiInverse:
         Total number of latent linear coefficients (EoR + FG/LSSM).
     inverse_lw_power : float, optional
         Prior precision assigned to FG/LSSM amplitudes.
-        fg_model_domain : {"uv", "image"}, optional
-            Spatial basis used for the non-monopole foreground block. When set to
-            ``"image"``, the leading non-monopole image-domain FG slice uses the
-            pushed-forward precision implied by the current UV prior and FG
-            ``UV -> LM`` embedding.
+    fg_model_domain : {"uv", "image"}, optional
+        Spatial basis used for the non-monopole foreground block. When set to
+        ``"image"``, the leading non-monopole image-domain FG slice uses the
+        pushed-forward precision implied by the current UV prior and FG
+        ``UV -> LM`` embedding.
     n_nonmp_fg : int, optional
         Number of leading FG coefficients belonging to the non-monopole
         foreground block. These coefficients immediately follow the EoR block
         in the latent vector. Only used when ``fg_model_domain="image"``.
-        n_nonmp_uv : int, optional
-            Number of non-monopole FG UV modes used in the pushed-forward image
-            prior calculation.
-        du_fg, dv_fg : float, optional
-            FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
-        fg_group_pixel_counts : jax.Array, optional
-            Number of high-resolution FG pixels represented by each image-domain
-            FG spatial group. When provided, the image-domain FG precision is
-            scaled by this count so coarser grouped pixels carry stronger
-            effective shrinkage than single high-resolution pixels.
-        n_modes_fg : int, optional
-            Number of FG/LSSM spectral modes attached to each non-monopole FG
-            spatial group. Used to expand the image-domain FG precision from a
-            spatial vector into the full ``[eta0 | LSSM]`` ordering.
+    n_nonmp_uv : int, optional
+        Number of non-monopole FG UV modes used in the pushed-forward image
+        prior calculation.
+    du_fg, dv_fg : float, optional
+        FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
+    fg_group_pixel_counts : jax.Array, optional
+        Number of high-resolution FG pixels represented by each image-domain
+        FG spatial group. When provided, the image-domain FG precision is
+        scaled by this count so coarser grouped pixels carry stronger
+        effective shrinkage than single high-resolution pixels.
+
+        This matches the current grouped image-domain forward model, where one
+        grouped FG coefficient is interpreted as a **shared child brightness**
+        copied onto every high-resolution child in the group. If the original
+        image-domain prior is diagonal with one equal quadratic penalty per
+        child pixel, then tying ``k`` children to the same coefficient induces
+        a grouped precision proportional to ``k``.
+    n_modes_fg : int, optional
+        Number of FG/LSSM spectral modes attached to each non-monopole FG
+        spatial group. Used to expand the image-domain FG precision from a
+        spatial vector into the full ``[eta0 | LSSM]`` ordering.
     """
 
     def __init__(
@@ -128,6 +135,8 @@ class PhiInverse:
                 raise ValueError("image-domain FG prior requires n_nonmp_uv > 0")
             if self.du_fg is None or self.dv_fg is None:
                 raise ValueError("image-domain FG prior requires du_fg and dv_fg")
+            # This is the existing scalar image-domain FG precision obtained by
+            # approximately pushing the UV prior into image space.
             base_precision = float(self.inverse_lw_power) / (
                 float(self.n_nonmp_uv) * (self.du_fg * self.dv_fg) ** 2
             )
@@ -138,8 +147,21 @@ class PhiInverse:
                     dtype=jnp.float64,
                 )
             else:
+                # In the grouped image model one spatial coefficient is copied
+                # onto every high-resolution child pixel in that group. Under
+                # the existing diagonal image-domain prior approximation, the
+                # equivalent grouped precision therefore scales with the number
+                # of tied child pixels:
+                #
+                #   lambda * sum_i a_i^2  with  a_i = q_g  for all children i
+                #   => lambda * k_g * q_g^2
+                #
+                # so the grouped precision is base_precision * k_g.
                 spatial_precision = base_precision * self.fg_group_pixel_counts
                 if self.n_modes_fg > 0:
+                    # Expand the spatial precision into the foreground
+                    # non-monopole block ordering:
+                    #   [eta0 per group][LSSM modes per group]
                     self.fg_nonmp_image_inverse_prior = jnp.concatenate(
                         [
                             spatial_precision,

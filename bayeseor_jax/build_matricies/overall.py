@@ -96,6 +96,16 @@ class BuildMatrices:
         block. ``"uv"`` assigns one coefficient set per FG uv pixel.
         ``"image"`` assigns one coefficient set per FG image pixel. Defaults
         to ``"uv"``.
+    fg_core_fov : float, optional
+        Optional inner foreground FoV, in degrees, that stays at the native
+        HEALPix resolution when ``fg_model_domain="image"``. Pixels outside
+        this core may be grouped onto a coarser HEALPix parent grid using
+        ``fg_outer_nside``.
+    fg_outer_nside : int, optional
+        Optional lower HEALPix ``nside`` used for the grouped outer
+        image-domain foreground region. Grouping is only active when both
+        ``fg_core_fov`` and ``fg_outer_nside`` are set and define a genuine
+        coarse outer region.
 
     Frequency and line of sight Fourier mode parameters
     n_freq : int
@@ -114,6 +124,15 @@ class BuildMatrices:
     fit_for_monopole : bool, optional
         Fit for (u, v) = (0, 0) (True) or exclude it from the fit (False).
         Defaults to False.
+    image_domain_trim : bool, optional
+        If ``True`` and ``fg_model_domain="image"``, trim the outermost FG
+        image pixels so the full linear parameter vector is divisible by 4.
+        This is independent of the multiresolution grouping logic.
+    sky_mask_time_mode : {"union", "center"}, optional
+        How the fixed EoR/FG HEALPix masks are selected across time.
+        ``"union"`` uses the drift-scan union over all configured timesteps.
+        ``"center"`` uses only the central timestep FoV when defining the
+        fixed sky mask.
 
     HEALPix image-domain model parameters
     telescope_latlonalt : tuple, optional
@@ -221,6 +240,7 @@ class BuildMatrices:
         d_eta: float = 0.0,
         fit_for_monopole: bool = False,
         image_domain_trim: bool = False,
+        sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         jd_center: float = 2461040.5,
         nside: Optional[int] = None,
@@ -281,6 +301,7 @@ class BuildMatrices:
             )
         self.fit_for_monopole = fit_for_monopole
         self.image_domain_trim = bool(image_domain_trim)
+        self.sky_mask_time_mode = str(sky_mask_time_mode)
         # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
@@ -366,6 +387,7 @@ class BuildMatrices:
             fg_core_fov=self.fg_core_fov,
             fg_outer_nside=self.fg_outer_nside,
             nside=self.nside,
+            sky_mask_time_mode=self.sky_mask_time_mode,
             telescope_latlonalt=self.telescope_latlonalt,
             jd_center=self.jd_center,
             n_t=self.n_t,
@@ -407,7 +429,14 @@ class BuildMatrices:
         self.n_fg_non_monopole_spatial_modes = self._fg_non_monopole_mode_count()
 
     def _fg_non_monopole_mode_count(self) -> int:
-        """Return the spatial width of the non-monopole foreground block."""
+        """
+        Return the spatial width of the non-monopole foreground block.
+
+        For image-domain FG this is no longer necessarily the number of native
+        foreground HEALPix pixels. When multiresolution FG grouping is active,
+        the non-monopole image-domain block is parameterized by
+        ``lmn_model_space.n_fg_groups`` instead.
+        """
         if self.fg_model_domain == "uv":
             return int(self.n_uv_fg - int(self.fit_for_monopole))
         return int(self.lmn_model_space.n_fg_groups)
@@ -426,6 +455,23 @@ class BuildMatrices:
         jnp.ndarray
             Array with the same leading axes and grouped FG spatial modes on
             the final axis.
+
+        Notes
+        -----
+        This operation only affects the image-domain **non-monopole**
+        foreground block. The EoR block is untouched, the UV-domain FG path is
+        untouched, and the FG monopole block is still built separately from the
+        constant-image template.
+
+        If a grouped spatial mode ``g`` contains high-resolution child pixels
+        ``p`` then the grouped image response is
+
+        ``F_grouped[..., g] = sum_p F_hi[..., p]``.
+
+        The corresponding image-domain FG coefficient therefore acts as a
+        single shared brightness/amplitude for every child in that group. This
+        is the convention assumed later by the grouped image-domain prior in
+        ``PhiInverse``.
         """
         if self.fg_model_domain != "image" or not self.lmn_model_space.use_multires_fg:
             return fg_response
@@ -435,6 +481,9 @@ class BuildMatrices:
             fg_response.shape[:-1] + (n_groups,),
             dtype=fg_response.dtype,
         )
+        # Summing the child columns means one grouped coefficient acts as a
+        # shared brightness/amplitude for every high-resolution child pixel in
+        # that group.
         return grouped.at[..., labels].add(fg_response)
 
 
