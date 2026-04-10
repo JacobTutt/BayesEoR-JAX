@@ -557,9 +557,9 @@ def run_setup(
     setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
     setup_args_dict["use_multires_fg"] = bool(bm.lmn_model_space.use_multires_fg)
     setup_args_dict["n_fg_groups"] = int(bm.lmn_model_space.n_fg_groups)
-    setup_args_dict["n_fg_group_highres"] = int(jnp.sum(bm.lmn_model_space.fg_group_is_highres))
+    setup_args_dict["n_fg_group_highres"] = int(np.sum(bm.lmn_model_space.fg_group_is_highres))
     setup_args_dict["n_fg_group_lowres"] = int(
-        bm.lmn_model_space.n_fg_groups - jnp.sum(bm.lmn_model_space.fg_group_is_highres)
+        bm.lmn_model_space.n_fg_groups - np.sum(bm.lmn_model_space.fg_group_is_highres)
     )
 
     # Assemble sampler-space prior and latent-space precision configs.

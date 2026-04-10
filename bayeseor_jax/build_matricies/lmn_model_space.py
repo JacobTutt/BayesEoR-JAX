@@ -327,10 +327,10 @@ class LMN_ModelSpace:
         """
         pix_fg = np.asarray(self.pix_indices_fg, dtype=np.int64)
         n_pix_fg = int(pix_fg.size)
-        self.pix_indices_fg_core = jnp.asarray([], dtype=jnp.int64)
-        self.fg_group_labels = jnp.arange(n_pix_fg, dtype=jnp.int64)
-        self.fg_group_pixel_counts = jnp.ones((n_pix_fg,), dtype=jnp.int32)
-        self.fg_group_is_highres = jnp.ones((n_pix_fg,), dtype=bool)
+        self.pix_indices_fg_core = np.asarray([], dtype=np.int64)
+        self.fg_group_labels = np.arange(n_pix_fg, dtype=np.int64)
+        self.fg_group_pixel_counts = np.ones((n_pix_fg,), dtype=np.int32)
+        self.fg_group_is_highres = np.ones((n_pix_fg,), dtype=bool)
         self.n_fg_groups = int(n_pix_fg)
         self.use_multires_fg = False
 
@@ -358,9 +358,9 @@ class LMN_ModelSpace:
         radius_rad_core = jnp.radians(float(self.fg_core_fov) / 2.0)
         pix_indices_core_np = self._query_disc_union(self.field_centers, radius_rad_core)
         core_mask = np.isin(pix_fg, pix_indices_core_np)
-        self.pix_indices_fg_core = jnp.asarray(
+        self.pix_indices_fg_core = np.asarray(
             pix_fg[core_mask],
-            dtype=jnp.int64,
+            dtype=np.int64,
         )
 
         child_per_parent = int(ratio * ratio)
@@ -401,9 +401,9 @@ class LMN_ModelSpace:
             raise ValueError("Failed to assign all FG pixels to multiresolution groups.")
 
         group_counts = np.bincount(labels, minlength=next_label).astype(np.int32)
-        self.fg_group_labels = jnp.asarray(labels, dtype=jnp.int64)
-        self.fg_group_pixel_counts = jnp.asarray(group_counts, dtype=jnp.int32)
-        self.fg_group_is_highres = jnp.asarray(np.asarray(group_is_highres, dtype=bool))
+        self.fg_group_labels = np.asarray(labels, dtype=np.int64)
+        self.fg_group_pixel_counts = np.asarray(group_counts, dtype=np.int32)
+        self.fg_group_is_highres = np.asarray(group_is_highres, dtype=bool)
         self.n_fg_groups = int(next_label)
         self.use_multires_fg = True
 

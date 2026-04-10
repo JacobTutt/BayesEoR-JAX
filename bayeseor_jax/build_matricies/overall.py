@@ -37,9 +37,11 @@ from .build_utils import (
     check_if_matrix_exists as check_if_matrix_exists_impl,
     get_T_component_layout as get_T_component_layout_impl,
     load_matrix as load_matrix_impl,
+    padded_visibility_partition as padded_visibility_partition_impl,
     save_matrix as save_matrix_impl,
 )
 from .jax_grid import MeshManager
+
 
 class BuildMatrices:
     """
@@ -1220,22 +1222,13 @@ class BuildMatrices:
 
         process_count = int(jax.process_count())
         local_device_count = int(jax.local_device_count())
-        # The cached backend partitions the visibility axis evenly across JAX
-        # processes, then splits each process-local stripe across its local
-        # GPUs. These divisibility checks make that mapping explicit.
-        if n_vis % process_count != 0:
-            raise ValueError(
-                f"n_vis={n_vis} must divide process_count={process_count} for cached T_Ninv_T"
-            )
-        rows_per_process = n_vis // process_count
-        if rows_per_process % max(1, local_device_count) != 0:
-            raise ValueError(
-                f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
-            )
-
         process_index = int(jax.process_index())
-        row0 = process_index * rows_per_process
-        row1 = row0 + rows_per_process
+        row0, row1, rows_per_process = padded_visibility_partition_impl(
+            n_vis=n_vis,
+            process_count=process_count,
+            local_device_count=local_device_count,
+            process_index=process_index,
+        )
 
         # Pre-create the dense on-disk output once so every process can attach
         # to the same memmap and write only the blocks it owns.
@@ -1262,9 +1255,14 @@ class BuildMatrices:
         # the true `(n_params, n_params)` shape and every block write is clipped
         # back to the valid physical rows/columns below.
         local_T = np.asarray(T_mm[row0:row1, :])
+        pad_rows = int(rows_per_process - local_T.shape[0])
+        if pad_rows:
+            local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
         if pad_cols:
             local_T = np.pad(local_T, ((0, 0), (0, pad_cols)), mode="constant")
         local_Ninv = np.asarray(Ninv_mm[row0:row1])
+        if pad_rows:
+            local_Ninv = np.pad(local_Ninv, (0, pad_rows), mode="constant")
 
         mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
 
@@ -1479,22 +1477,19 @@ class BuildMatrices:
 
         process_count = int(jax.process_count())
         process_index = int(jax.process_index())
-        if n_vis % process_count != 0:
-            raise ValueError(
-                f"n_vis={n_vis} must divide process_count={process_count} for cached dbar"
-            )
-
-        rows_per_process = n_vis // process_count
-        row0 = process_index * rows_per_process
-        row1 = row0 + rows_per_process
-        local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
 
         if int(jax.device_count()) > 1:
             local_device_count = int(jax.local_device_count())
-            if rows_per_process % max(1, local_device_count) != 0:
-                raise ValueError(
-                    f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
-                )
+            row0, row1, rows_per_process = padded_visibility_partition_impl(
+                n_vis=n_vis,
+                process_count=process_count,
+                local_device_count=local_device_count,
+                process_index=process_index,
+            )
+            local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
+            pad_rows = int(rows_per_process - local_ninv_d.shape[0])
+            if pad_rows:
+                local_ninv_d = np.pad(local_ninv_d, (0, pad_rows), mode="constant")
 
             devices = np.asarray(jax.devices(), dtype=object)
             if devices.size != process_count * local_device_count:
@@ -1515,6 +1510,8 @@ class BuildMatrices:
                 return jnp.conj(T).T @ ninv_d
 
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
+            if pad_rows:
+                local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
             with mesh:
                 T = multihost_utils.host_local_array_to_global_array(
                     local_T, mesh, P(("host", "dev"), None)
