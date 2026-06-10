@@ -1,6 +1,6 @@
 # BayesEoR-JAX Documentation
 
-[Home](../README.md) | [Installation](installation.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
 
 BayesEoR-JAX is the JAX-compatible implementation and extension of BayesEoR.
 The documentation is being built as a Markdown-first guide for users running
@@ -27,4 +27,6 @@ Research notes and derivations should live under dedicated subdirectories once
 they are promoted into the public documentation. The top-level docs should stay
 focused on installation, running analyses, and understanding the main pipeline.
 
-[Home](../README.md) | [Installation](installation.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+---
+
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)

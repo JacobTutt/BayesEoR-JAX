@@ -1,6 +1,6 @@
 # BayesEoR-JAX
 
-[Overview](#overview) | [Installation](docs/installation.md) | [Documentation](docs/index.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Docs Index](docs/index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
 
 ## Overview
 
@@ -57,4 +57,6 @@ Users should cite the relevant BayesEoR methodology papers associated with the
 original project. Formal citation guidance for BayesEoR-JAX will be expanded as
 the JAX implementation stabilizes.
 
-[Overview](#overview) | [Installation](docs/installation.md) | [Documentation](docs/index.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+---
+
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Docs Index](docs/index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)

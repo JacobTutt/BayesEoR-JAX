@@ -1,6 +1,6 @@
 # Installation
 
-[Home](../README.md) | [Docs Index](index.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
 
 BayesEoR-JAX is installed as a Python package named `bayeseor-jax` and imported
 as `bayeseor_jax`. The package uses JAX for accelerated numerical work and the
@@ -171,4 +171,6 @@ or PyCUDA workflow unless you have checked that they do not prepend incompatible
 CUDA libraries. On Isambard, loading an old NVHPC or CUDA module stack at run
 time can make JAX fail its cuSPARSE probe and fall back to CPU.
 
-[Home](../README.md) | [Docs Index](index.md) | [Original BayesEoR](https://github.com/PSims/BayesEoR)
+---
+
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
