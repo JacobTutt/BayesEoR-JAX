@@ -9,7 +9,7 @@ description = "JAX-accelerated BayesEoR pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "numpy",
+  "numpy>=2.0,<2.4",
   "scipy",
   "astropy",
   "h5py",

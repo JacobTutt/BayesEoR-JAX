@@ -14,13 +14,19 @@ systems below because the current prebuilt JAXMg wheels are CPython 3.11 wheels.
 The core Python package installs:
 
 - JAX with CUDA 12 support
-- NumPy, SciPy, Astropy, h5py, and pyuvdata
+- NumPy 2.x with an upper bound below 2.4, SciPy, Astropy, h5py, and pyuvdata
 - JAX modelling dependencies including `distrax` and `jax-healpy`
 - analysis and sampling support including `anesthetic`, `matplotlib`, `tqdm`,
   `pymultinest`, and a pinned BlackJAX development revision
 
 JAXMg is not installed by the core dependency set. Install it either through one
 of the supported wheel extras below or by building JAXMg from source.
+
+The NumPy upper bound is intentional. Some runtime dependencies currently import
+Numba, and current Numba releases used in this environment reject NumPy 2.4 with
+an import-time error. Keeping `numpy<2.4` avoids that resolver failure while
+remaining compatible with the JAX 0.10.1 CUDA stack used by the supported JAXMg
+wheels.
 
 ## Core Development Install
 
