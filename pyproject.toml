@@ -21,7 +21,16 @@ dependencies = [
   "matplotlib",
   "tqdm",
   "anesthetic",
+  "pymultinest",
   "blackjax @ git+https://github.com/handley-lab/blackjax@95e93ed93e726b95143b2f4a9582888621625f52",
+]
+
+[project.optional-dependencies]
+csd3 = [
+  "jaxmg[csd3] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/csd3/jaxmg-0.0.7-cp311-cp311-linux_x86_64.whl",
+]
+isambard = [
+  "jaxmg[isambard] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/isambard/jaxmg-0.0.7-cp311-cp311-linux_aarch64.whl",
 ]
 
 [tool.setuptools.packages.find]

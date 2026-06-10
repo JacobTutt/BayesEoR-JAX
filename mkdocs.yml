@@ -1,0 +1,7 @@
+site_name: BayesEoR-JAX
+repo_url: https://github.com/PSims/BayesEoR-v2
+nav:
+  - Home: index.md
+  - Installation: installation.md
+theme:
+  name: readthedocs

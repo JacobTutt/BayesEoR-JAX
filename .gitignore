@@ -29,5 +29,4 @@ env/
 *.xlsx
 
 # local migration tests (do not commit)
-docs/
 T_matrix_old_vs_streamlined.md
