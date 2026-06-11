@@ -38,6 +38,7 @@ import json
 import os
 from pathlib import Path
 
+from examples.run_analysis_example import run_output_analysis
 from bayeseor_jax import (
     BayesEoRParser,
     run_nestedsampling,
@@ -78,4 +79,11 @@ summary = run_nestedsampling(
 
 print("Run summary:")
 print(json.dumps(summary, indent=2))
+
+run_output_analysis(
+    sampler_dir=out_dir / "ns",
+    output_dir=out_dir,
+    sampler="multinest",
+    label="EoR + foregrounds",
+)
 PY

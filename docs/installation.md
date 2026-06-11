@@ -130,13 +130,13 @@ python examples/run_analysis_example.py --config test_data/eor/config.yaml
 python examples/run_analysis_example.py --config test_data/eor_fgs/config.yaml
 ```
 
-These commands run setup only by default. Add `--sample` to run nested sampling with the default MultiNest backend:
+These commands run setup only by default. Add `--sample` to run nested sampling with the default MultiNest backend and then run the example analysis step:
 
 ```bash
 python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
 ```
 
-Sampling is substantially more expensive than setup and should normally be run on a suitable GPU node.
+Sampling is substantially more expensive than setup and should normally be run on a suitable GPU node. After sampling, the example writes posterior summaries and diagnostic plots under the output directory's `analysis/` subdirectory.
 
 ---
 

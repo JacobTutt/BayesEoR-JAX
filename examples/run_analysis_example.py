@@ -5,11 +5,96 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 
 import jax
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 
 from bayeseor_jax import * 
+
+
+def _json_ready(value):
+    """Convert NumPy/JAX-like values into JSON-serializable Python objects."""
+    if isinstance(value, dict):
+        return {str(k): _json_ready(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(v) for v in value]
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _copy_run_metadata(output_dir: Path, sampler_dir: Path) -> None:
+    """Put setup metadata beside sampler output so DataContainer can read it."""
+    for filename in (
+        "args.json",
+        "version.txt",
+        "k-vals.txt",
+        "k-vals-bins.txt",
+        "k-vals-nsamples.txt",
+    ):
+        src = output_dir / filename
+        if src.exists():
+            shutil.copy2(src, sampler_dir / filename)
+
+
+def run_output_analysis(
+    sampler_dir: Path | str,
+    output_dir: Path | str | None = None,
+    sampler: str = "multinest",
+    label: str = "BayesEoR-JAX",
+) -> dict:
+    """
+    Read sampler output, write posterior summaries, and save diagnostic plots.
+    """
+    sampler_dir = Path(sampler_dir)
+    output_dir = Path(output_dir) if output_dir is not None else sampler_dir.parent
+    analysis_dir = output_dir / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    sampler_key = "blackjax" if sampler.lower() in {"blackjaxns", "blackjax"} else "multinest"
+    _copy_run_metadata(output_dir, sampler_dir)
+
+    data = DataContainer(
+        [sampler_dir],
+        sampler=sampler_key,
+        labels=[label],
+    )
+    summary = {
+        "sampler": sampler_key,
+        "sampler_dir": str(sampler_dir),
+        "k_vals": _json_ready(data.k_vals[0]),
+        "averages": _json_ready(data.avgs[0]),
+        "medians": _json_ready(data.medians[0]),
+        "credible_intervals": _json_ready(data.cred_intervals[0]),
+    }
+    if hasattr(data, "uplims"):
+        summary["upper_limits"] = _json_ready(data.uplims[0])
+
+    summary_path = analysis_dir / "posterior_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+    fig = data.plot_power_spectra(plot_priors=True, labels=[label])
+    fig.savefig(analysis_dir / "power_spectrum.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    fig = data.plot_posteriors(plot_priors=True)
+    fig.savefig(analysis_dir / "posteriors.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    fig = data.plot_power_spectra_and_posteriors(plot_priors=True, labels=[label])
+    fig.savefig(analysis_dir / "power_spectrum_and_posteriors.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    print("Analysis summary:")
+    print(json.dumps({"analysis_dir": str(analysis_dir), **summary}, indent=2))
+    return summary
 
 
 def run_example(
@@ -64,7 +149,13 @@ def run_example(
 
     print("Run summary:")
     print(json.dumps(summary, indent=2))
-    return setup_result, summary
+
+    analysis_summary = run_output_analysis(
+        sampler_dir=ns_out_dir,
+        output_dir=out_dir,
+        sampler=args.sampler,
+    )
+    return setup_result, summary, analysis_summary
 
 
 def main() -> None:

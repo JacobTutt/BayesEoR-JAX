@@ -43,7 +43,9 @@ The `summary.json` file records sampler settings, dimensions, output paths, and 
 
 ## Reading Results
 
-Use `DataContainer` for posterior analysis:
+The example script and CSD3 Slurm scripts run a small analysis step after sampling. This writes `analysis/posterior_summary.json` and diagnostic plots under the run output directory.
+
+Use `DataContainer` directly for custom posterior analysis:
 
 ```python
 from bayeseor_jax import DataContainer

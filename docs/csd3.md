@@ -122,7 +122,7 @@ $PROJECT_ROOT/r/eor_<job-id>/
 $PROJECT_ROOT/r/fgs_<job-id>/
 ```
 
-The compact `r/`, `m`, `o`, and `ns` directory names keep MultiNest output paths below its 100-character limit. The scripts use the package API directly and run the default MultiNest sampler through `run_setup` and `run_nestedsampling`.
+The compact `r/`, `m`, `o`, and `ns` directory names keep MultiNest output paths below its 100-character limit. The scripts use the package API directly and run `run_setup`, the default MultiNest sampler, and the example analysis step.
 
 To use a non-default project location:
 
@@ -145,6 +145,15 @@ After completion, check the run summary:
 ```bash
 cat "$PROJECT_ROOT/r/eor_<job-id>/o/ns/summary.json"
 cat "$PROJECT_ROOT/r/fgs_<job-id>/o/ns/summary.json"
+```
+
+The analysis step writes:
+
+```text
+$PROJECT_ROOT/r/eor_<job-id>/o/analysis/posterior_summary.json
+$PROJECT_ROOT/r/eor_<job-id>/o/analysis/power_spectrum.png
+$PROJECT_ROOT/r/eor_<job-id>/o/analysis/posteriors.png
+$PROJECT_ROOT/r/eor_<job-id>/o/analysis/power_spectrum_and_posteriors.png
 ```
 
 The setup logs should show that JAX uses a CUDA device. Treat CPU fallback as a configuration error for production analyses.

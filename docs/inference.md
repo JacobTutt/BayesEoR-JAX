@@ -100,7 +100,7 @@ Add `--sample` to run nested sampling:
 python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
 ```
 
-The example uses the package-level `run_nestedsampling` selector, which defaults to MultiNest. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
+The example uses the package-level `run_nestedsampling` selector, which defaults to MultiNest. After sampling, it runs the example analysis step and writes posterior summaries and diagnostic plots. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
 
 ## Choosing A Sampler
 
