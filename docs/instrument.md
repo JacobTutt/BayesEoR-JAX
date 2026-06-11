@@ -1,6 +1,6 @@
 # Instrument Model
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 The instrument model describes how sky emission is sampled into interferometric visibilities. In BayesEoR-JAX this includes baseline coordinates, time and frequency selection, the primary beam, redundancy, and noise.
 
@@ -103,4 +103,4 @@ Keep these files versioned or archived with the run configuration. A power-spect
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

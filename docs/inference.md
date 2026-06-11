@@ -1,6 +1,6 @@
 # Inference
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 BayesEoR-JAX currently exposes several inference paths. The main production path is the marginalised likelihood for power-spectrum parameters, with nested sampling backends used to estimate posterior distributions and Bayesian evidence.
 
@@ -119,4 +119,4 @@ Document the sampler, live-point settings, random seed, and stopping criterion i
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

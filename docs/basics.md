@@ -1,6 +1,6 @@
 # Basics
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 BayesEoR-JAX estimates the 21-cm Epoch of Reionization power spectrum from interferometric visibility data using a Bayesian forward model.
 
@@ -85,4 +85,4 @@ The mathematical vocabulary is intentionally similar so existing BayesEoR users 
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

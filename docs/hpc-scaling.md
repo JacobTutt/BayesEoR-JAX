@@ -1,6 +1,6 @@
 # HPC And Scaling
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 BayesEoR-JAX is designed for accelerator-backed workflows, but the practical scaling limit is usually dense matrix size and likelihood linear algebra rather than Python overhead.
 
@@ -85,6 +85,8 @@ The CSD3 wheel was built for a CUDA 12 style x86_64 environment. For source buil
 
 The CSD3 cuDNN module exposed versioned headers and libraries, so the source build needed a local compatibility directory for generic cuDNN header/library names. That is a JAXMg build issue, not a BayesEoR-JAX runtime setting.
 
+For the recommended CSD3 conda environment, MultiNest shared-library setup, and one-GPU nested-sampling scripts, see [CSD3 Getting Started](csd3.md).
+
 ## Isambard-Like Systems
 
 The Isambard wheel targets Linux ARM64 CUDA systems. Use:
@@ -106,4 +108,4 @@ For multi-node JAX jobs, scripts may need distributed initialisation and NCCL en
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

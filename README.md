@@ -1,6 +1,6 @@
 # BayesEoR-JAX
 
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/forward-model.md) · [Inference](docs/inference.md) · [References](docs/references.md)
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [CSD3](docs/csd3.md) · [Basics](docs/basics.md) · [Forward Model](docs/forward-model.md) · [Inference](docs/inference.md) · [References](docs/references.md)
 
 BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
 
@@ -22,6 +22,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 ## Documentation
 
 - [Installation](docs/installation.md): install paths for core development, supported JAXMg wheels, source builds, JAX checks, and MultiNest setup.
+- [CSD3 Getting Started](docs/csd3.md): CSD3 environment setup, MultiNest library setup, and one-GPU Slurm scripts for the test analyses.
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.
 - [Forward Model](docs/forward-model.md): how visibility data are modelled through the linear operator `T`.
 - [EoR Model](docs/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
@@ -64,10 +65,12 @@ python examples/run_analysis_example.py --config test_data/eor/config.yaml
 
 Use `[isambard]` instead of `[csd3]` on systems matching the Isambard wheel. Unsupported systems should build JAXMg from source first; see [Installation](docs/installation.md).
 
+For a CSD3 Slurm workflow, including example one-GPU nested-sampling jobs, see [CSD3 Getting Started](docs/csd3.md).
+
 ## Citation
 
 Please cite the relevant BayesEoR methodology and software papers when using this package. The core references are listed in [References](docs/references.md), including Sims et al. (2016, 2017), Sims & Pober (2019), Burba, Sims & Pober (2023), and Sims, Burba & Pober (2025).
 
 ---
 
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/forward-model.md) · [Inference](docs/inference.md) · [References](docs/references.md)
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [CSD3](docs/csd3.md) · [Basics](docs/basics.md) · [Forward Model](docs/forward-model.md) · [Inference](docs/inference.md) · [References](docs/references.md)

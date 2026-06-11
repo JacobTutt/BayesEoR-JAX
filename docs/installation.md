@@ -1,6 +1,6 @@
 # Installation
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 BayesEoR-JAX is installed as a Python package named `bayeseor-jax` and imported as `bayeseor_jax`. The package uses JAX for accelerated numerical work. The current marginalised likelihood path also uses Jacob's downstream JAXMg branch, which adds the log-determinant support needed by BayesEoR-JAX.
 
@@ -27,6 +27,8 @@ For CSD3-like Linux x86_64 CUDA systems:
 ```bash
 pip install "bayeseor-jax[csd3] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
 ```
+
+For a complete CSD3 workflow with conda, MultiNest, and Slurm examples, see [CSD3 Getting Started](csd3.md).
 
 For Isambard-like Linux ARM64 CUDA systems:
 
@@ -138,4 +140,4 @@ Sampling is substantially more expensive than setup and should normally be run o
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

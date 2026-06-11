@@ -1,6 +1,6 @@
 # Foregrounds
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
 Foreground emission is much brighter than the 21-cm EoR signal and is spectrally smoother. BayesEoR-JAX models foreground-like large spectral scale structure jointly with the EoR signal so that uncertainty and covariance between components propagate into the power-spectrum posterior.
 
@@ -70,4 +70,4 @@ When comparing UV-domain and image-domain runs, record:
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

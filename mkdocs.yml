@@ -2,6 +2,7 @@ site_name: BayesEoR-JAX
 repo_url: https://github.com/PSims/BayesEoR-v2
 nav:
   - Installation: installation.md
+  - CSD3 Getting Started: csd3.md
   - Basics: basics.md
   - Forward Model: forward-model.md
   - EoR Model: eor.md
