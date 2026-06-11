@@ -36,7 +36,7 @@ def run_example(config_path: str = "test_data/eor/config.yaml", do_sampling: boo
     write_log_files(parser, args, out_dir=out_dir)
 
     ns_out_dir = out_dir / "nested_sampling"
-    summary = run_inference(
+    summary = run_nestedsampling(
         setup_result=setup_result,
         out_dir=ns_out_dir,
         random_key=args.random_key,

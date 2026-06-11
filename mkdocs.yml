@@ -1,7 +1,16 @@
 site_name: BayesEoR-JAX
 repo_url: https://github.com/PSims/BayesEoR-v2
 nav:
-  - Home: index.md
   - Installation: installation.md
+  - Basics: basics.md
+  - Forward Model: forward-model.md
+  - EoR Model: eor.md
+  - Foregrounds: foregrounds.md
+  - Instrument Model: instrument.md
+  - Inference: inference.md
+  - Configuration: configuration.md
+  - Outputs and Analysis: outputs-analysis.md
+  - HPC and Scaling: hpc-scaling.md
+  - References: references.md
 theme:
   name: readthedocs

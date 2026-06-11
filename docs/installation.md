@@ -1,89 +1,73 @@
 # Installation
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
-BayesEoR-JAX is installed as a Python package named `bayeseor-jax` and imported
-as `bayeseor_jax`. The package uses JAX for accelerated numerical work and the
-current likelihood path uses JAXMg for native CUDA linear algebra.
+BayesEoR-JAX is installed as a Python package named `bayeseor-jax` and imported as `bayeseor_jax`. The package uses JAX for accelerated numerical work. The current marginalised likelihood path also uses Jacob's downstream JAXMg branch, which adds the log-determinant support needed by BayesEoR-JAX.
+
+The original BayesEoR package used a MAGMA/PyCUDA backend. This implementation does not use that installation path. Install and debug it as a JAX CUDA package plus JAXMg.
 
 ## Requirements
 
-Use Python 3.10 or newer. Python 3.11 is recommended on the supported HPC
-systems below because the current prebuilt JAXMg wheels are CPython 3.11 wheels.
+The recommended runtime is:
 
-The core Python package installs:
+- Python 3.11 for the prebuilt JAXMg wheels.
+- A CUDA 12 compatible NVIDIA GPU environment.
+- JAX with CUDA support.
+- JAXMg, either from one of the hosted wheels or from a local source build.
+- MultiNest native libraries when using the `multinest` sampler through `pymultinest`.
 
-- JAX with CUDA 12 support
-- NumPy 2.x with an upper bound below 2.4, SciPy, Astropy, h5py, and pyuvdata
-- JAX modelling dependencies including `distrax` and `jax-healpy`
-- analysis and sampling support including `anesthetic`, `matplotlib`, `tqdm`,
-  `pymultinest`, and a pinned BlackJAX development revision
+The package pins NumPy to `>=2.0,<2.4` because runtime dependencies that use Numba currently reject NumPy 2.4.
 
-JAXMg is not installed by the core dependency set. Install it either through one
-of the supported wheel extras below or by building JAXMg from source.
+## Option 1: Supported Hardware Wheels
 
-The NumPy upper bound is intentional. Some runtime dependencies currently import
-Numba, and current Numba releases used in this environment reject NumPy 2.4 with
-an import-time error. Keeping `numpy<2.4` avoids that resolver failure while
-remaining compatible with the JAX 0.10.1 CUDA stack used by the supported JAXMg
-wheels.
+Use this path when your system matches one of the provided JAXMg wheels. These extras install BayesEoR-JAX plus the corresponding JAXMg wheel.
 
-## Core Development Install
-
-Clone the repository and install the package into an existing virtual
-environment:
-
-```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
-cd BayesEoR-v2
-pip install -e .
-```
-
-This installs BayesEoR-JAX and its Python dependencies, but it does not install
-JAXMg. Use this path when you need to build JAXMg yourself or when you are
-developing the BayesEoR-JAX package.
-
-## Install With A Supported JAXMg Wheel
-
-The package provides optional extras for systems where a compatible JAXMg wheel
-is hosted on GitHub. These extras install the BayesEoR-JAX package plus the
-matching JAXMg wheel and its JAX CUDA runtime dependency.
-
-For CSD3-compatible Linux x86_64 systems with CPython 3.11:
+For CSD3-like Linux x86_64 CUDA systems:
 
 ```bash
 pip install "bayeseor-jax[csd3] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
 ```
 
-For Isambard-compatible Linux aarch64 systems with CPython 3.11:
+For Isambard-like Linux ARM64 CUDA systems:
 
 ```bash
 pip install "bayeseor-jax[isambard] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
 ```
 
-From a local checkout, the equivalent commands are:
+These names describe the hardware/software environment used to build the JAXMg wheel. They are not intended to mean the package only works on those named machines.
+
+For development from a local clone:
 
 ```bash
+git clone https://github.com/PSims/BayesEoR-v2.git
+cd BayesEoR-v2
 pip install -e ".[csd3]"
+```
+
+or:
+
+```bash
+git clone https://github.com/PSims/BayesEoR-v2.git
+cd BayesEoR-v2
 pip install -e ".[isambard]"
 ```
 
-The extras currently point at the downstream JAXMg logdet wheels:
+## Option 2: Build JAXMg From Source
 
-- `csd3`: `jaxmg[csd3]` from
-  `https://github.com/JacobTutt/jaxmg/raw/main/wheels/csd3/jaxmg-0.0.7-cp311-cp311-linux_x86_64.whl`
-- `isambard`: `jaxmg[isambard]` from
-  `https://github.com/JacobTutt/jaxmg/raw/main/wheels/isambard/jaxmg-0.0.7-cp311-cp311-linux_aarch64.whl`
+Use this path on unsupported systems where no prebuilt JAXMg wheel is available. The Python editable install and the native CUDA build are separate steps.
 
-Both JAXMg extras install `jax[cuda12]==0.10.1`, so the BayesEoR-JAX JAX
-runtime resolves to the version used to build and test the wheels.
+```bash
+git clone https://github.com/JacobTutt/jaxmg.git
+cd jaxmg
 
-## Build JAXMg From Source
+pip install "jax[cuda12]"
+pip install --no-deps -e .
 
-Use a source build when no prebuilt JAXMg wheel matches your hardware, Python
-version, CUDA stack, or architecture.
+cmake -S . -B build
+cmake --build build --target install
+```
 
-First install BayesEoR-JAX without a JAXMg wheel:
+Then install BayesEoR-JAX without a JAXMg wheel extra:
 
 ```bash
 git clone https://github.com/PSims/BayesEoR-v2.git
@@ -91,86 +75,67 @@ cd BayesEoR-v2
 pip install -e .
 ```
 
-Then build and install the downstream JAXMg branch:
+On managed clusters you may need to load compiler, CUDA, and cuDNN modules before configuring JAXMg. On CSD3, previous successful source builds used a CUDA 12.1 stack with `gcc/11`, `cuda/12.1`, and `cudnn/8.9_cuda-12.1`. CSD3's cuDNN module also exposed versioned header names, so a local cuDNN compatibility directory was needed during that source build. Treat those as site-specific JAXMg build notes, not BayesEoR-JAX package changes.
 
-```bash
-git clone https://github.com/JacobTutt/jaxmg.git
-cd jaxmg
+## Verify JAX
 
-mkdir build
-cd build
-cmake .. -DJAX_VERSION=0.10.1
-cmake --build . --target install
-cd ..
-
-pip install --no-deps -e .
-```
-
-The CMake step builds native shared libraries into `src/jaxmg/cu12` or
-`src/jaxmg/cu13`, depending on the CUDA toolkit used. Rebuild these libraries
-whenever the JAXMg C++ or CUDA sources change.
-
-The source build needs a working CUDA toolkit, cuDNN, cuSolverMg, CMake, and a
-host compiler supported by the selected NVCC version. On some HPC systems those
-paths must be supplied explicitly through modules, `CUDA_HOME`, `CUDA_ROOT`,
-`CUDNN_INCLUDE_DIR`, `CUDNN_LIBRARY`, or a small compatibility symlink
-directory.
-
-## Runtime Checks
-
-After installation, verify that JAX sees the expected GPU backend:
+Check that JAX sees the expected accelerator:
 
 ```bash
 python - <<'PY'
 import jax
-print(jax.default_backend())
+jax.config.update("jax_enable_x64", True)
 print(jax.devices())
+print(jax.default_backend())
 PY
 ```
 
-The backend should report `gpu` and list at least one `CudaDevice` on a GPU
-node. If JAX reports only CPU devices on a GPU node, check that the environment
-has not been contaminated by an incompatible system CUDA module or manually
-prepended CUDA library path.
+For a GPU run, the backend should be `gpu`, and the device list should contain CUDA devices. If JAX reports only CPU devices, fix the JAX/CUDA environment before running BayesEoR-JAX.
 
-You can also check that JAXMg is installed and contains native CUDA libraries:
+## Verify JAXMg
+
+The BayesEoR-JAX marginalised likelihood imports JAXMg through `jaxmg`. A minimal import check is:
 
 ```bash
 python - <<'PY'
-from pathlib import Path
 import jaxmg
-
-root = Path(jaxmg.__file__).parent
-print(root)
-print(sorted(p.name for p in (root / "cu12").glob("*.so")))
+from jaxmg import potrs
+print("jaxmg import ok")
 PY
 ```
 
+The JAXMg fork used here includes log-determinant support required by the BayesEoR-JAX likelihood. Installing upstream JAXMg from PyPI will not provide downstream branch-specific changes unless the upstream package has since incorporated them.
+
 ## MultiNest
 
-BayesEoR-JAX includes nested-sampling workflows that use MultiNest through
-`pymultinest`. The Python wrapper is installed with the package, but the
-MultiNest shared library itself is usually installed as a system or user library
-on HPC systems.
+`pymultinest` is a Python wrapper around the native MultiNest library. Installing the Python package is not always enough; the dynamic linker must also be able to find `libmultinest`.
 
-If `pymultinest` cannot find `libmultinest.so`, add the directory containing
-that library to `LD_LIBRARY_PATH` before running nested-sampling jobs:
+If `import pymultinest` fails with a missing library error, set `LD_LIBRARY_PATH` to the directory containing the MultiNest shared library before running BayesEoR-JAX:
 
 ```bash
-export LD_LIBRARY_PATH=/path/to/MultiNest/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=/path/to/MultiNest/lib:$LD_LIBRARY_PATH
+python -c "from pymultinest.solve import solve; print('pymultinest ok')"
 ```
 
-Keep MultiNest output path prefixes short. MultiNest has strict path-length
-limits and can fail when output paths are deeply nested.
+MultiNest output paths should also be kept short. Very long output paths can fail in the underlying MultiNest library.
 
-## HPC Notes
+## Quick Functional Check
 
-For JAX-based runs, prefer a clean Python environment with the pip-installed
-JAX CUDA stack. Avoid reusing launcher scripts from the original BayesEoR MAGMA
-or PyCUDA workflow unless you have checked that they do not prepend incompatible
-CUDA libraries. On Isambard, loading an old NVHPC or CUDA module stack at run
-time can make JAX fail its cuSPARSE probe and fall back to CPU.
+From a BayesEoR-JAX clone:
+
+```bash
+python examples/run_analysis_example.py --config test_data/eor/config.yaml
+python examples/run_analysis_example.py --config test_data/eor_fgs/config.yaml
+```
+
+These commands run setup only by default. Add `--sample` to run nested sampling:
+
+```bash
+python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
+```
+
+Sampling is substantially more expensive than setup and should normally be run on a suitable GPU node.
 
 ---
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [Docs Index](index.md) · [Original BayesEoR](https://github.com/PSims/BayesEoR)
+**Navigation:** [README](../README.md) · [Installation](installation.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
