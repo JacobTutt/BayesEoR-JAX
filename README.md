@@ -12,7 +12,7 @@ BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is 
 
 - JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
 - A JAXMg-backed marginalised likelihood using GPU-native dense solves and log determinants.
-- Support for both MultiNest and BlackJAX nested-sampling workflows.
+- MultiNest as the default nested-sampling workflow, with BlackJAX retained as an experimental backend.
 - Image-domain and UV-domain foreground model paths for studying wide-field foreground modelling.
 - A configuration-first workflow using YAML files and `jsonargparse`.
 - Test datasets for EoR-only and EoR-plus-foreground runs.

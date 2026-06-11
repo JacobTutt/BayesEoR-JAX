@@ -36,7 +36,7 @@ class BayesEoRParser(ArgumentParser):
     array_save_directory : str, optional
         Directory for matrix storage. Defaults to ``"./matrices/"``.
     output_dir : str, optional
-        Directory for sampler outputs. Defaults to ``"./BlackJAXOutputs/"``.
+        Directory for sampler outputs. Defaults to ``"./BayesEoROutputs/"``.
     priors : list of list, optional
         Power-spectrum prior ranges ``[[min, max], ...]``.
     uniform_priors : list of bool/int, optional
@@ -48,14 +48,18 @@ class BayesEoRParser(ArgumentParser):
         Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
     use_intrinsic_noise_fitting : bool, optional
         Fit for global intrinsic noise amplitude. Defaults to False.
+    sampler : str, optional
+        Nested-sampling backend. Defaults to ``"multinest"``.
     n_live_scale_factor : float, optional
         Multiplier converting ``n_dim`` to live-point count. Defaults to 25.
     num_inner_scale_factor : float, optional
-        Multiplier converting ``n_dim`` to inner-step count. Defaults to 3.
+        BlackJAX-only multiplier converting ``n_dim`` to inner-step count.
+        Defaults to 3.
     delete_scale_factor : float, optional
-        Fraction of live points replaced per NS iteration. Defaults to 0.025.
+        BlackJAX-only fraction of live points replaced per NS iteration.
+        Defaults to 0.025.
     stop_threshold : float, optional
-        Stop when ``logZ_live - logZ < stop_threshold``. Defaults to -3.
+        BlackJAX-only stop threshold on ``logZ_live - logZ``. Defaults to -3.
     random_key : int, optional
         Base PRNG seed for nested sampling. Defaults to 0.
 
@@ -201,7 +205,7 @@ class BayesEoRParser(ArgumentParser):
             default="./matrices/",
             help="Directory for matrix storage.",
         )
-        self.add_argument("--output-dir", type=str, default="./BlackJAXOutputs/", help="Directory for sampler outputs.")
+        self.add_argument("--output-dir", type=str, default="./BayesEoROutputs/", help="Directory for sampler outputs.")
         self.add_argument("--priors", type=list[list[float]], help="Power-spectrum prior ranges [[min, max], ...].")
         self.add_argument(
             "--uniform-priors",
@@ -211,10 +215,17 @@ class BayesEoRParser(ArgumentParser):
         )
         self.add_argument("--inverse-lw-power", type=float, default=1e-16, help="Inverse FG prior power.")
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
+        self.add_argument(
+            "--sampler",
+            type=str,
+            default="multinest",
+            choices=("multinest", "blackjaxns"),
+            help="Nested-sampling backend.",
+        )
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
-        self.add_argument("--num-inner-scale-factor", type=float, default=3.0, help="Inner steps = factor * n_dim.")
-        self.add_argument("--delete-scale-factor", type=float, default=0.025, help="Fraction of live points deleted per NS step.")
-        self.add_argument("--stop-threshold", type=float, default=-3.0, help="Stop when logZ_live - logZ is below this threshold.")
+        self.add_argument("--num-inner-scale-factor", type=float, default=3.0, help="BlackJAX inner steps = factor * n_dim.")
+        self.add_argument("--delete-scale-factor", type=float, default=0.025, help="BlackJAX fraction of live points deleted per NS step.")
+        self.add_argument("--stop-threshold", type=float, default=-3.0, help="BlackJAX stop when logZ_live - logZ is below this threshold.")
         self.add_argument("--random-key", type=int, default=0, help="PRNG seed for nested sampling.")
 
         # UV model grids

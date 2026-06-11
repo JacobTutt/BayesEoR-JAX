@@ -22,7 +22,7 @@ The Slurm scripts in `examples/slurm/` default to this layout:
 $PROJECT_ROOT/
   BayesEoR-v2/
   conda-env/
-  runs/
+  r/
 ```
 
 If you use a different location, pass `BAYESEOR_PROJECT_ROOT`, `BAYESEOR_REPO_DIR`, or `BAYESEOR_ENV_DIR` when submitting the job.
@@ -118,11 +118,11 @@ Use the account and QOS assigned to your CSD3 project. These are intentionally n
 Each script requests one GPU and writes to a unique run directory:
 
 ```text
-$PROJECT_ROOT/runs/eor_<job-id>/
-$PROJECT_ROOT/runs/eor_fgs_<job-id>/
+$PROJECT_ROOT/r/eor_<job-id>/
+$PROJECT_ROOT/r/fgs_<job-id>/
 ```
 
-The scripts use the package API directly rather than `examples/run_analysis_example.py`. This avoids unnecessary JAX distributed initialisation in single-process Slurm jobs while still running `run_setup` and `run_nestedsampling`.
+The compact `r/`, `m`, `o`, and `ns` directory names keep MultiNest output paths below its 100-character limit. The scripts use the package API directly and run the default MultiNest sampler through `run_setup` and `run_nestedsampling`.
 
 To use a non-default project location:
 
@@ -143,8 +143,8 @@ squeue -u $USER
 After completion, check the run summary:
 
 ```bash
-cat "$PROJECT_ROOT/runs/eor_<job-id>/outputs/nested_sampling/summary.json"
-cat "$PROJECT_ROOT/runs/eor_fgs_<job-id>/outputs/nested_sampling/summary.json"
+cat "$PROJECT_ROOT/r/eor_<job-id>/o/ns/summary.json"
+cat "$PROJECT_ROOT/r/fgs_<job-id>/o/ns/summary.json"
 ```
 
 The setup logs should show that JAX uses a CUDA device. Treat CPU fallback as a configuration error for production analyses.

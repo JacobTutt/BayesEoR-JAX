@@ -14,7 +14,7 @@ The recommended runtime is:
 - A CUDA 12 compatible NVIDIA GPU environment.
 - JAX with CUDA support.
 - JAXMg, either from one of the hosted wheels or from a local source build.
-- MultiNest native libraries when using the `multinest` sampler through `pymultinest`.
+- MultiNest native libraries for the default `multinest` sampler through `pymultinest`.
 
 The package pins NumPy to `>=2.0,<2.4` because runtime dependencies that use Numba currently reject NumPy 2.4.
 
@@ -130,7 +130,7 @@ python examples/run_analysis_example.py --config test_data/eor/config.yaml
 python examples/run_analysis_example.py --config test_data/eor_fgs/config.yaml
 ```
 
-These commands run setup only by default. Add `--sample` to run nested sampling:
+These commands run setup only by default. Add `--sample` to run nested sampling with the default MultiNest backend:
 
 ```bash
 python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample

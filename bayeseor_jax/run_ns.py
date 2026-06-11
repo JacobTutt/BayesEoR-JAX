@@ -357,7 +357,7 @@ def run_nestedsampling(
     setup_result: SetupResult,
     out_dir: Path | str,
     *,
-    sampler: str = "blackjaxns",
+    sampler: str = "multinest",
     **kwargs: Any,
 ) -> dict[str, Any]:
     """
@@ -365,8 +365,8 @@ def run_nestedsampling(
 
     Parameters
     ----------
-    sampler : {"blackjaxns", "multinest"}, optional
-        Nested-sampling backend selector. Defaults to ``"blackjaxns"``.
+    sampler : {"multinest", "blackjaxns"}, optional
+        Nested-sampling backend selector. Defaults to ``"multinest"``.
     """
     sampler_key = sampler.lower()
     if sampler_key in {"blackjaxns", "blackjax", "blackjax-ns"}:

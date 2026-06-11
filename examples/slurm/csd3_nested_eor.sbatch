@@ -14,7 +14,7 @@ set -euo pipefail
 PROJECT_ROOT="${BAYESEOR_PROJECT_ROOT:-/rds/user/${USER}/hpc-work/BAYESEOR}"
 REPO_DIR="${BAYESEOR_REPO_DIR:-${PROJECT_ROOT}/BayesEoR-v2}"
 ENV_DIR="${BAYESEOR_ENV_DIR:-${PROJECT_ROOT}/conda-env}"
-RUN_DIR="${BAYESEOR_RUN_DIR:-${PROJECT_ROOT}/runs/eor_${SLURM_JOB_ID}}"
+RUN_DIR="${BAYESEOR_RUN_DIR:-${PROJECT_ROOT}/r/eor_${SLURM_JOB_ID}}"
 
 mkdir -p "${RUN_DIR}"
 
@@ -56,9 +56,9 @@ args = parser.parse_args(
         "--config",
         str(config_path),
         "--array-save-directory",
-        str(run_dir / "matrices"),
+        str(run_dir / "m"),
         "--output-dir",
-        str(run_dir / "outputs"),
+        str(run_dir / "o"),
         "--run",
     ]
 )
@@ -70,12 +70,10 @@ write_log_files(parser, args, out_dir=out_dir)
 
 summary = run_nestedsampling(
     setup_result=setup_result,
-    out_dir=out_dir / "nested_sampling",
+    out_dir=out_dir / "ns",
+    sampler="multinest",
     random_key=args.random_key,
     n_live_scale_factor=args.n_live_scale_factor,
-    num_inner_scale_factor=args.num_inner_scale_factor,
-    delete_scale_factor=args.delete_scale_factor,
-    stop_threshold=args.stop_threshold,
 )
 
 print("Run summary:")

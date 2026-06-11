@@ -2,7 +2,7 @@
 
 **Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
-BayesEoR-JAX currently exposes several inference paths. The main production path is the marginalised likelihood for power-spectrum parameters, with nested sampling backends used to estimate posterior distributions and Bayesian evidence.
+BayesEoR-JAX currently exposes several inference paths. The main production path is the marginalised likelihood for power-spectrum parameters, with MultiNest used by default to estimate posterior distributions and Bayesian evidence.
 
 ## Marginalised Likelihood
 
@@ -24,7 +24,7 @@ Evaluating the likelihood requires dense positive-definite linear algebra, inclu
 
 ## MultiNest
 
-The MultiNest backend is available through:
+MultiNest is the default nested-sampling backend. It is available directly through:
 
 ```python
 from bayeseor_jax import run_multinest
@@ -38,7 +38,6 @@ from bayeseor_jax import run_nestedsampling
 summary = run_nestedsampling(
     setup_result,
     out_dir="outputs/nested_sampling",
-    sampler="multinest",
 )
 ```
 
@@ -46,7 +45,9 @@ MultiNest is often useful when likelihood evaluations are expensive and evidence
 
 ## BlackJAX Nested Sampling
 
-The BlackJAX backend is available through:
+The BlackJAX nested-sampling backend is experimental for the marginalised JAXMg likelihood. The current JAXMg FFI solve/log-determinant path is scalar and can fail under BlackJAX batching transforms such as `vmap`. Use MultiNest for the production pipeline.
+
+The backend remains available for development through:
 
 ```python
 from bayeseor_jax import run_blackjaxns
@@ -99,7 +100,7 @@ Add `--sample` to run nested sampling:
 python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
 ```
 
-The example uses the package-level `run_nestedsampling` selector. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
+The example uses the package-level `run_nestedsampling` selector, which defaults to MultiNest. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
 
 ## Choosing A Sampler
 
@@ -107,13 +108,13 @@ Use MultiNest when:
 
 - you need a mature nested-sampling backend;
 - evidence estimates are central to the analysis;
-- the likelihood is slow enough that MultiNest overhead is not the limiting factor.
+- you are running the JAXMg-backed marginalised likelihood.
 
 Use BlackJAX nested sampling when:
 
 - you want a JAX-native experimental backend;
 - you are comparing sampler behaviour;
-- you need tighter integration with JAX workflows.
+- you are working on likelihood paths that are compatible with JAX batching transforms.
 
 Document the sampler, live-point settings, random seed, and stopping criterion in any scientific result.
 

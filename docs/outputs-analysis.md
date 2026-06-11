@@ -32,12 +32,12 @@ These files are written by `write_analysis_metadata` during setup.
 
 ## Sampler Outputs
 
+MultiNest writes its standard `data-*` products and a BayesEoR-JAX `summary.json`. The main weighted-chain file is usually `data-.txt`, though a shorter file root may be used to avoid MultiNest path-length limits.
+
 BlackJAX nested sampling writes:
 
 - `nested_sampling_results.csv`
 - `summary.json`
-
-MultiNest writes its standard `data-*` products and a BayesEoR-JAX `summary.json`. The main weighted-chain file is usually `data-.txt`, though a shorter file root may be used to avoid MultiNest path-length limits.
 
 The `summary.json` file records sampler settings, dimensions, output paths, and evidence-related quantities where available.
 
@@ -50,17 +50,17 @@ from bayeseor_jax import DataContainer
 
 dc = DataContainer(
     ["outputs/nested_sampling"],
-    sampler="blackjax",
-    store_samples=True,
+    sampler="multinest",
 )
 ```
 
-For MultiNest outputs:
+For BlackJAX outputs:
 
 ```python
 dc = DataContainer(
     ["outputs/nested_sampling"],
-    sampler="multinest",
+    sampler="blackjax",
+    store_samples=True,
 )
 ```
 
