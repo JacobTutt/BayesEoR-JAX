@@ -60,7 +60,7 @@ For local development from a clone:
 git clone https://github.com/PSims/BayesEoR-v2.git
 cd BayesEoR-v2
 pip install -e ".[csd3]"
-python examples/run_analysis_example.py --config test_data/eor/config.yaml
+python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
 ```
 
 Use `[isambard]` instead of `[csd3]` on systems matching the Isambard wheel. Unsupported systems should build JAXMg from source first; see [Installation](docs/installation.md).

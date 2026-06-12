@@ -15,7 +15,7 @@ class BayesEoRParser(ArgumentParser):
 
     .. code-block:: bash
 
-        python examples/run_analysis_example.py
+        python test_examples/run_analysis_example.py
 
     Attributes
     ----------

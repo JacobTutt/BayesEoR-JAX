@@ -34,20 +34,20 @@ The central setup function is `bayeseor_jax.run_setup`. It returns a `SetupResul
 
 The repository includes two small test datasets:
 
-- `test_data/eor/config.yaml`: EoR-only visibility data.
-- `test_data/eor_fgs/config.yaml`: EoR plus foreground visibility data.
+- `test_examples/eor/config.yaml`: EoR-only visibility data.
+- `test_examples/eor_fgs/config.yaml`: EoR plus foreground visibility data.
 
 Run setup for either example with:
 
 ```bash
-python examples/run_analysis_example.py --config test_data/eor/config.yaml
-python examples/run_analysis_example.py --config test_data/eor_fgs/config.yaml
+python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
+python test_examples/run_analysis_example.py --config test_examples/eor_fgs/config.yaml
 ```
 
 Run nested sampling by adding `--sample`:
 
 ```bash
-python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
+python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
 ```
 
 The setup-only mode is designed as a quick installation and configuration check. Sampling should be treated as the scientific run.

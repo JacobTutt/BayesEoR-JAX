@@ -12,7 +12,7 @@ fov_eor: 12.9
 ```
 
 ```bash
-python examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
+python test_examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
 ```
 
 For reproducible analyses, prefer YAML files committed or archived with the outputs.
@@ -22,7 +22,7 @@ For reproducible analyses, prefer YAML files committed or archived with the outp
 Most runs need these groups:
 
 ```yaml
-data_path: test_data/eor/eor.uvh5
+data_path: test_examples/eor/eor.uvh5
 
 n_u_eor: 15
 fov_eor: 12.9080728652
@@ -45,8 +45,8 @@ priors:
 
 The complete shipped examples are:
 
-- `test_data/eor/config.yaml`
-- `test_data/eor_fgs/config.yaml`
+- `test_examples/eor/config.yaml`
+- `test_examples/eor_fgs/config.yaml`
 
 ## General And Output
 

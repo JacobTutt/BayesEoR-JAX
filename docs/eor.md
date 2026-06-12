@@ -66,7 +66,7 @@ priors:
   - [-0.7, 3.3]
 ```
 
-The shipped example configs in `test_data/eor/` and `test_data/eor_fgs/` show complete working parameter sets.
+The shipped example configs in `test_examples/eor/` and `test_examples/eor_fgs/` show complete working parameter sets.
 
 ## Choosing Grid Size
 

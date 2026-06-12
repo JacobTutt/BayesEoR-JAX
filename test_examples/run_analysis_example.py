@@ -98,14 +98,18 @@ def run_output_analysis(
 
 
 def run_example(
-    config_path: str = "test_data/eor/config.yaml",
+    config_path: str = "test_examples/eor/config.yaml",
     do_sampling: bool = False,
     sampler: str | None = None,
+    extra_bayeseor_args: list[str] | None = None,
+    nested_sampling_dirname: str = "nested_sampling",
+    analysis_label: str = "BayesEoR-JAX",
 ):
     """
     Run setup (and optionally nested sampling) from a YAML config.
 
-    Edit `config_path` and `do_sampling` in `main()` for quick local tests.
+    Additional BayesEoR parser arguments can be supplied through
+    `extra_bayeseor_args`, for example output and matrix-cache directories.
     """
     parser = BayesEoRParser()
     args_list = ["--config", config_path]
@@ -113,6 +117,8 @@ def run_example(
         args_list.extend(["--sampler", sampler])
     if do_sampling:
         args_list.append("--run")
+    if extra_bayeseor_args:
+        args_list.extend(extra_bayeseor_args)
     args = parser.parse_args(args_list)
 
     args_dict = dict(vars(args))
@@ -126,7 +132,7 @@ def run_example(
     out_dir.mkdir(parents=True, exist_ok=True)
     write_log_files(parser, args, out_dir=out_dir)
 
-    ns_out_dir = out_dir / "nested_sampling"
+    ns_out_dir = out_dir / nested_sampling_dirname
     sampler_key = args.sampler.lower()
     ns_kwargs = {
         "sampler": args.sampler,
@@ -154,6 +160,7 @@ def run_example(
         sampler_dir=ns_out_dir,
         output_dir=out_dir,
         sampler=args.sampler,
+        label=analysis_label,
     )
     return setup_result, summary, analysis_summary
 
@@ -170,7 +177,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default="test_data/eor/config.yaml",
+        default="test_examples/eor/config.yaml",
         help="Path to YAML config file.",
     )
     parser.add_argument(
@@ -184,11 +191,24 @@ def main() -> None:
         default=None,
         help="Nested-sampling backend. Defaults to the config/package default.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--nested-sampling-dirname",
+        default="nested_sampling",
+        help="Directory name, under output_dir, for sampler products.",
+    )
+    parser.add_argument(
+        "--analysis-label",
+        default="BayesEoR-JAX",
+        help="Label used in the analysis plots.",
+    )
+    args, extra_bayeseor_args = parser.parse_known_args()
     run_example(
         config_path=args.config,
         do_sampling=args.sample,
         sampler=args.sampler,
+        extra_bayeseor_args=extra_bayeseor_args,
+        nested_sampling_dirname=args.nested_sampling_dirname,
+        analysis_label=args.analysis_label,
     )
 
 

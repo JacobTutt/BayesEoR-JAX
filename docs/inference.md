@@ -91,13 +91,13 @@ These are useful for development and high-dimensional posterior experiments. The
 The shipped example runs setup by default:
 
 ```bash
-python examples/run_analysis_example.py --config test_data/eor/config.yaml
+python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
 ```
 
 Add `--sample` to run nested sampling:
 
 ```bash
-python examples/run_analysis_example.py --config test_data/eor/config.yaml --sample
+python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
 ```
 
 The example uses the package-level `run_nestedsampling` selector, which defaults to MultiNest. After sampling, it runs the example analysis step and writes posterior summaries and diagnostic plots. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
