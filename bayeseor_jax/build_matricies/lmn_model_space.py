@@ -88,8 +88,9 @@ class LMN_ModelSpace:
         coefficient in the multiresolution model.
     fg_group_pixel_counts : jnp.ndarray
         Number of native high-resolution FG pixels represented by each spatial
-        group. This is later used to construct an area-aware image-domain FG
-        prior for the grouped model.
+        group. This records the grouped geometry for diagnostics and provides
+        the spatial-group layout used when constructing the image-domain FG
+        prior. It does not scale the prior precision by group size.
     fg_group_is_highres : jnp.ndarray
         Boolean flag per spatial group. ``True`` means this group corresponds to
         a single retained high-resolution FG pixel. ``False`` means it is a

@@ -69,16 +69,16 @@ class PhiInverse:
         FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
     fg_group_pixel_counts : jax.Array, optional
         Number of high-resolution FG pixels represented by each image-domain
-        FG spatial group. When provided, the image-domain FG precision is
-        scaled by this count so coarser grouped pixels carry stronger
-        effective shrinkage than single high-resolution pixels.
+        FG spatial group. When provided, this defines the spatial-group layout
+        used to expand the image-domain precision into the full foreground
+        coefficient ordering.
 
         This matches the current grouped image-domain forward model, where one
         grouped FG coefficient is interpreted as a **shared child brightness**
-        copied onto every high-resolution child in the group. If the original
-        image-domain prior is diagonal with one equal quadratic penalty per
-        child pixel, then tying ``k`` children to the same coefficient induces
-        a grouped precision proportional to ``k``.
+        copied onto every high-resolution child in the group. All groups retain
+        the same base brightness precision, irrespective of their number of
+        children. This treats the children of a coarse group as strongly
+        correlated rather than as independent prior draws.
     n_modes_fg : int, optional
         Number of FG/LSSM spectral modes attached to each non-monopole FG
         spatial group. Used to expand the image-domain FG precision from a
@@ -147,17 +147,17 @@ class PhiInverse:
                     dtype=jnp.float64,
                 )
             else:
-                # In the grouped image model one spatial coefficient is copied
-                # onto every high-resolution child pixel in that group. Under
-                # the existing diagonal image-domain prior approximation, the
-                # equivalent grouped precision therefore scales with the number
-                # of tied child pixels:
-                #
-                #   lambda * sum_i a_i^2  with  a_i = q_g  for all children i
-                #   => lambda * k_g * q_g^2
-                #
-                # so the grouped precision is base_precision * k_g.
-                spatial_precision = base_precision * self.fg_group_pixel_counts
+                # A grouped coefficient represents one coherent brightness
+                # value shared by its high-resolution children. Neighbouring
+                # foreground pixels are therefore treated as strongly
+                # correlated: a coarse group retains the same brightness prior
+                # as a single high-resolution group instead of multiplying its
+                # precision by the number of children.
+                spatial_precision = jnp.full(
+                    self.fg_group_pixel_counts.shape,
+                    base_precision,
+                    dtype=jnp.float64,
+                )
                 if self.n_modes_fg > 0:
                     # Expand the spatial precision into the foreground
                     # non-monopole block ordering:

@@ -471,9 +471,10 @@ class BuildMatrices:
         ``F_grouped[..., g] = sum_p F_hi[..., p]``.
 
         The corresponding image-domain FG coefficient therefore acts as a
-        single shared brightness/amplitude for every child in that group. This
-        is the convention assumed later by the grouped image-domain prior in
-        ``PhiInverse``.
+        single shared brightness/amplitude for every child in that group. The
+        grouped image-domain prior in ``PhiInverse`` retains the same base
+        brightness precision for every group, treating neighbouring children
+        as strongly correlated.
         """
         if self.fg_model_domain != "image" or not self.lmn_model_space.use_multires_fg:
             return fg_response
