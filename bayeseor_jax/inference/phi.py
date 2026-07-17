@@ -67,6 +67,22 @@ class PhiInverse:
         prior calculation.
     du_fg, dv_fg : float, optional
         FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
+    fg_group_pixel_counts : jax.Array, optional
+        Number of high-resolution FG pixels represented by each image-domain
+        FG spatial group. When provided, the image-domain FG precision is
+        scaled by this count so coarser grouped pixels carry stronger
+        effective shrinkage than single high-resolution pixels.
+
+        This matches the current grouped image-domain forward model, where one
+        grouped FG coefficient is interpreted as a **shared child brightness**
+        copied onto every high-resolution child in the group. If the original
+        image-domain prior is diagonal with one equal quadratic penalty per
+        child pixel, then tying ``k`` children to the same coefficient induces
+        a grouped precision proportional to ``k``.
+    n_modes_fg : int, optional
+        Number of FG/LSSM spectral modes attached to each non-monopole FG
+        spatial group. Used to expand the image-domain FG precision from a
+        spatial vector into the full ``[eta0 | LSSM]`` ordering.
     """
 
     def __init__(
@@ -85,6 +101,8 @@ class PhiInverse:
         n_nonmp_uv: int = 0,
         du_fg: float | None = None,
         dv_fg: float | None = None,
+        fg_group_pixel_counts: jax.Array | None = None,
+        n_modes_fg: int = 0,
     ) -> None:
         self.kbin_index_per_voxel = build_kbin_index_per_voxel(
             bin_id_per_k_mode=bin_id_per_k_mode,
@@ -105,15 +123,60 @@ class PhiInverse:
         self.n_nonmp_uv = int(n_nonmp_uv)
         self.du_fg = None if du_fg is None else float(du_fg)
         self.dv_fg = None if dv_fg is None else float(dv_fg)
+        self.n_modes_fg = int(n_modes_fg)
+        self.fg_group_pixel_counts = (
+            None
+            if fg_group_pixel_counts is None
+            else jnp.asarray(fg_group_pixel_counts, dtype=jnp.float64)
+        )
         self.fg_nonmp_image_inverse_prior = None
         if self.fg_model_domain == "image":
             if self.n_nonmp_uv <= 0:
                 raise ValueError("image-domain FG prior requires n_nonmp_uv > 0")
             if self.du_fg is None or self.dv_fg is None:
                 raise ValueError("image-domain FG prior requires du_fg and dv_fg")
-            self.fg_nonmp_image_inverse_prior = float(self.inverse_lw_power) / (
+            # This is the existing scalar image-domain FG precision obtained by
+            # approximately pushing the UV prior into image space.
+            base_precision = float(self.inverse_lw_power) / (
                 float(self.n_nonmp_uv) * (self.du_fg * self.dv_fg) ** 2
             )
+            if self.fg_group_pixel_counts is None:
+                self.fg_nonmp_image_inverse_prior = jnp.full(
+                    (self.n_nonmp_fg,),
+                    base_precision,
+                    dtype=jnp.float64,
+                )
+            else:
+                # In the grouped image model one spatial coefficient is copied
+                # onto every high-resolution child pixel in that group. Under
+                # the existing diagonal image-domain prior approximation, the
+                # equivalent grouped precision therefore scales with the number
+                # of tied child pixels:
+                #
+                #   lambda * sum_i a_i^2  with  a_i = q_g  for all children i
+                #   => lambda * k_g * q_g^2
+                #
+                # so the grouped precision is base_precision * k_g.
+                spatial_precision = base_precision * self.fg_group_pixel_counts
+                if self.n_modes_fg > 0:
+                    # Expand the spatial precision into the foreground
+                    # non-monopole block ordering:
+                    #   [eta0 per group][LSSM modes per group]
+                    self.fg_nonmp_image_inverse_prior = jnp.concatenate(
+                        [
+                            spatial_precision,
+                            jnp.repeat(spatial_precision, self.n_modes_fg),
+                        ],
+                        axis=0,
+                    )
+                else:
+                    self.fg_nonmp_image_inverse_prior = spatial_precision
+                if int(self.fg_nonmp_image_inverse_prior.shape[0]) != int(self.n_nonmp_fg):
+                    raise ValueError(
+                        "image-domain FG prior length mismatch: "
+                        f"got {int(self.fg_nonmp_image_inverse_prior.shape[0])}, "
+                        f"expected {self.n_nonmp_fg}"
+                    )
         self.use_fg_nonmp_image_override = (
             self.fg_model_domain == "image"
             and self.n_nonmp_fg > 0
@@ -152,7 +215,7 @@ class PhiInverse:
         phi_fg = jnp.full((n_fg,), self.inverse_lw_power, dtype=phi_eor.dtype)
         if self.use_fg_nonmp_image_override:
             phi_fg = phi_fg.at[: self.n_nonmp_fg_override].set(
-                self.fg_nonmp_image_inverse_prior
+                jnp.asarray(self.fg_nonmp_image_inverse_prior, dtype=phi_eor.dtype)
             )
         return jnp.concatenate([phi_eor, phi_fg], axis=0)
 

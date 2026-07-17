@@ -212,6 +212,37 @@ def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
     return start, stop
 
 
+def padded_visibility_partition(
+    n_vis: int,
+    process_count: int,
+    local_device_count: int,
+    process_index: int,
+) -> tuple[int, int, int]:
+    """
+    Return a process-local visibility stripe padded to shard evenly over devices.
+
+    The cached distributed builders shard the visibility axis across hosts and
+    then across local devices. When ``n_vis`` does not divide that layout
+    exactly, this returns a process-local stripe length rounded up so each host
+    can pad with trailing zero rows. That leaves ``T^H N^{-1} T`` and
+    ``T^H N^{-1} d`` unchanged provided the padded rows of ``T`` and the
+    corresponding ``N^{-1}`` / ``N^{-1} d`` entries are set to zero.
+    """
+    n_vis = int(n_vis)
+    process_count = max(1, int(process_count))
+    local_device_count = max(1, int(local_device_count))
+    process_index = int(process_index)
+
+    rows_per_process = (n_vis + process_count - 1) // process_count
+    rows_per_process = (
+        (rows_per_process + local_device_count - 1) // local_device_count
+    ) * local_device_count
+
+    row0 = process_index * rows_per_process
+    row1 = min(row0 + rows_per_process, n_vis)
+    return row0, row1, rows_per_process
+
+
 def save_dense_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
     """
     Save a dense matrix to disk as `.npy`.

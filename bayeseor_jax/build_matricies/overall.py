@@ -37,9 +37,11 @@ from .build_utils import (
     check_if_matrix_exists as check_if_matrix_exists_impl,
     get_T_component_layout as get_T_component_layout_impl,
     load_matrix as load_matrix_impl,
+    padded_visibility_partition as padded_visibility_partition_impl,
     save_matrix as save_matrix_impl,
 )
 from .jax_grid import MeshManager
+
 
 class BuildMatrices:
     """
@@ -96,6 +98,16 @@ class BuildMatrices:
         block. ``"uv"`` assigns one coefficient set per FG uv pixel.
         ``"image"`` assigns one coefficient set per FG image pixel. Defaults
         to ``"uv"``.
+    fg_core_fov : float, optional
+        Optional inner foreground FoV, in degrees, that stays at the native
+        HEALPix resolution when ``fg_model_domain="image"``. Pixels outside
+        this core may be grouped onto a coarser HEALPix parent grid using
+        ``fg_outer_nside``.
+    fg_outer_nside : int, optional
+        Optional lower HEALPix ``nside`` used for the grouped outer
+        image-domain foreground region. Grouping is only active when both
+        ``fg_core_fov`` and ``fg_outer_nside`` are set and define a genuine
+        coarse outer region.
 
     Frequency and line of sight Fourier mode parameters
     n_freq : int
@@ -114,6 +126,15 @@ class BuildMatrices:
     fit_for_monopole : bool, optional
         Fit for (u, v) = (0, 0) (True) or exclude it from the fit (False).
         Defaults to False.
+    image_domain_trim : bool, optional
+        If ``True`` and ``fg_model_domain="image"``, trim the outermost FG
+        image pixels so the full linear parameter vector is divisible by 4.
+        This is independent of the multiresolution grouping logic.
+    sky_mask_time_mode : {"union", "center"}, optional
+        How the fixed EoR/FG HEALPix masks are selected across time.
+        ``"union"`` uses the drift-scan union over all configured timesteps.
+        ``"center"`` uses only the central timestep FoV when defining the
+        fixed sky mask.
 
     HEALPix image-domain model parameters
     telescope_latlonalt : tuple, optional
@@ -208,6 +229,8 @@ class BuildMatrices:
         du_fg: float,
         n_v_fg: int,
         dv_fg: float,
+        fg_core_fov: Optional[float] = None,
+        fg_outer_nside: Optional[int] = None,
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
@@ -218,6 +241,8 @@ class BuildMatrices:
         n_eta: int = 0,
         d_eta: float = 0.0,
         fit_for_monopole: bool = False,
+        image_domain_trim: bool = False,
+        sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         jd_center: float = 2461040.5,
         nside: Optional[int] = None,
@@ -261,6 +286,8 @@ class BuildMatrices:
         self.n_v_fg = n_v_fg
         self.dv_fg = dv_fg
         self.n_modes_fg = n_modes_fg
+        self.fg_core_fov = fg_core_fov
+        self.fg_outer_nside = fg_outer_nside
         self.n_powerlaws_fg = n_powerlaws_fg
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
@@ -275,6 +302,8 @@ class BuildMatrices:
                 f"got {self.fg_model_domain!r}."
             )
         self.fit_for_monopole = fit_for_monopole
+        self.image_domain_trim = bool(image_domain_trim)
+        self.sky_mask_time_mode = str(sky_mask_time_mode)
         # Total FG uv modes (optional monopole exclusion).
         self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
@@ -357,12 +386,26 @@ class BuildMatrices:
         self.lmn_model_space = LMN_ModelSpace(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
+            fg_core_fov=self.fg_core_fov,
+            fg_outer_nside=self.fg_outer_nside,
             nside=self.nside,
+            sky_mask_time_mode=self.sky_mask_time_mode,
             telescope_latlonalt=self.telescope_latlonalt,
             jd_center=self.jd_center,
             n_t=self.n_t,
             d_t=self.d_t,
         )
+        self.n_fg_pixels_trimmed = 0
+        if self.fg_model_domain == "image" and self.image_domain_trim:
+            self.n_fg_pixels_trimmed = int(
+                self.lmn_model_space.trim_fg_outer_pixels_for_total_param_divisibility(
+                    n_modes_fg=int(self.n_modes_fg),
+                    n_uv_eor=int(self.n_uv_eor),
+                    n_eta=int(self.n_eta),
+                    fit_for_monopole=bool(self.fit_for_monopole),
+                    divisor=4,
+                )
+            )
 
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
@@ -388,10 +431,62 @@ class BuildMatrices:
         self.n_fg_non_monopole_spatial_modes = self._fg_non_monopole_mode_count()
 
     def _fg_non_monopole_mode_count(self) -> int:
-        """Return the spatial width of the non-monopole foreground block."""
+        """
+        Return the spatial width of the non-monopole foreground block.
+
+        For image-domain FG this is no longer necessarily the number of native
+        foreground HEALPix pixels. When multiresolution FG grouping is active,
+        the non-monopole image-domain block is parameterized by
+        ``lmn_model_space.n_fg_groups`` instead.
+        """
         if self.fg_model_domain == "uv":
             return int(self.n_uv_fg - int(self.fit_for_monopole))
-        return int(self.lmn_model_space.n_pix_fg)
+        return int(self.lmn_model_space.n_fg_groups)
+
+    def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
+        """
+        Aggregate the high-resolution FG pixel axis into multiresolution groups.
+
+        Parameters
+        ----------
+        fg_response : jnp.ndarray
+            Array whose final axis is the high-resolution FG pixel axis.
+
+        Returns
+        -------
+        jnp.ndarray
+            Array with the same leading axes and grouped FG spatial modes on
+            the final axis.
+
+        Notes
+        -----
+        This operation only affects the image-domain **non-monopole**
+        foreground block. The EoR block is untouched, the UV-domain FG path is
+        untouched, and the FG monopole block is still built separately from the
+        constant-image template.
+
+        If a grouped spatial mode ``g`` contains high-resolution child pixels
+        ``p`` then the grouped image response is
+
+        ``F_grouped[..., g] = sum_p F_hi[..., p]``.
+
+        The corresponding image-domain FG coefficient therefore acts as a
+        single shared brightness/amplitude for every child in that group. This
+        is the convention assumed later by the grouped image-domain prior in
+        ``PhiInverse``.
+        """
+        if self.fg_model_domain != "image" or not self.lmn_model_space.use_multires_fg:
+            return fg_response
+        labels = self.lmn_model_space.fg_group_labels
+        n_groups = int(self.lmn_model_space.n_fg_groups)
+        grouped = jnp.zeros(
+            fg_response.shape[:-1] + (n_groups,),
+            dtype=fg_response.dtype,
+        )
+        # Summing the child columns means one grouped coefficient acts as a
+        # shared brightness/amplitude for every high-resolution child pixel in
+        # that group.
+        return grouped.at[..., labels].add(fg_response)
 
 
     # ---------------------------
@@ -629,7 +724,7 @@ class BuildMatrices:
         else:
             full_fg = None
             n_non_mp = self.n_fg_non_monopole_spatial_modes
-            fg_non_mp = finv_blocks
+            fg_non_mp = self._aggregate_fg_image_response(finv_blocks)
 
         n_rows = self.n_t * self.n_freq * self.nbls
 
@@ -895,9 +990,10 @@ class BuildMatrices:
                         lssm_col1 = lssm_col0 + (uv1 - uv0) * lssm_mode_count
                         mm[row0:row1, lssm_col0:lssm_col1] = np.asarray(t_fg_lssm_rows)
             else:
+                fg_block_grouped = self._aggregate_fg_image_response(finv_block)
                 for pix0 in range(0, n_non_mp, fg_img_chunk):
                     pix1 = min(pix0 + fg_img_chunk, n_non_mp)
-                    fg_block = finv_block[:, pix0:pix1]
+                    fg_block = fg_block_grouped[:, pix0:pix1]
 
                     eta0_rows = fg_block * eta0_basis[i_f, 0]
                     eta0_col0 = int(layout["fg_eta0"]["col_start"]) + pix0
@@ -1126,22 +1222,13 @@ class BuildMatrices:
 
         process_count = int(jax.process_count())
         local_device_count = int(jax.local_device_count())
-        # The cached backend partitions the visibility axis evenly across JAX
-        # processes, then splits each process-local stripe across its local
-        # GPUs. These divisibility checks make that mapping explicit.
-        if n_vis % process_count != 0:
-            raise ValueError(
-                f"n_vis={n_vis} must divide process_count={process_count} for cached T_Ninv_T"
-            )
-        rows_per_process = n_vis // process_count
-        if rows_per_process % max(1, local_device_count) != 0:
-            raise ValueError(
-                f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
-            )
-
         process_index = int(jax.process_index())
-        row0 = process_index * rows_per_process
-        row1 = row0 + rows_per_process
+        row0, row1, rows_per_process = padded_visibility_partition_impl(
+            n_vis=n_vis,
+            process_count=process_count,
+            local_device_count=local_device_count,
+            process_index=process_index,
+        )
 
         # Pre-create the dense on-disk output once so every process can attach
         # to the same memmap and write only the blocks it owns.
@@ -1168,9 +1255,14 @@ class BuildMatrices:
         # the true `(n_params, n_params)` shape and every block write is clipped
         # back to the valid physical rows/columns below.
         local_T = np.asarray(T_mm[row0:row1, :])
+        pad_rows = int(rows_per_process - local_T.shape[0])
+        if pad_rows:
+            local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
         if pad_cols:
             local_T = np.pad(local_T, ((0, 0), (0, pad_cols)), mode="constant")
         local_Ninv = np.asarray(Ninv_mm[row0:row1])
+        if pad_rows:
+            local_Ninv = np.pad(local_Ninv, (0, pad_rows), mode="constant")
 
         mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
 
@@ -1385,22 +1477,19 @@ class BuildMatrices:
 
         process_count = int(jax.process_count())
         process_index = int(jax.process_index())
-        if n_vis % process_count != 0:
-            raise ValueError(
-                f"n_vis={n_vis} must divide process_count={process_count} for cached dbar"
-            )
-
-        rows_per_process = n_vis // process_count
-        row0 = process_index * rows_per_process
-        row1 = row0 + rows_per_process
-        local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
 
         if int(jax.device_count()) > 1:
             local_device_count = int(jax.local_device_count())
-            if rows_per_process % max(1, local_device_count) != 0:
-                raise ValueError(
-                    f"rows_per_process={rows_per_process} must divide local_device_count={local_device_count}"
-                )
+            row0, row1, rows_per_process = padded_visibility_partition_impl(
+                n_vis=n_vis,
+                process_count=process_count,
+                local_device_count=local_device_count,
+                process_index=process_index,
+            )
+            local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
+            pad_rows = int(rows_per_process - local_ninv_d.shape[0])
+            if pad_rows:
+                local_ninv_d = np.pad(local_ninv_d, (0, pad_rows), mode="constant")
 
             devices = np.asarray(jax.devices(), dtype=object)
             if devices.size != process_count * local_device_count:
@@ -1421,6 +1510,8 @@ class BuildMatrices:
                 return jnp.conj(T).T @ ninv_d
 
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
+            if pad_rows:
+                local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
             with mesh:
                 T = multihost_utils.host_local_array_to_global_array(
                     local_T, mesh, P(("host", "dev"), None)

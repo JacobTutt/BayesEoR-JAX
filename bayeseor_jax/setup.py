@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 
-from .build_matricies import BuildMatrices
+from .build_matricies import BuildMatrices, LMN_ModelSpace
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import PhiInverse
 from .inference.prior import Prior
@@ -24,7 +24,11 @@ from .model.k_cube import (
     generate_k_cube_model_spherical_binning,
     mask_k_cube,
 )
-from .utils import _resolve_uv_spacing, load_numpy_dict, write_analysis_metadata
+from .utils import (
+    _resolve_uv_grid_from_extents,
+    load_numpy_dict,
+    write_analysis_metadata,
+)
 from .vis import get_vis_data
 
 jax.config.update("jax_enable_x64", True)
@@ -58,7 +62,6 @@ class SetupResult:
         self.ps_box_size_ra_mpc = ps_box_size_ra_mpc
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
-
 def run_setup(
     *,
     # IO
@@ -67,7 +70,7 @@ def run_setup(
     noise_data_path: Path | str | None = None,
     array_save_directory: Path | str = "./matrices/",
     # UV model
-    n_u_eor: int,
+    n_u_eor: int | None = None,
     n_v_eor: int | None = None,
     du_eor: float | None = None,
     dv_eor: float | None = None,
@@ -76,6 +79,8 @@ def run_setup(
     du_fg: float | None = None,
     dv_fg: float | None = None,
     fit_for_monopole: bool = False,
+    image_domain_trim: bool = False,
+    sky_mask_time_mode: str = "union",
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
@@ -89,9 +94,11 @@ def run_setup(
     d_t: float | None = None,
     jd_center: float | None = None,
     # Sky / beam
-    nside: int = 256,
+    nside: int = 128,
     fov_eor: float = 10.0,
     fov_fg: float | None = None,
+    fg_core_fov: float | None = None,
+    fg_outer_nside: int | None = None,
     telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0),
     beam_type: str = "uniform",
     peak_amp: float = 1.0,
@@ -160,12 +167,19 @@ def run_setup(
         pipeline saves old-style `k-vals*.txt` products here for downstream
         analysis compatibility.
 
-    n_u_eor, n_v_eor, du_eor, dv_eor : int/float
-        EoR model UV grid shape and spacing.
+    n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
+        EoR model UV grid shape and spacing. When omitted, these are
+        auto-resolved from the configured sky-mask FoV widths and instrument support.
     n_u_fg, n_v_fg, du_fg, dv_fg : int/float, optional
-        FG model UV grid shape and spacing.
+        FG model UV grid shape and spacing. When omitted, these are
+        auto-resolved from the configured sky-mask FoV widths and instrument support.
     fit_for_monopole : bool, optional
         Whether to include a dedicated FG monopole block.
+    sky_mask_time_mode : {"union", "center"}, optional
+        How the fixed EoR/FG HEALPix masks are selected across time.
+        ``"union"`` uses the drift-scan union over all configured timesteps.
+        ``"center"`` uses only the central timestep FoV when defining the
+        fixed sky mask.
     n_modes_fg, n_powerlaws_fg, beta_fg : optional
         FG large spectral scale model controls.
 
@@ -218,35 +232,16 @@ def run_setup(
         - `ps_box_size_ra_mpc`, `ps_box_size_dec_mpc`, `ps_box_size_para_mpc`:
           cosmological box extents used for power normalization.
     """
-    # Resolve parser-like defaults once so downstream uses a fully-specified config.
-    if n_v_eor is None:
-        n_v_eor = n_u_eor
-    if n_u_fg is None:
-        n_u_fg = n_u_eor
-    if n_v_fg is None:
-        n_v_fg = n_u_fg
+    # Resolve parser-like defaults that are independent of the actual selected
+    # data product. The uv-grid shapes themselves are resolved later from the
+    # time-union FoV extents and instrument uv coverage once vis metadata are
+    # available.
     if fov_fg is None:
         fov_fg = fov_eor
     if len(telescope_latlonalt) != 3:
         raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
-
-    # Resolve uv-grid spacings from the requested FoV when they are omitted.
-    # If explicit du/dv values are provided, keep them but warn when they are
-    # inconsistent with the standard FoV-derived choice 1 / deg2rad(FoV).
     fov_eor = float(fov_eor)
     fov_fg = float(fov_fg)
-    du_eor, dv_eor = _resolve_uv_spacing(
-        fov_deg=fov_eor,
-        du=du_eor,
-        dv=dv_eor,
-        label="EoR uv grid spacing",
-    )
-    du_fg, dv_fg = _resolve_uv_spacing(
-        fov_deg=fov_fg,
-        du=du_fg,
-        dv=dv_fg,
-        label="FG uv grid spacing",
-    )
 
     if n_eta is None:
         if n_freq is None:
@@ -310,6 +305,47 @@ def run_setup(
     if n_eta is None:
         n_eta = n_freq
 
+    # Build the configured HEALPix FoV model once before the expensive matrix
+    # construction so the spherical-aware local angular widths can define the
+    # uv sampling and automatic n_u/n_v sizing.
+    lmn_model_space = LMN_ModelSpace(
+        fov_eor=float(fov_eor),
+        fov_fg=float(fov_fg),
+        nside=int(nside),
+        sky_mask_time_mode=str(sky_mask_time_mode),
+        telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
+        jd_center=float(jd_center),
+        n_t=int(n_t),
+        d_t=float(d_t),
+    )
+    resolved_grid = _resolve_uv_grid_from_extents(
+        extent_u_eor=float(lmn_model_space.fov_l_angle_eor),
+        extent_v_eor=float(lmn_model_space.fov_m_angle_eor),
+        extent_u_fg=float(lmn_model_space.fov_l_angle_fg),
+        extent_v_fg=float(lmn_model_space.fov_m_angle_fg),
+        freqs_hz=np.asarray(freqs_hz, dtype=float),
+        uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
+        beam_type=beam_type,
+        fwhm_deg=None if fwhm_deg is None else float(fwhm_deg),
+        diam=None if diam is None else float(diam),
+        n_u_eor=n_u_eor,
+        n_v_eor=n_v_eor,
+        du_eor=du_eor,
+        dv_eor=dv_eor,
+        n_u_fg=n_u_fg,
+        n_v_fg=n_v_fg,
+        du_fg=du_fg,
+        dv_fg=dv_fg,
+    )
+    n_u_eor = int(resolved_grid["n_u_eor"])
+    n_v_eor = int(resolved_grid["n_v_eor"])
+    n_u_fg = int(resolved_grid["n_u_fg"])
+    n_v_fg = int(resolved_grid["n_v_fg"])
+    du_eor = float(resolved_grid["du_eor"])
+    dv_eor = float(resolved_grid["dv_eor"])
+    du_fg = float(resolved_grid["du_fg"])
+    dv_fg = float(resolved_grid["dv_fg"])
+
     setup_args_dict = {
         "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
         "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
@@ -325,6 +361,10 @@ def run_setup(
         "du_fg": float(du_fg),
         "dv_fg": float(dv_fg),
         "fit_for_monopole": bool(fit_for_monopole),
+        "image_domain_trim": bool(image_domain_trim),
+        "sky_mask_time_mode": str(sky_mask_time_mode),
+        "fg_core_fov": None if fg_core_fov is None else float(fg_core_fov),
+        "fg_outer_nside": None if fg_outer_nside is None else int(fg_outer_nside),
         "n_modes_fg": int(n_modes_fg),
         "n_powerlaws_fg": int(n_powerlaws_fg),
         "beta_fg": None if beta_fg is None else list(beta_fg),
@@ -340,6 +380,19 @@ def run_setup(
         "nside": int(nside),
         "fov_eor": float(fov_eor),
         "fov_fg": float(fov_fg),
+        "fov_l_angle_eor": float(lmn_model_space.fov_l_angle_eor),
+        "fov_m_angle_eor": float(lmn_model_space.fov_m_angle_eor),
+        "fov_l_angle_fg": float(lmn_model_space.fov_l_angle_fg),
+        "fov_m_angle_fg": float(lmn_model_space.fov_m_angle_fg),
+        "beam_aperture_width_uv": float(resolved_grid["beam_aperture_width_uv"]),
+        "u_max_inst_model": float(resolved_grid["u_max_inst_model"]),
+        "v_max_inst_model": float(resolved_grid["v_max_inst_model"]),
+        "u_extent_with_buffer": float(resolved_grid["u_extent_with_buffer"]),
+        "v_extent_with_buffer": float(resolved_grid["v_extent_with_buffer"]),
+        "n_u_eor_required": int(resolved_grid["n_u_eor_required"]),
+        "n_v_eor_required": int(resolved_grid["n_v_eor_required"]),
+        "n_u_fg_required": int(resolved_grid["n_u_fg_required"]),
+        "n_v_fg_required": int(resolved_grid["n_v_fg_required"]),
         "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
         "beam_type": beam_type,
         "peak_amp": float(peak_amp),
@@ -383,8 +436,8 @@ def run_setup(
     z = float(cosmo.f2z(jnp.mean(freqs_hz)))
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     ps_box_size_para_mpc = float(cosmo.dL_df(z) * bandwidth_hz)
-    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
-    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * np.deg2rad(float(fov_eor)))
+    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_l_angle_eor))
+    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_m_angle_eor))
 
     # Build the EoR k-cube model:
     # 1) generate physical k coordinates
@@ -467,12 +520,16 @@ def run_setup(
         n_eta=int(n_eta),
         d_eta=float(1.0 / bandwidth_hz),
         fit_for_monopole=fit_for_monopole,
+        image_domain_trim=bool(image_domain_trim),
+        sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
         fg_model_domain=str(fg_model_domain),
+        fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
+        fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         n_t=int(n_t),
         d_t=float(d_t),
         beam_type=beam_type,
@@ -496,6 +553,14 @@ def run_setup(
     # data-dependent compressed terms needed by the marginalized Gaussian path.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     n_params = bm.build_minimum_likelihood_stack(vis_noisy)
+    setup_args_dict["n_fg_pixels_trimmed"] = int(bm.n_fg_pixels_trimmed)
+    setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
+    setup_args_dict["use_multires_fg"] = bool(bm.lmn_model_space.use_multires_fg)
+    setup_args_dict["n_fg_groups"] = int(bm.lmn_model_space.n_fg_groups)
+    setup_args_dict["n_fg_group_highres"] = int(np.sum(bm.lmn_model_space.fg_group_is_highres))
+    setup_args_dict["n_fg_group_lowres"] = int(
+        bm.lmn_model_space.n_fg_groups - np.sum(bm.lmn_model_space.fg_group_is_highres)
+    )
 
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.
@@ -540,19 +605,33 @@ def run_setup(
         inverse_lw_power=float(inverse_lw_power),
         fg_model_domain=str(fg_model_domain),
         n_nonmp_fg=(
-            int(bm.lmn_model_space.n_pix_fg) * (1 + int(n_modes_fg))
+            int(bm.n_fg_non_monopole_spatial_modes) * (1 + int(n_modes_fg))
             if str(fg_model_domain) == "image"
             else 0
         ),
         n_nonmp_uv=int(n_u_fg) * int(n_v_fg) - int(bool(fit_for_monopole)),
         du_fg=float(du_fg),
         dv_fg=float(dv_fg),
+        fg_group_pixel_counts=(
+            bm.lmn_model_space.fg_group_pixel_counts
+            if str(fg_model_domain) == "image"
+            else None
+        ),
+        n_modes_fg=int(n_modes_fg),
     )
 
     setup_args_dict["fg_nonmp_image_inverse_prior"] = (
         None
         if phi_inverse_class.fg_nonmp_image_inverse_prior is None
-        else float(phi_inverse_class.fg_nonmp_image_inverse_prior)
+        else (
+            float(phi_inverse_class.fg_nonmp_image_inverse_prior)
+            if np.ndim(phi_inverse_class.fg_nonmp_image_inverse_prior) == 0
+            else {
+                "size": int(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).size),
+                "min": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).min()),
+                "max": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).max()),
+            }
+        )
     )
     
     likelihood_class = MarginalisedLikelihood(
