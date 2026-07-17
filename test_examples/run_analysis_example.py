@@ -147,6 +147,8 @@ def run_example(
                 "stop_threshold": args.stop_threshold,
             }
         )
+    else:
+        ns_kwargs["resume"] = args.resume
     summary = run_nestedsampling(
         setup_result=setup_result,
         out_dir=ns_out_dir,

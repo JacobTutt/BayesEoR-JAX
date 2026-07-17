@@ -50,6 +50,9 @@ class BayesEoRParser(ArgumentParser):
         Fit for global intrinsic noise amplitude. Defaults to False.
     sampler : str, optional
         Nested-sampling backend. Defaults to ``"multinest"``.
+    resume : bool, optional
+        Resume an existing MultiNest run from the current ``output_dir``.
+        Defaults to False.
     n_live_scale_factor : float, optional
         Multiplier converting ``n_dim`` to live-point count. Defaults to 25.
     num_inner_scale_factor : float, optional
@@ -221,6 +224,11 @@ class BayesEoRParser(ArgumentParser):
             default="multinest",
             choices=("multinest", "blackjaxns"),
             help="Nested-sampling backend.",
+        )
+        self.add_argument(
+            "--resume",
+            action="store_true",
+            help="Resume an existing MultiNest run from the current output_dir.",
         )
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
         self.add_argument("--num-inner-scale-factor", type=float, default=3.0, help="BlackJAX inner steps = factor * n_dim.")

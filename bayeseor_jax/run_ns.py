@@ -31,6 +31,15 @@ from .utils import (
 LOGGER = logging.getLogger(__name__)
 
 
+def _multinest_resume_checkpoints(outputfiles_basename: str) -> list[Path]:
+    """Return candidate MultiNest checkpoint files for an output basename."""
+    return [
+        Path(f"{outputfiles_basename}resume.dat"),
+        Path(f"{outputfiles_basename}phys_live.points"),
+        Path(f"{outputfiles_basename}.resume"),
+    ]
+
+
 def run_blackjaxns(
     setup_result: SetupResult,
     out_dir: Path | str,
@@ -237,6 +246,14 @@ def run_multinest(
         else int(np.ceil(n_live_scale_factor * n_dim))
     )
     outputfiles_basename = validate_multinest_output_path(out_dir, file_root=file_root)
+    resume_checkpoints = _multinest_resume_checkpoints(outputfiles_basename)
+    existing_resume_files = [path for path in resume_checkpoints if path.exists()]
+    if bool(resume) and not existing_resume_files:
+        expected = ", ".join(path.name for path in resume_checkpoints)
+        raise FileNotFoundError(
+            "Requested MultiNest resume, but no existing checkpoint files were "
+            f"found in {out_dir}. Expected at least one of: {expected}"
+        )
 
     theta_ref = 0.5 * (
         np.asarray(prior_class.lower, dtype=np.float64)
@@ -324,6 +341,9 @@ def run_multinest(
         summary["random_key"] = int(random_key)
     if resume is not None:
         summary["resume"] = bool(resume)
+        summary["resume_checkpoint_files_found"] = [
+            path.name for path in existing_resume_files
+        ]
     summary["verbose"] = bool(verbose)
     if importance_nested_sampling is not None:
         summary["importance_nested_sampling"] = bool(importance_nested_sampling)
