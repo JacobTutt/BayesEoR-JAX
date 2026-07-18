@@ -8,6 +8,7 @@ jax.config.update("jax_enable_x64", True)
 import json
 import logging
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -18,17 +19,87 @@ from anesthetic import NestedSamples
 from blackjax.ns import adaptive as ns_adaptive
 from blackjax.ns import nss as ns_nss
 from blackjax.ns.utils import finalise, log_weights
+from jax.experimental import multihost_utils
 from pymultinest.solve import solve
 from tqdm.auto import tqdm
 
+from .multinest_paths import MultiNestPathManager
 from .setup import SetupResult
 from .utils import (
     block_until_ready,
     estimate_average_eval_time,
-    validate_multinest_output_path,
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _jax_distributed_is_initialized() -> bool:
+    return bool(
+        getattr(jax, "distributed", None) is not None
+        and jax.distributed.is_initialized()
+    )
+
+
+def _prepare_multinest_path(path_manager: MultiNestPathManager) -> str:
+    """Prepare a shared short path once and expose it to every JAX process."""
+    if not _jax_distributed_is_initialized():
+        return path_manager.prepare()
+
+    process_index = int(jax.process_index())
+    source_error: Exception | None = None
+    if process_index == 0:
+        try:
+            path_manager.prepare()
+        except Exception as exc:  # broadcast failure before any rank raises
+            source_error = exc
+
+    source_ok = np.asarray(1 if source_error is None else 0, dtype=np.int32)
+    source_ok = multihost_utils.broadcast_one_to_all(
+        source_ok,
+        is_source=process_index == 0,
+    )
+    if not bool(np.asarray(source_ok).item()):
+        if source_error is not None:
+            raise source_error
+        raise RuntimeError(
+            "JAX process 0 could not prepare the shared MultiNest short path."
+        )
+
+    path_manager.mark_prepared()
+    multihost_utils.sync_global_devices("multinest-short-path-ready")
+    return path_manager.outputfiles_basename
+
+
+def _cleanup_multinest_path(path_manager: MultiNestPathManager) -> None:
+    """Remove a short link after every distributed sampler rank has finished."""
+    if not path_manager.using_short_path:
+        return
+    if not _jax_distributed_is_initialized():
+        path_manager.cleanup()
+        return
+
+    multihost_utils.sync_global_devices("multinest-short-path-finished")
+    process_index = int(jax.process_index())
+    source_error: Exception | None = None
+    if process_index == 0:
+        try:
+            path_manager.cleanup()
+        except Exception as exc:  # cleanup must not invalidate completed samples
+            source_error = exc
+
+    source_ok = np.asarray(1 if source_error is None else 0, dtype=np.int32)
+    source_ok = multihost_utils.broadcast_one_to_all(
+        source_ok,
+        is_source=process_index == 0,
+    )
+    if not bool(np.asarray(source_ok).item()):
+        warnings.warn(
+            "MultiNest completed, but process 0 could not remove its short "
+            f"symlink: {source_error or path_manager.short_link}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    multihost_utils.sync_global_devices("multinest-short-path-cleaned")
 
 
 def _multinest_resume_checkpoints(outputfiles_basename: str) -> list[Path]:
@@ -245,11 +316,13 @@ def run_multinest(
         if n_live_points is not None
         else int(np.ceil(n_live_scale_factor * n_dim))
     )
-    outputfiles_basename = validate_multinest_output_path(out_dir, file_root=file_root)
+    path_manager = MultiNestPathManager(out_dir, file_root=file_root)
+    outputfiles_basename = _prepare_multinest_path(path_manager)
     resume_checkpoints = _multinest_resume_checkpoints(outputfiles_basename)
     existing_resume_files = [path for path in resume_checkpoints if path.exists()]
     if bool(resume) and not existing_resume_files:
         expected = ", ".join(path.name for path in resume_checkpoints)
+        _cleanup_multinest_path(path_manager)
         raise FileNotFoundError(
             "Requested MultiNest resume, but no existing checkpoint files were "
             f"found in {out_dir}. Expected at least one of: {expected}"
@@ -323,12 +396,20 @@ def run_multinest(
     result = solve(
         **solve_kwargs,
     )
+    _cleanup_multinest_path(path_manager)
 
     summary = {
         "sampler": "multinest",
         "n_dim": n_dim,
         "n_live_points": n_live_points,
         "outputfiles_basename": outputfiles_basename,
+        "logical_outputfiles_basename": path_manager.logical_outputfiles_basename,
+        "used_short_multinest_path": path_manager.using_short_path,
+        "multinest_short_path_link": (
+            path_manager.short_link.as_posix()
+            if path_manager.using_short_path
+            else None
+        ),
         "multinest_kwargs_passed": sorted(
             key for key in solve_kwargs.keys()
             if key not in {"LogLikelihood", "Prior", "n_dims"}

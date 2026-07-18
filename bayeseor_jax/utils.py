@@ -15,6 +15,9 @@ import numpy as np
 from jax.sharding import NamedSharding
 
 from .build_matricies.beam_model import Beam_Model
+from .multinest_paths import (
+    validate_multinest_output_path as validate_multinest_output_path,
+)
 
 jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)
@@ -421,39 +424,6 @@ def write_analysis_metadata(
     np.savetxt(k_vals_path, k_vals_np)
     np.savetxt(k_bins_path, np.asarray(kbin_edges, dtype=np.float64))
     np.savetxt(k_counts_path, np.asarray(nsamples, dtype=np.int64), fmt="%d")
-
-
-def validate_multinest_output_path(
-    out_dir: Path,
-    file_root: str,
-    longest_suffix: str = "post_equal_weights.dat",
-) -> str:
-    """
-    Validate a MultiNest output prefix against the 100-character path limit.
-
-    Parameters
-    ----------
-    out_dir : pathlib.Path
-        Directory that will contain the MultiNest output files.
-    file_root : str
-        Filename prefix passed to MultiNest, for example ``"data-"``.
-    longest_suffix : str, optional
-        Longest expected suffix emitted by MultiNest. Defaults to
-        ``"post_equal_weights.dat"``.
-
-    Returns
-    -------
-    str
-        The full ``outputfiles_basename`` string to pass to MultiNest.
-    """
-    outputfiles_basename = (out_dir / file_root).as_posix()
-    longest_path = f"{outputfiles_basename}{longest_suffix}"
-    if len(longest_path) > 100:
-        raise ValueError(
-            "MultiNest requires output file paths of length <= 100 characters. "
-            f"The derived path '{longest_path}' has length {len(longest_path)}."
-        )
-    return outputfiles_basename
 
 
 def estimate_average_eval_time(
