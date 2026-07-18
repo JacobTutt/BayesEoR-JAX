@@ -574,51 +574,39 @@ def load_sharded_npy(
     return jax.make_array_from_callback(mm.shape, sharding, _callback)
 
 
-MULTINEST_MAX_PATH_LENGTH = 100
-MULTINEST_LONGEST_SUFFIX = "post_equal_weights.dat"
-DEFAULT_SHORT_PATH_DIRECTORY = Path(".mn_chains_symlinks")
-
-
-def validate_multinest_output_path(
-    out_dir: Path,
-    file_root: str,
-    longest_suffix: str = MULTINEST_LONGEST_SUFFIX,
-    max_path_length: int = MULTINEST_MAX_PATH_LENGTH,
-) -> str:
-    """Return a MultiNest basename after validating its longest output path."""
-    outputfiles_basename = (Path(out_dir) / file_root).as_posix()
-    longest_path = f"{outputfiles_basename}{longest_suffix}"
-    if len(longest_path) > int(max_path_length):
-        raise ValueError(
-            "MultiNest requires output file paths of length "
-            f"<= {max_path_length} characters. The derived path "
-            f"'{longest_path}' has length {len(longest_path)}."
-        )
-    return outputfiles_basename
-
-
 class MultiNestPathManager:
-    """Provide a short symlink basename when a real output path is too long.
+    """Hide long output directories from MultiNest behind a short symlink.
 
-    MultiNest opens files through ``outputfiles_basename``. When the real path
-    exceeds its path-length limit, this manager creates a deterministic short
-    symlink to the real output directory and returns a basename below that
-    link. Files therefore land directly in the requested directory without a
-    copy or staging step.
+    MultiNest output filenames must not exceed 100 characters. Its longest
+    filename in this pipeline is ``<file_root>post_equal_weights.dat``. If the
+    requested path would exceed that limit, this class passes MultiNest a
+    short path of the form ``.mn_chains_symlinks/mn_<hash>/<file_root>``.
+    The symlink targets the requested output directory, so files are written
+    directly to their final location without copying or staging.
 
-    The short-link directory must be visible from every process participating
-    in a distributed run. The default is relative to the shared working
-    directory so that the string passed to MultiNest stays short.
+    The hash is derived from the resolved output directory. Repeating a run,
+    including a resumed run, therefore recreates the same link. The relative
+    link directory must be on a filesystem shared by all JAX processes and
+    the working directory must remain unchanged while MultiNest is running.
+
+    Parameters
+    ----------
+    output_dir : pathlib.Path or str
+        Real directory in which MultiNest products should remain.
+    file_root : str, optional
+        MultiNest filename prefix. It must be a filename rather than a path.
+
+    Notes
+    -----
+    ``prepare`` must be called before using ``outputfiles_basename`` and
+    ``cleanup`` after MultiNest has finished reading its products. Cleanup
+    removes only a verified symlink and never removes the real output data.
     """
 
     def __init__(
         self,
         output_dir: Path | str,
         file_root: str = "data-",
-        *,
-        short_path_directory: Path | str = DEFAULT_SHORT_PATH_DIRECTORY,
-        longest_suffix: str = MULTINEST_LONGEST_SUFFIX,
-        max_path_length: int = MULTINEST_MAX_PATH_LENGTH,
     ) -> None:
         if not file_root:
             raise ValueError("MultiNest file_root must not be empty.")
@@ -631,86 +619,84 @@ class MultiNestPathManager:
         self.output_dir = Path(output_dir)
         self.real_output_dir = self.output_dir.expanduser().resolve()
         self.file_root = file_root
-        self.short_path_directory = Path(short_path_directory)
-        self.longest_suffix = longest_suffix
-        self.max_path_length = int(max_path_length)
+        self.logical_outputfiles_basename = (
+            self.real_output_dir / self.file_root
+        ).as_posix()
 
-        digest = hashlib.sha256(
-            os.fsencode(self.real_output_dir.as_posix())
-        ).hexdigest()[:16]
-        self.short_link = self.short_path_directory / f"mn_{digest}"
+        direct_basename = (self.output_dir / self.file_root).as_posix()
+        self.using_short_path = (
+            len(f"{direct_basename}post_equal_weights.dat") > 100
+        )
+
+        digest = hashlib.sha256(os.fsencode(self.real_output_dir)).hexdigest()[:16]
+        self.short_link = Path(".mn_chains_symlinks") / f"mn_{digest}"
+        basename_directory = (
+            self.short_link if self.using_short_path else self.output_dir
+        )
+        self.outputfiles_basename = (
+            basename_directory / self.file_root
+        ).as_posix()
         self._prepared = False
 
-    @property
-    def logical_outputfiles_basename(self) -> str:
-        """Return the basename in the requested real output directory."""
-        return (self.real_output_dir / self.file_root).as_posix()
-
-    @property
-    def direct_outputfiles_basename(self) -> str:
-        """Return the basename without applying symlink indirection."""
-        return (self.output_dir / self.file_root).as_posix()
-
-    @property
-    def direct_longest_path(self) -> str:
-        """Return the longest expected path without symlink indirection."""
-        return f"{self.direct_outputfiles_basename}{self.longest_suffix}"
-
-    @property
-    def using_short_path(self) -> bool:
-        """Whether the direct path exceeds the configured MultiNest limit."""
-        return len(self.direct_longest_path) > self.max_path_length
-
-    @property
-    def outputfiles_basename(self) -> str:
-        """Return the basename that should be passed to MultiNest."""
-        parent = self.short_link if self.using_short_path else self.output_dir
-        return (parent / self.file_root).as_posix()
-
     def _resolved_link_target(self) -> Path:
+        """Resolve the current symlink target for safety comparisons."""
         target = Path(os.readlink(self.short_link))
         if not target.is_absolute():
             target = self.short_link.parent / target
         return target.resolve()
 
-    def _ensure_short_link(self) -> None:
-        self.short_path_directory.mkdir(parents=True, exist_ok=True)
+    def prepare(self) -> str:
+        """Prepare the output path and return the basename for MultiNest.
 
+        Short paths are returned unchanged. For long paths, the method creates
+        or reuses the deterministic symlink. A stale symlink is repaired, but
+        a non-symlink collision is never deleted. The final length check is a
+        guard against future changes to the fixed short-link layout.
+
+        Returns
+        -------
+        str
+            The ``outputfiles_basename`` to pass to ``pymultinest.solve``.
+        """
+        self.real_output_dir.mkdir(parents=True, exist_ok=True)
+        if not self.using_short_path:
+            self._prepared = True
+            return self.outputfiles_basename
+
+        self.short_link.parent.mkdir(parents=True, exist_ok=True)
         if os.path.lexists(self.short_link):
             if not self.short_link.is_symlink():
                 raise FileExistsError(
                     "Refusing to replace non-symlink MultiNest short path: "
                     f"{self.short_link}"
                 )
-            if self._resolved_link_target() == self.real_output_dir:
-                return
-            self.short_link.unlink()
+            if self._resolved_link_target() != self.real_output_dir:
+                self.short_link.unlink()
 
-        self.short_link.symlink_to(self.real_output_dir, target_is_directory=True)
+        if not os.path.lexists(self.short_link):
+            self.short_link.symlink_to(
+                self.real_output_dir,
+                target_is_directory=True,
+            )
 
-    def prepare(self) -> str:
-        """Create or verify the short link and return MultiNest's basename."""
-        self.real_output_dir.mkdir(parents=True, exist_ok=True)
-        if self.using_short_path:
-            self._ensure_short_link()
+        longest_path = f"{self.outputfiles_basename}post_equal_weights.dat"
+        if len(longest_path) > 100:
+            raise ValueError(
+                "The short MultiNest path still exceeds 100 characters: "
+                f"{longest_path}"
+            )
 
-        parent = self.short_link if self.using_short_path else self.output_dir
-        outputfiles_basename = validate_multinest_output_path(
-            parent,
-            self.file_root,
-            longest_suffix=self.longest_suffix,
-            max_path_length=self.max_path_length,
-        )
-        self._prepared = True
-        return outputfiles_basename
-
-    def mark_prepared(self) -> str:
-        """Mark a link prepared by another distributed process as usable."""
         self._prepared = True
         return self.outputfiles_basename
 
     def cleanup(self) -> None:
-        """Remove only this manager's verified symlink, never real output."""
+        """Remove the temporary link without touching the output directory.
+
+        The link is removed only when this object prepared a shortened path,
+        the path is still a symlink, and it still targets the expected real
+        output directory. Any unexpected filesystem object is left intact and
+        reported as an error.
+        """
         if not self._prepared or not self.using_short_path:
             return
         if not os.path.lexists(self.short_link):
@@ -730,16 +716,21 @@ class MultiNestPathManager:
         self._prepared = False
 
 
-def _jax_distributed_is_initialized() -> bool:
-    return bool(
+def _prepare_multinest_path(path_manager: MultiNestPathManager) -> str:
+    """Prepare a MultiNest path safely across JAX processes.
+
+    In a normal single-process run this simply calls ``path_manager.prepare``.
+    In a distributed run, process zero performs the filesystem mutation and
+    broadcasts whether it succeeded before any process raises an exception.
+    This ordering prevents other processes hanging at a barrier when link
+    creation fails. All processes then wait until the shared link is visible
+    and use the same deterministic basename.
+    """
+    distributed = bool(
         getattr(jax, "distributed", None) is not None
         and jax.distributed.is_initialized()
     )
-
-
-def _prepare_multinest_path(path_manager: MultiNestPathManager) -> str:
-    """Prepare a shared short path once and expose it to every JAX process."""
-    if not _jax_distributed_is_initialized():
+    if not distributed:
         return path_manager.prepare()
 
     process_index = int(jax.process_index())
@@ -762,16 +753,26 @@ def _prepare_multinest_path(path_manager: MultiNestPathManager) -> str:
             "JAX process 0 could not prepare the shared MultiNest short path."
         )
 
-    path_manager.mark_prepared()
     multihost_utils.sync_global_devices("multinest-short-path-ready")
     return path_manager.outputfiles_basename
 
 
 def _cleanup_multinest_path(path_manager: MultiNestPathManager) -> None:
-    """Remove a short link after every distributed sampler rank has finished."""
+    """Remove a short link after every sampler process has finished.
+
+    Direct output paths require no work. In distributed runs, all processes
+    first confirm that MultiNest has returned; process zero then removes the
+    verified symlink and broadcasts the cleanup result. Cleanup failure emits
+    a warning rather than invalidating an otherwise completed inference run.
+    """
     if not path_manager.using_short_path:
         return
-    if not _jax_distributed_is_initialized():
+
+    distributed = bool(
+        getattr(jax, "distributed", None) is not None
+        and jax.distributed.is_initialized()
+    )
+    if not distributed:
         path_manager.cleanup()
         return
 
