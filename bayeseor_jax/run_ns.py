@@ -23,9 +23,11 @@ from tqdm.auto import tqdm
 
 from .setup import SetupResult
 from .utils import (
+    MultiNestPathManager,
+    _cleanup_multinest_path,
+    _prepare_multinest_path,
     block_until_ready,
     estimate_average_eval_time,
-    validate_multinest_output_path,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -245,11 +247,13 @@ def run_multinest(
         if n_live_points is not None
         else int(np.ceil(n_live_scale_factor * n_dim))
     )
-    outputfiles_basename = validate_multinest_output_path(out_dir, file_root=file_root)
+    path_manager = MultiNestPathManager(out_dir, file_root=file_root)
+    outputfiles_basename = _prepare_multinest_path(path_manager)
     resume_checkpoints = _multinest_resume_checkpoints(outputfiles_basename)
     existing_resume_files = [path for path in resume_checkpoints if path.exists()]
     if bool(resume) and not existing_resume_files:
         expected = ", ".join(path.name for path in resume_checkpoints)
+        _cleanup_multinest_path(path_manager)
         raise FileNotFoundError(
             "Requested MultiNest resume, but no existing checkpoint files were "
             f"found in {out_dir}. Expected at least one of: {expected}"
@@ -323,12 +327,20 @@ def run_multinest(
     result = solve(
         **solve_kwargs,
     )
+    _cleanup_multinest_path(path_manager)
 
     summary = {
         "sampler": "multinest",
         "n_dim": n_dim,
         "n_live_points": n_live_points,
         "outputfiles_basename": outputfiles_basename,
+        "logical_outputfiles_basename": path_manager.logical_outputfiles_basename,
+        "used_short_multinest_path": path_manager.using_short_path,
+        "multinest_short_path_link": (
+            path_manager.short_link.as_posix()
+            if path_manager.using_short_path
+            else None
+        ),
         "multinest_kwargs_passed": sorted(
             key for key in solve_kwargs.keys()
             if key not in {"LogLikelihood", "Prior", "n_dims"}
