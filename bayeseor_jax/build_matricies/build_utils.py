@@ -59,22 +59,16 @@ def get_T_component_layout(bm) -> dict[str, dict[str, int]]:
     Returns
     -------
     dict[str, dict[str, int]]
-        Mapping from component name to ``{"col_start", "col_stop"}`` slices in
-        the legacy direct-``T`` column ordering.
+        Mapping from component name to ``{"col_start", "col_stop"}`` slices.
     """
-    n_non_mp = int(bm.n_fg_non_monopole_spatial_modes)
     eor_width = int(bm.n_uv_eor * (bm.n_eta - 1))
-    fg_eta0_width = int(n_non_mp)
-    fg_lssm_width = int(n_non_mp * bm.n_modes_fg)
-    fg_mp_width = int((bm.n_eta + bm.n_modes_fg) if bm.fit_for_monopole else 0)
+    foreground_width = int(bm.n_fg_spatial_modes * (1 + bm.n_modes_fg))
 
     col = 0
     layout: dict[str, dict[str, int]] = {}
     for name, width in (
         ("eor", eor_width),
-        ("fg_eta0", fg_eta0_width),
-        ("fg_lssm", fg_lssm_width),
-        ("fg_monopole", fg_mp_width),
+        ("foreground", foreground_width),
     ):
         layout[name] = {
             "col_start": col,

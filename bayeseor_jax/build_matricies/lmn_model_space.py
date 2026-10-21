@@ -587,7 +587,6 @@ class LMN_ModelSpace:
         n_modes_fg: int,
         n_uv_eor: int,
         n_eta: int,
-        fit_for_monopole: bool,
         divisor: int = 4,
     ) -> int:
         """
@@ -602,8 +601,6 @@ class LMN_ModelSpace:
             Number of EoR UV modes.
         n_eta : int
             Number of line-of-sight Fourier modes.
-        fit_for_monopole : bool
-            Whether the FG monopole block is present.
         divisor : int, optional
             Required divisor for the total linear parameter count. Defaults to 4.
 
@@ -627,8 +624,6 @@ class LMN_ModelSpace:
 
         ``n_uv_eor * (n_eta - 1)``
         ``+ n_fg_groups * (1 + n_modes_fg)``
-        ``+ (n_eta + n_modes_fg)`` if the FG monopole block is enabled.
-
         Because trimming is only needed to make the *final* parameter axis in
         ``T`` and ``T_Ninv_T`` divisible by ``divisor``, the check is performed
         after any multiresolution regrouping. If grouping is active, removing a
@@ -643,11 +638,10 @@ class LMN_ModelSpace:
 
         per_group_width = 1 + int(n_modes_fg)
         eor_width = int(n_uv_eor) * (int(n_eta) - 1)
-        fg_mp_width = (int(n_eta) + int(n_modes_fg)) if fit_for_monopole else 0
         initial_trimmed = int(self.n_fg_pixels_trimmed)
 
         while True:
-            total_width = eor_width + int(self.n_fg_groups) * per_group_width + fg_mp_width
+            total_width = eor_width + int(self.n_fg_groups) * per_group_width
             if total_width % divisor == 0:
                 return int(self.n_fg_pixels_trimmed) - initial_trimmed
 

@@ -507,10 +507,6 @@ def run_setup(
         du_eor=float(du_eor),
         n_v_eor=int(n_v_eor),
         dv_eor=float(dv_eor),
-        n_u_fg=int(n_u_fg),
-        du_fg=float(du_fg),
-        n_v_fg=int(n_v_fg),
-        dv_fg=float(dv_fg),
         n_modes_fg=int(n_modes_fg),
         n_powerlaws_fg=int(n_powerlaws_fg),
         beta_fg=beta_fg,
@@ -519,7 +515,6 @@ def run_setup(
         df_mhz=float(df_mhz),
         n_eta=int(n_eta),
         d_eta=float(1.0 / bandwidth_hz),
-        fit_for_monopole=fit_for_monopole,
         image_domain_trim=bool(image_domain_trim),
         sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
@@ -527,7 +522,6 @@ def run_setup(
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
-        fg_model_domain=str(fg_model_domain),
         fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
         fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         n_t=int(n_t),
@@ -605,7 +599,7 @@ def run_setup(
         inverse_lw_power=float(inverse_lw_power),
         fg_model_domain=str(fg_model_domain),
         n_nonmp_fg=(
-            int(bm.n_fg_non_monopole_spatial_modes) * (1 + int(n_modes_fg))
+            int(bm.n_fg_spatial_modes) * (1 + int(n_modes_fg))
             if str(fg_model_domain) == "image"
             else 0
         ),

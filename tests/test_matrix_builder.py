@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from bayeseor_jax.build_matricies.overall import BuildMatrices
+from bayeseor_jax.build_matricies.uv_model_space import UV_ModelSpace
 
 
 def _minimal_builder(tmp_path):
@@ -21,8 +22,7 @@ def _minimal_builder(tmp_path):
     builder.beta_fg = [2.0, 3.0]
     builder.f0_mhz = 100.0
     builder.df_mhz = 10.0
-    builder.fg_model_domain = "image"
-    builder.n_fg_non_monopole_spatial_modes = 2
+    builder.n_fg_spatial_modes = 2
     builder.array_save_directory = tmp_path
     builder.inst_uvw_irad = jnp.asarray(
         [
@@ -69,3 +69,11 @@ def test_component_builders_match_concatenated_operator(tmp_path):
     assert foreground.shape == (4, 6)
     assert joint.shape == (4, 7)
     np.testing.assert_allclose(joint, np.concatenate([eor, foreground], axis=1))
+    np.testing.assert_allclose(joint, builder._build_T_directly_impl())
+
+
+def test_uv_model_space_contains_only_cosmological_modes():
+    model_space = UV_ModelSpace(3, 3, du_eor=0.5, dv_eor=0.25)
+
+    assert model_space.uv_eor.shape == (2, 8)
+    assert not hasattr(model_space, "uv_fg")

@@ -1,52 +1,29 @@
-"""
-Model uses three spatial Fourier grids:
-- EoR grid: rectilinear (u,v) modes within the EoR FoV.
-    - Captures the 21cm signal fluctuations on relevant angular scales.
-- FG grid: rectilinear (u,v) grid for smooth foreground emission.
-    - Captures large spectral scale foreground modes.
-"""
+"""Rectilinear transverse Fourier grid for the cosmological model."""
 import jax
 jax.config.update("jax_enable_x64", True)
 
-from typing import Tuple
 import jax.numpy as jnp
 
 
 class UV_ModelSpace:
     """
-    Build the (U, V) model grids used by the Bayesian sky model.
-
-    This class constructs:
-    - An EoR rectilinear grid for 21cm signal modes.
-    - A foreground (FG) rectilinear grid for smooth spatial and spectral emission.
+    Build the rectilinear ``(u, v)`` grid used by the 21-cm model.
 
     Attributes
     ----------
     uv_eor : jnp.ndarray
         Flattened EoR (u, v) coordinates with shape (2, N_uv_eor).
-    uv_fg : jnp.ndarray
-        Flattened foreground (u, v) coordinates with shape (2, N_uv_fg).
     """
 
     def __init__(
         self,
         n_u_eor: int,
         n_v_eor: int,
-        n_u_fg: int,
-        n_v_fg: int,
         du_eor: float = 1.0,
         dv_eor: float = 1.0,
-        du_fg: float = 1.0,
-        dv_fg: float = 1.0,
-        exclude_monopole: bool = True,
     ) -> None:
-        
-        # Create the rectilinear EoR and foreground grids.
         self.uv_eor = self.create_uv_regular_grid(
             n_u_eor, n_v_eor, du=du_eor, dv=dv_eor, exclude_monopole=True,
-        )
-        self.uv_fg = self.create_uv_regular_grid(
-            n_u_fg, n_v_fg, du=du_fg, dv=dv_fg, exclude_monopole=exclude_monopole,
         )
 
     def create_uv_regular_grid(self,
@@ -57,8 +34,7 @@ class UV_ModelSpace:
         exclude_monopole: bool = True,
     ) -> jnp.ndarray:
         """
-        Create 2D rectilinear (u, v) grid coordinates centered at zero for 
-        both 21cm EoR angular modes and smooth spectral foreground modes. 
+        Create 2D rectilinear ``(u, v)`` coordinates centred on zero.
 
         Parameters
         ----------
@@ -91,13 +67,11 @@ class UV_ModelSpace:
         # i0 = v_idx * n_u + u_idx, with u_idx=n_u//2 and v_idx=n_v//2.
         i0 = (n_v // 2) * n_u + (n_u // 2)
 
-        # Optionally exclude the monopole mode (not present in interferometric data).
+        # The transverse monopole is not part of the cosmological model.
         if exclude_monopole:
             u_vec = jnp.concatenate([u_vec[:i0], u_vec[i0 + 1 :]], axis=0)
             v_vec = jnp.concatenate([v_vec[:i0], v_vec[i0 + 1 :]], axis=0)
         else:
-            # If keeping the monopole, move it to the rightmost column so it is adjacent 
-            # to LSSM modes downstream in the UV_ModelSpace ordering.
             u_mp = u_vec[i0 : i0 + 1]
             v_mp = v_vec[i0 : i0 + 1]
             u_vec = jnp.concatenate([u_vec[:i0], u_vec[i0 + 1 :], u_mp], axis=0)

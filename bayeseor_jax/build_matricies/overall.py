@@ -1,8 +1,8 @@
 """
 High-level orchestration for constructing model matrices and associated kernels.
 
-This module wires together UV/LMN model spaces, beam evaluation, and NUDFT
-operators to build the dense Finv/Fprime blocks used downstream.
+This module combines the physical model spaces, beam response, and NUDFT
+kernels into the dense operators used by inference.
 """
 import time
 
@@ -40,7 +40,6 @@ from .build_utils import (
     _prepare_memmap_output as _prepare_memmap_output_impl,
     _slice_bounds as _slice_bounds_impl,
     check_if_matrix_exists as check_if_matrix_exists_impl,
-    get_T_component_layout as get_T_component_layout_impl,
     load_matrix as load_matrix_impl,
     padded_visibility_partition as padded_visibility_partition_impl,
     save_matrix as save_matrix_impl,
@@ -49,180 +48,14 @@ from .jax_grid import MeshManager
 
 
 class BuildMatrices:
+    """Build the physical 21-cm and spherical foreground operators.
+
+    The cosmological contribution is represented on a rectilinear
+    ``(u, v, eta)`` grid, while smooth foreground brightness is represented in
+    the spherical image domain. Both are propagated through the same primary
+    beam and full three-dimensional fringe response. Large operators are built
+    in process-local CPU row blocks and written to shared ``.npy`` memmaps.
     """
-    Orchestrate model-space construction and build NUDFT-based matrices.
-
-    This class centralizes:
-    - UV model grids for EoR/FG.
-    - LMN image-domain coordinates across time.
-    - Beam evaluation across time/frequency.
-    - NUDFT kernels and the Finv/Fprime blocks.
-
-    Parameters
-    ----------
-    EoR model uv-plane parameters
-    n_u_eor : int
-        Number of pixels on a side for the u axis in the model uv-plane
-        of the EoR model. Defaults to None.
-    du_eor : float
-        Fourier mode spacing along the u axis in inverse radians of the
-        EoR model uv-plane. Defaults to None.
-    n_v_eor : int
-        Number of pixels on a side for the v axis in the model uv-plane
-        of the EoR model. Defaults to None.
-    dv_eor : float
-        Fourier mode spacing along the v axis in inverse radians of the
-        EoR model uv-plane. Defaults to None.
-
-    Foreground model uv-plane parameters
-    n_u_fg : int
-        Number of pixels on a side for the u-axis in the FG model uv-plane.
-        Defaults to None.
-    du_fg : float
-        Fourier mode spacing along the u axis in inverse radians of the
-        FG model uv-plane. Defaults to None.
-    n_v_fg : int
-        Number of pixels on a side for the v-axis in the FG model uv-plane.
-        Defaults to None.
-    dv_fg : float
-        Fourier mode spacing along the v axis in inverse radians of the
-        FG model uv-plane. Defaults to None.
-    n_modes_fg : int, optional
-        Number of quadratic modes in the Large Spectral Scale Model (LSSM).
-        Defaults to 0.
-    n_powerlaws_fg : int, optional
-        Number of power law coefficients which replace quadratic modes in
-        the LSSM. Defaults to 0.
-    beta_fg : list of float, optional
-        Brightness temperature power law spectral index/indices used in the
-        large spectral scale model. Can be a single spectral index, e.g.
-        [2.63], or multiple spectral indices, e.g. [2.63, 2.82]. Defaults to
-        [2.63, 2.82].
-    fg_model_domain : {"uv", "image"}, optional
-        Spatial basis used for the non-monopole foreground ``[eta0 | LSSM]``
-        block. ``"uv"`` assigns one coefficient set per FG uv pixel.
-        ``"image"`` assigns one coefficient set per FG image pixel. Defaults
-        to ``"uv"``.
-    fg_core_fov : float, optional
-        Optional inner foreground FoV, in degrees, that stays at the native
-        HEALPix resolution when ``fg_model_domain="image"``. Pixels outside
-        this core may be grouped onto a coarser HEALPix parent grid using
-        ``fg_outer_nside``.
-    fg_outer_nside : int, optional
-        Optional lower HEALPix ``nside`` used for the grouped outer
-        image-domain foreground region. Grouping is only active when both
-        ``fg_core_fov`` and ``fg_outer_nside`` are set and define a genuine
-        coarse outer region.
-
-    Frequency and line of sight Fourier mode parameters
-    n_freq : int
-        Number of frequency channels. Defaults to None.
-    f0_mhz : float
-        Minimum frequency in megahertz. Defaults to None.
-    df_mhz : float
-        Frequency channel width in megahertz. Defaults to None.
-    n_eta : int
-        Number of Line of Sight (LoS) Fourier modes. Defaults to None.
-    d_eta : float
-        Fourier mode spacing along the eta (line of sight, frequency) axis in
-        inverse Hz. Defaults to None.
-
-    Model parameters
-    fit_for_monopole : bool, optional
-        Fit for (u, v) = (0, 0) (True) or exclude it from the fit (False).
-        Defaults to False.
-    image_domain_trim : bool, optional
-        If ``True`` and ``fg_model_domain="image"``, trim the outermost FG
-        image pixels so the full linear parameter vector is divisible by 4.
-        This is independent of the multiresolution grouping logic.
-    sky_mask_time_mode : {"union", "center"}, optional
-        How the fixed EoR/FG HEALPix masks are selected across time.
-        ``"union"`` uses the drift-scan union over all configured timesteps.
-        ``"center"`` uses only the central timestep FoV when defining the
-        fixed sky mask.
-
-    HEALPix image-domain model parameters
-    telescope_latlonalt : tuple, optional
-        The latitude, longitude, and altitude of the telescope in degrees,
-        degrees, and meters, respectively. Defaults to HERA location.
-    jd_center : float
-        Central time of the observation in JD units.
-        Defaults to 2461040.5 (2026-01-01 00:00:00 UTC).
-    nside : int
-        HEALPix nside parameter. Defaults to None.
-    fov_eor : float
-        Circular field of view in degrees for the EoR model.
-    fov_fg : float
-        Circular field of view in degrees for the foreground model. 
-    n_t : int
-        Number of time integrations. Defaults to 1.
-    d_t : float, optional
-        Integration time in seconds. Required if ``n_t > 1``.
-    
-    Beam model parameters
-    beam_type : str, optional
-        Can be either a path to a pyuvdata-compatible beam file or one of
-        'uniform', 'gaussian', 'airy', 'gausscosine', 'taperairy', or 'tanhairy'.
-        Defaults to 'uniform'.
-    peak_amp : float, optional
-        Peak amplitude of the beam. Defaults to 1.0.
-    fwhm_deg : float, optional
-        Full width at half maximum of the beam in degrees. Required if
-        `beam_type` is 'gaussian' or 'gausscosine'.
-    diam : float, optional
-        Antenna (aperture) diameter in meters. Used if `beam_type` is 'airy'.
-    cosfreq : float, optional
-        Cosine frequency in inverse radians. Used if `beam_type` is 'gausscosine'.
-    tanh_freq : float, optional
-        Exponential frequency (rate parameter) in inverse radians. Used if
-        `beam_type` is 'tanhairy'.
-    tanh_sl_red : float, optional
-        Airy sidelobe amplitude reduction as a fractional percent. Used if
-        `beam_type` is 'tanhairy'.
-    pol : str, optional
-        Polarization string. Used only if `beam_type` is a UVBeam file path.
-        Defaults to 'xx'.
-    freq_interp_kind : str, optional
-        Frequency interpolation kind from scipy.interpolate.interp1d. 
-        Defaults to 'cubic'.
-
-    Data parameters
-    uvw_array_m : numpy.ndarray
-        Array containing the (u(t), v(t), w(t)) coordinates of the instrument
-        model with shape (nt, nbls, 3). Defaults to None.
-    bl_red_array : numpy.ndarray
-        Array containing the number of redundant baselines at each
-        (u(t), v(t), w(t)) in the instrument model with shape (nt, nbls, 1).
-        Defaults to None.
-    sigma : float, optional
-        RMS noise per visibility before redundancy weighting. Required if
-        `effective_noise` is None.
-    effective_noise : numpy.ndarray, optional
-        Optional array of per-visibility noise standard deviations. If
-        provided, it overrides `sigma` and redundancy weighting.
-    array_save_directory : str, optional
-        Path to the directory where sparse matrices will be saved.
-        Defaults to './matrices/'.
-    t_stepwise_eor_uv_chunk : int, optional
-        EoR UV chunk size used by the stepwise `.npy` T writer. Defaults to 128.
-    t_stepwise_fg_uv_chunk : int, optional
-        Foreground UV chunk size used by the stepwise `.npy` T writer.
-        Defaults to 128.
-    t_stepwise_fg_img_chunk : int, optional
-        Foreground image-pixel chunk size used by the stepwise `.npy` T writer
-        when the non-monopole FG block is parameterized in image space.
-        Defaults to 128.
-    t_ninv_t_block_cols : int, optional
-        Parameter-space block width used by the blockwise `.npy`
-        ``T_Ninv_T`` writer. Defaults to 16384.
-    t_ninv_t_right_block_batch : int, optional
-        Number of right-hand parameter blocks evaluated together inside one
-        local ``T_Ninv_T`` kernel call. Defaults to 4.
-    clobber : bool, optional
-        When ``True``, delete any existing saved matrix products in
-        ``array_save_directory`` before rebuilding them. Defaults to ``False``.
-    """
-
 
     def __init__(
         self,
@@ -230,22 +63,16 @@ class BuildMatrices:
         du_eor: float,
         n_v_eor: int,
         dv_eor: float,
-        n_u_fg: int,
-        du_fg: float,
-        n_v_fg: int,
-        dv_fg: float,
         fg_core_fov: Optional[float] = None,
         fg_outer_nside: Optional[int] = None,
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
-        fg_model_domain: str = "image",
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
         n_eta: int = 0,
         d_eta: float = 0.0,
-        fit_for_monopole: bool = False,
         image_domain_trim: bool = False,
         sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -269,9 +96,6 @@ class BuildMatrices:
         sigma: Optional[float] = None,
         effective_noise: Optional[jnp.ndarray] = None,
         array_save_directory: str = "./matrices/",
-        t_stepwise_eor_uv_chunk: int = 128,
-        t_stepwise_fg_uv_chunk: int = 128,
-        t_stepwise_fg_img_chunk: int = 128,
         t_ninv_t_block_cols: int = 16384,
         t_ninv_t_right_block_batch: int = 4,
         clobber: bool = False,
@@ -285,11 +109,7 @@ class BuildMatrices:
         # Total EoR uv modes (monopole always excluded).
         self.n_uv_eor = (n_u_eor * n_v_eor) - 1
 
-        # Store foreground UV-plane parameters and LSSM settings.
-        self.n_u_fg = n_u_fg
-        self.du_fg = du_fg
-        self.n_v_fg = n_v_fg
-        self.dv_fg = dv_fg
+        # Store foreground spectral-model settings.
         self.n_modes_fg = n_modes_fg
         self.fg_core_fov = fg_core_fov
         self.fg_outer_nside = fg_outer_nside
@@ -300,22 +120,8 @@ class BuildMatrices:
             self.beta_fg = [float(beta_fg)]
         else:
             self.beta_fg = list(beta_fg)
-        self.fg_model_domain = str(fg_model_domain)
-        if self.fg_model_domain != "image":
-            raise ValueError(
-                "Only the spherical image-domain foreground model is "
-                "supported; "
-                f"got {self.fg_model_domain!r}."
-            )
-        self.fit_for_monopole = fit_for_monopole
-        if self.fit_for_monopole:
-            raise ValueError(
-                "fit_for_monopole belongs to the removed foreground UV model."
-            )
         self.image_domain_trim = bool(image_domain_trim)
         self.sky_mask_time_mode = str(sky_mask_time_mode)
-        # Total FG uv modes (optional monopole exclusion).
-        self.n_uv_fg = (n_u_fg * n_v_fg) - int(not self.fit_for_monopole)
 
         # Store frequency/eta grid parameters.
         self.n_freq = n_freq
@@ -362,34 +168,20 @@ class BuildMatrices:
         self.effective_noise = effective_noise
         self.array_save_directory = Path(array_save_directory)
         self.array_save_directory.mkdir(parents=True, exist_ok=True)
-        self.t_stepwise_eor_uv_chunk = int(t_stepwise_eor_uv_chunk)
-        self.t_stepwise_fg_uv_chunk = int(t_stepwise_fg_uv_chunk)
-        self.t_stepwise_fg_img_chunk = int(t_stepwise_fg_img_chunk)
         self.t_ninv_t_block_cols = int(t_ninv_t_block_cols)
         self.t_ninv_t_right_block_batch = int(t_ninv_t_right_block_batch)
         self.clobber = bool(clobber)
-        if self.t_stepwise_eor_uv_chunk < 1:
-            raise ValueError("t_stepwise_eor_uv_chunk must be >= 1")
-        if self.t_stepwise_fg_uv_chunk < 1:
-            raise ValueError("t_stepwise_fg_uv_chunk must be >= 1")
-        if self.t_stepwise_fg_img_chunk < 1:
-            raise ValueError("t_stepwise_fg_img_chunk must be >= 1")
         if self.t_ninv_t_block_cols < 1:
             raise ValueError("t_ninv_t_block_cols must be >= 1")
         if self.t_ninv_t_right_block_batch < 1:
             raise ValueError("t_ninv_t_right_block_batch must be >= 1")
 
-        # UV model space (EoR + FG rectilinear grids).
+        # The cosmological model retains its rectilinear transverse grid.
         self.uv_model_space = UV_ModelSpace(
             n_u_eor=self.n_u_eor,
             n_v_eor=self.n_v_eor,
-            n_u_fg=self.n_u_fg,
-            n_v_fg=self.n_v_fg,
             du_eor=self.du_eor,
             dv_eor=self.dv_eor,
-            du_fg=self.du_fg,
-            dv_fg=self.dv_fg,
-            exclude_monopole=not self.fit_for_monopole,
         )
 
         # LMN model space: FG pixel set and shared EoR mask (computed at init).
@@ -406,13 +198,12 @@ class BuildMatrices:
             d_t=self.d_t,
         )
         self.n_fg_pixels_trimmed = 0
-        if self.fg_model_domain == "image" and self.image_domain_trim:
+        if self.image_domain_trim:
             self.n_fg_pixels_trimmed = int(
                 self.lmn_model_space.trim_fg_outer_pixels_for_total_param_divisibility(
                     n_modes_fg=int(self.n_modes_fg),
                     n_uv_eor=int(self.n_uv_eor),
                     n_eta=int(self.n_eta),
-                    fit_for_monopole=bool(self.fit_for_monopole),
                     divisor=4,
                 )
             )
@@ -438,11 +229,7 @@ class BuildMatrices:
         self.sharding_grid = self.mm.get_sharding(rank=4)
         self.sharding_vec = self.mm.get_sharding(rank=1)
         self.sharding_mat = self.mm.get_sharding(rank=2)
-        self.n_fg_non_monopole_spatial_modes = self._fg_non_monopole_mode_count()
-
-    def _fg_non_monopole_mode_count(self) -> int:
-        """Return the number of foreground image-domain spatial modes."""
-        return int(self.lmn_model_space.n_fg_groups)
+        self.n_fg_spatial_modes = int(self.lmn_model_space.n_fg_groups)
 
     def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
         """
@@ -575,7 +362,7 @@ class BuildMatrices:
     def _forward_operator_width(self, component: str) -> int:
         """Return the number of columns in a selected forward operator."""
         eor_width = self.n_uv_eor * (self.n_eta - 1)
-        foreground_width = self.n_fg_non_monopole_spatial_modes * (
+        foreground_width = self.n_fg_spatial_modes * (
             1 + self.n_modes_fg
         )
         if component == "eor":
@@ -601,12 +388,6 @@ class BuildMatrices:
         one frequency block at a time on its local CPU and writes only its
         disjoint rows into a shared ``.npy`` memmap.
         """
-        if component in {"all", "foreground"} and self.fg_model_domain != "image":
-            raise ValueError(
-                "The equation-level foreground operator requires "
-                "fg_model_domain='image'."
-            )
-
         path = _dense_matrix_path_impl(self, matrix_name)
         partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
         n_rows = int(self.n_t * self.n_freq * self.nbls)
@@ -815,7 +596,6 @@ class BuildMatrices:
         self,
         *,
         matrix_name: str = "T",
-        **_: object,
     ) -> None:
         """Compatibility wrapper for the distributed forward-operator builder."""
         self.build_T(matrix_name=matrix_name)
