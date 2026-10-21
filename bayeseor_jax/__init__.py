@@ -6,7 +6,6 @@ from .build_matricies import (
     Beam_Model,
     BuildMatrices,
     LMN_ModelSpace,
-    MeshManager,
     UV_ModelSpace,
     build_foreground_spectral_basis,
     build_nudft_matrix,
@@ -14,9 +13,6 @@ from .build_matricies import (
     build_T_eor_core,
     build_T_fg_core,
     inverse_udft_1d_rect,
-    # reorder_fuv_to_uvf,
-    # sparse_block_diag_repeat,
-    # sparse_block_diag_two,
 )
 from .analyze import DataContainer
 from .model import (
@@ -93,7 +89,6 @@ __all__ = [
     "save_numpy_dict",
     "write_log_files",
     "LMN_ModelSpace",
-    "MeshManager",
     "MaximumAPosteriori",
     "UV_ModelSpace",
     "build_foreground_spectral_basis",
@@ -102,7 +97,4 @@ __all__ = [
     "build_T_eor_core",
     "build_T_fg_core",
     "inverse_udft_1d_rect",
-    # "reorder_fuv_to_uvf",
-    # "sparse_block_diag_repeat",
-    # "sparse_block_diag_two",
 ]

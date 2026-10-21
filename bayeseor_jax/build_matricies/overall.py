@@ -43,7 +43,6 @@ from .build_utils import (
     padded_visibility_partition as padded_visibility_partition_impl,
     save_matrix as save_matrix_impl,
 )
-from .jax_grid import MeshManager
 
 
 class BuildMatrices:
@@ -207,11 +206,6 @@ class BuildMatrices:
             self.lmn_model_space.az_za_fg, self.freq_hz
             )  # Shape (n_freq, n_t, n_pix_fg)
 
-        # Initialize sharding utilities.
-        self.mm = MeshManager()
-        self.sharding_grid = self.mm.get_sharding(rank=4)
-        self.sharding_vec = self.mm.get_sharding(rank=1)
-        self.sharding_mat = self.mm.get_sharding(rank=2)
         self.n_fg_spatial_modes = int(self.lmn_model_space.n_fg_groups)
 
     def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
