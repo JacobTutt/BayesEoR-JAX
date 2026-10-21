@@ -3,86 +3,24 @@
 from __future__ import annotations
 
 import jax
-jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+
+jax.config.update("jax_enable_x64", True)
+
+DEFAULT_FOREGROUND_PRIOR_STD_MK = (
+    8690.961932554002,
+    2479547.297490031,
+    1406322.413511489,
+)
 
 
 class PhiInverse:
-    """
-    Prior-precision configuration for the latent linear coefficients.
+    """Construct the diagonal prior precision for the joint coefficients.
 
-    In the hierarchical model, the latent coefficient vector ``a`` is given a
-    zero-mean Gaussian prior, ``a ~ N(0, Phi)``, where ``Phi`` is diagonal in
-    this implementation. The object stores the static ingredients needed to
-    construct ``Phi^{-1}`` (the prior precision) from sampled power-spectrum
-    amplitudes during each likelihood evaluation.
-
-    Statistically, ``Phi^{-1}`` controls shrinkage/regularization of latent
-    modes:
-
-    - larger precision => stronger pull of coefficients toward zero
-    - smaller precision => weaker prior constraint (broader prior)
-
-    The resulting precision enters the marginalized Gaussian system as
-    ``Sigma = T^H N^{-1} T + Phi^{-1}``, so it directly affects MAP estimates,
-    posterior curvature, and evidence values.
-
-    To keep repeated log-likelihood calls cheap, this class precomputes and
-    stores geometry/cosmology-dependent terms (voxel->bin mapping and per-bin
-    normalization factors) that do not change with ``theta``.
-
-    Parameters
-    ----------
-    bin_id_per_k_mode : jax.Array
-        Native spherical-bin assignment from ``k_cube.py`` with shape
-        ``(n_eor_voxels,)`` and invalid entries encoded as ``-1``.
-    valid_mask : jax.Array
-        Native validity mask from ``k_cube.py`` with shape
-        ``(n_eor_voxels,)``.
-    k_vals : jax.Array
-        Mean k value per spherical bin.
-    ps_box_size_ra_mpc : float
-        Comoving box size along RA-like transverse axis, in Mpc.
-    ps_box_size_dec_mpc : float
-        Comoving box size along Dec-like transverse axis, in Mpc.
-    ps_box_size_para_mpc : float
-        Comoving box size along LOS axis, in Mpc.
-    inst_to_cosmo_vol : float or jax.Array
-        Conversion factor from instrumental voxel units to comoving units.
-    n_par : int
-        Total number of latent linear coefficients (EoR + FG/LSSM).
-    inverse_lw_power : float, optional
-        Prior precision assigned to FG/LSSM amplitudes.
-    fg_model_domain : {"uv", "image"}, optional
-        Spatial basis used for the non-monopole foreground block. When set to
-        ``"image"``, the leading non-monopole image-domain FG slice uses the
-        pushed-forward precision implied by the current UV prior and FG
-        ``UV -> LM`` embedding.
-    n_nonmp_fg : int, optional
-        Number of leading FG coefficients belonging to the non-monopole
-        foreground block. These coefficients immediately follow the EoR block
-        in the latent vector. Only used when ``fg_model_domain="image"``.
-    n_nonmp_uv : int, optional
-        Number of non-monopole FG UV modes used in the pushed-forward image
-        prior calculation.
-    du_fg, dv_fg : float, optional
-        FG UV pixel spacings used in the raw quadrature ``UV -> LM`` embedding.
-    fg_group_pixel_counts : jax.Array, optional
-        Number of high-resolution FG pixels represented by each image-domain
-        FG spatial group. When provided, this defines the spatial-group layout
-        used to expand the image-domain precision into the full foreground
-        coefficient ordering.
-
-        This matches the current grouped image-domain forward model, where one
-        grouped FG coefficient is interpreted as a **shared child brightness**
-        copied onto every high-resolution child in the group. All groups retain
-        the same base brightness precision, irrespective of their number of
-        children. This treats the children of a coarse group as strongly
-        correlated rather than as independent prior draws.
-    n_modes_fg : int, optional
-        Number of FG/LSSM spectral modes attached to each non-monopole FG
-        spatial group. Used to expand the image-domain FG precision from a
-        spatial vector into the full ``[eta0 | LSSM]`` ordering.
+    The cosmological block is set by the sampled spherical power-spectrum
+    amplitudes. The foreground block uses one physical brightness-temperature
+    prior width per spectral coefficient field, repeated across all spherical
+    image-domain modes in component-major order.
     """
 
     def __init__(
@@ -95,129 +33,81 @@ class PhiInverse:
         ps_box_size_para_mpc: float,
         inst_to_cosmo_vol: float | jax.Array,
         n_par: int,
-        inverse_lw_power: float = 1e-16,
-        fg_model_domain: str = "uv",
-        n_nonmp_fg: int = 0,
-        n_nonmp_uv: int = 0,
-        du_fg: float | None = None,
-        dv_fg: float | None = None,
-        fg_group_pixel_counts: jax.Array | None = None,
-        n_modes_fg: int = 0,
+        foreground_prior_std_mk=DEFAULT_FOREGROUND_PRIOR_STD_MK,
+        n_fg_spatial_modes: int = 0,
     ) -> None:
         self.kbin_index_per_voxel = build_kbin_index_per_voxel(
             bin_id_per_k_mode=bin_id_per_k_mode,
             valid_mask=valid_mask,
         )
-        self.power_norm_per_bin = compute_power_norm_per_bin(
-            k_vals=jnp.asarray(k_vals, dtype=jnp.float64),
-            ps_box_size_ra_mpc=ps_box_size_ra_mpc,
-            ps_box_size_dec_mpc=ps_box_size_dec_mpc,
-            ps_box_size_para_mpc=ps_box_size_para_mpc,
-            inst_to_cosmo_vol=jnp.asarray(inst_to_cosmo_vol, dtype=jnp.float64),
-        )
-        self.n_par = n_par
-        self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
-        self.inverse_lw_power = inverse_lw_power
-        self.fg_model_domain = str(fg_model_domain)
-        self.n_nonmp_fg = int(n_nonmp_fg)
-        self.n_nonmp_uv = int(n_nonmp_uv)
-        self.du_fg = None if du_fg is None else float(du_fg)
-        self.dv_fg = None if dv_fg is None else float(dv_fg)
-        self.n_modes_fg = int(n_modes_fg)
-        self.fg_group_pixel_counts = (
-            None
-            if fg_group_pixel_counts is None
-            else jnp.asarray(fg_group_pixel_counts, dtype=jnp.float64)
-        )
-        self.fg_nonmp_image_inverse_prior = None
-        if self.fg_model_domain == "image":
-            if self.n_nonmp_uv <= 0:
-                raise ValueError("image-domain FG prior requires n_nonmp_uv > 0")
-            if self.du_fg is None or self.dv_fg is None:
-                raise ValueError("image-domain FG prior requires du_fg and dv_fg")
-            # This is the existing scalar image-domain FG precision obtained by
-            # approximately pushing the UV prior into image space.
-            base_precision = float(self.inverse_lw_power) / (
-                float(self.n_nonmp_uv) * (self.du_fg * self.dv_fg) ** 2
+        k_vals = jnp.asarray(k_vals, dtype=jnp.float64)
+        self.power_norm_per_bin = (
+            compute_power_norm_per_bin(
+                k_vals=k_vals,
+                ps_box_size_ra_mpc=ps_box_size_ra_mpc,
+                ps_box_size_dec_mpc=ps_box_size_dec_mpc,
+                ps_box_size_para_mpc=ps_box_size_para_mpc,
+                inst_to_cosmo_vol=jnp.asarray(
+                    inst_to_cosmo_vol,
+                    dtype=jnp.float64,
+                ),
             )
-            if self.fg_group_pixel_counts is None:
-                self.fg_nonmp_image_inverse_prior = jnp.full(
-                    (self.n_nonmp_fg,),
-                    base_precision,
-                    dtype=jnp.float64,
-                )
-            else:
-                # A grouped coefficient represents one coherent brightness
-                # value shared by its high-resolution children. Neighbouring
-                # foreground pixels are therefore treated as strongly
-                # correlated: a coarse group retains the same brightness prior
-                # as a single high-resolution group instead of multiplying its
-                # precision by the number of children.
-                spatial_precision = jnp.full(
-                    self.fg_group_pixel_counts.shape,
-                    base_precision,
-                    dtype=jnp.float64,
-                )
-                if self.n_modes_fg > 0:
-                    # Expand the spatial precision into the foreground
-                    # non-monopole block ordering:
-                    #   [eta0 per group][LSSM modes per group]
-                    self.fg_nonmp_image_inverse_prior = jnp.concatenate(
-                        [
-                            spatial_precision,
-                            jnp.repeat(spatial_precision, self.n_modes_fg),
-                        ],
-                        axis=0,
-                    )
-                else:
-                    self.fg_nonmp_image_inverse_prior = spatial_precision
-                if int(self.fg_nonmp_image_inverse_prior.shape[0]) != int(self.n_nonmp_fg):
-                    raise ValueError(
-                        "image-domain FG prior length mismatch: "
-                        f"got {int(self.fg_nonmp_image_inverse_prior.shape[0])}, "
-                        f"expected {self.n_nonmp_fg}"
-                    )
-        self.use_fg_nonmp_image_override = (
-            self.fg_model_domain == "image"
-            and self.n_nonmp_fg > 0
+            if k_vals.size
+            else jnp.empty((0,), dtype=jnp.float64)
         )
-        self.n_nonmp_fg_override = min(
-            self.n_nonmp_fg,
-            self.n_par - self.n_eor_voxels,
+        self.n_par = int(n_par)
+        self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
+        self.n_fg_spatial_modes = int(n_fg_spatial_modes)
+        foreground_std = jnp.asarray(
+            foreground_prior_std_mk,
+            dtype=jnp.float64,
+        )
+        if foreground_std.ndim != 1 or foreground_std.size == 0:
+            raise ValueError(
+                "foreground_prior_std_mk must be a non-empty vector"
+            )
+        if bool(jnp.any(foreground_std <= 0.0)):
+            raise ValueError("foreground prior widths must be positive")
+
+        n_foreground = self.n_par - self.n_eor_voxels
+        expected_foreground = (
+            self.n_fg_spatial_modes * int(foreground_std.size)
+        )
+        if n_foreground != expected_foreground:
+            raise ValueError(
+                "foreground prior length mismatch: the joint model contains "
+                f"{n_foreground} foreground coefficients, but "
+                f"{self.n_fg_spatial_modes} spatial modes and "
+                f"{int(foreground_std.size)} spectral fields imply "
+                f"{expected_foreground}"
+            )
+        component_precision = 1.0 / jnp.square(foreground_std)
+        self.foreground_precision = jnp.repeat(
+            component_precision,
+            self.n_fg_spatial_modes,
         )
 
     def evaluate(self, theta_power_linear: jax.Array) -> jax.Array:
-        """
-        Build diagonal prior precision ``Phi^{-1}`` for current power amplitudes.
-
-        Parameters
-        ----------
-        theta_power_linear : jax.Array
-            Linear-space power-spectrum amplitudes for each non-empty k-bin.
-
-        Returns
-        -------
-        jax.Array
-            Diagonal precision vector with EoR entries followed by FG/LSSM
-            entries.
-        """
-        safe_theta = jnp.maximum(
-            theta_power_linear, jnp.finfo(theta_power_linear.dtype).tiny
-        )
-        poweri_per_bin = self.power_norm_per_bin / safe_theta
-
-        idx = self.kbin_index_per_voxel
-        valid = idx >= 0
-        idx_clip = jnp.clip(idx, 0, poweri_per_bin.shape[0] - 1)
-        phi_eor = jnp.where(valid, poweri_per_bin[idx_clip], 0.0)
-
-        n_fg = self.n_par - self.n_eor_voxels
-        phi_fg = jnp.full((n_fg,), self.inverse_lw_power, dtype=phi_eor.dtype)
-        if self.use_fg_nonmp_image_override:
-            phi_fg = phi_fg.at[: self.n_nonmp_fg_override].set(
-                jnp.asarray(self.fg_nonmp_image_inverse_prior, dtype=phi_eor.dtype)
+        """Return the joint EoR and foreground prior-precision diagonal."""
+        if self.n_eor_voxels:
+            safe_theta = jnp.maximum(
+                theta_power_linear,
+                jnp.finfo(theta_power_linear.dtype).tiny,
             )
-        return jnp.concatenate([phi_eor, phi_fg], axis=0)
+            poweri_per_bin = self.power_norm_per_bin / safe_theta
+            indices = self.kbin_index_per_voxel
+            valid = indices >= 0
+            clipped = jnp.clip(indices, 0, poweri_per_bin.shape[0] - 1)
+            phi_eor = jnp.where(valid, poweri_per_bin[clipped], 0.0)
+        else:
+            phi_eor = jnp.empty((0,), dtype=theta_power_linear.dtype)
+        return jnp.concatenate(
+            [
+                phi_eor,
+                self.foreground_precision.astype(theta_power_linear.dtype),
+            ]
+        )
+
 
 
 def build_kbin_index_per_voxel(

@@ -222,7 +222,12 @@ class BayesEoRParser(ArgumentParser):
             default=None,
             help="Optional boolean/int mask over k bins (1=True uses linear-uniform sampling).",
         )
-        self.add_argument("--inverse-lw-power", type=float, default=1e-16, help="Inverse FG prior power.")
+        self.add_argument(
+            "--foreground-prior-std-mk",
+            type=list[float],
+            default=[8690.961932554002, 2479547.297490031, 1406322.413511489],
+            help="Physical prior width for each foreground spectral field in mK.",
+        )
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
         self.add_argument(
             "--sampler",

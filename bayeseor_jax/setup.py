@@ -14,7 +14,7 @@ from jax.experimental import multihost_utils
 
 from .build_matricies import BuildMatrices, LMN_ModelSpace
 from .inference.likelihood_marg import MarginalisedLikelihood
-from .inference.phi import PhiInverse
+from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
 from .model.cosmology_transforms import Cosmology
 from .model.k_cube import (
@@ -135,7 +135,7 @@ def run_setup(
     # Prior / likelihood
     priors: Any = None,
     uniform_priors: Any = None,
-    inverse_lw_power: float = 1e-16,
+    foreground_prior_std_mk: tuple[float, ...] = DEFAULT_FOREGROUND_PRIOR_STD_MK,
     use_intrinsic_noise_fitting: bool = False,
     **_: Any,
 ) -> SetupResult:
@@ -251,6 +251,11 @@ def run_setup(
         n_powerlaws_fg = len(beta_fg) if (beta_fg is not None and n_modes_fg > 0) else 0
     if n_modes_fg > n_powerlaws_fg and n_powerlaws_fg > 0:
         n_modes_fg = n_powerlaws_fg
+    if len(foreground_prior_std_mk) != 1 + len(beta_fg):
+        raise ValueError(
+            "foreground_prior_std_mk must contain one width for the constant "
+            "field and one for each beta_fg power law"
+        )
 
     output_dir = Path(output_dir).expanduser().resolve()
     array_save_directory = Path(array_save_directory).expanduser().resolve()
@@ -425,7 +430,7 @@ def run_setup(
         "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
         "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
         "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
-        "inverse_lw_power": float(inverse_lw_power),
+        "foreground_prior_std_mk": list(foreground_prior_std_mk),
         "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
     }
 
@@ -594,36 +599,8 @@ def run_setup(
         ps_box_size_para_mpc=ps_box_size_para_mpc,
         inst_to_cosmo_vol=float(cosmo.inst_to_cosmo_vol(z)),
         n_par=int(n_params),
-        inverse_lw_power=float(inverse_lw_power),
-        fg_model_domain=str(fg_model_domain),
-        n_nonmp_fg=(
-            int(bm.n_fg_spatial_modes) * (1 + int(n_modes_fg))
-            if str(fg_model_domain) == "image"
-            else 0
-        ),
-        n_nonmp_uv=int(n_u_fg) * int(n_v_fg) - int(bool(fit_for_monopole)),
-        du_fg=float(du_fg),
-        dv_fg=float(dv_fg),
-        fg_group_pixel_counts=(
-            bm.lmn_model_space.fg_group_pixel_counts
-            if str(fg_model_domain) == "image"
-            else None
-        ),
-        n_modes_fg=int(n_modes_fg),
-    )
-
-    setup_args_dict["fg_nonmp_image_inverse_prior"] = (
-        None
-        if phi_inverse_class.fg_nonmp_image_inverse_prior is None
-        else (
-            float(phi_inverse_class.fg_nonmp_image_inverse_prior)
-            if np.ndim(phi_inverse_class.fg_nonmp_image_inverse_prior) == 0
-            else {
-                "size": int(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).size),
-                "min": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).min()),
-                "max": float(np.asarray(phi_inverse_class.fg_nonmp_image_inverse_prior).max()),
-            }
-        )
+        foreground_prior_std_mk=foreground_prior_std_mk,
+        n_fg_spatial_modes=int(bm.n_fg_spatial_modes),
     )
     
     likelihood_class = MarginalisedLikelihood(
