@@ -70,6 +70,14 @@ def test_T_fg_core_uses_component_major_column_order():
     )
 
 
+def test_forward_operator_rows_are_time_frequency_baseline_ordered():
+    response = jnp.arange(8).reshape(2, 2, 2, 1)
+
+    result = build_T_fg_core(response, jnp.ones((2, 1)))
+
+    np.testing.assert_array_equal(result[:, 0], np.arange(8))
+
+
 def test_foreground_spectral_basis_matches_physical_model():
     frequencies = jnp.asarray([100.0, 200.0])
 
