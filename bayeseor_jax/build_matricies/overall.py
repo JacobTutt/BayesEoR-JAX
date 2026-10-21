@@ -71,7 +71,6 @@ class BuildMatrices:
         df_mhz: Optional[float] = None,
         n_eta: int = 0,
         d_eta: float = 0.0,
-        image_domain_trim: bool = False,
         sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         jd_center: float = 2461040.5,
@@ -117,7 +116,6 @@ class BuildMatrices:
         else:
             self.beta_fg = list(beta_fg)
         self.n_fg_components = 1 + len(self.beta_fg)
-        self.image_domain_trim = bool(image_domain_trim)
         self.sky_mask_time_mode = str(sky_mask_time_mode)
 
         # Store frequency/eta grid parameters.
@@ -194,17 +192,6 @@ class BuildMatrices:
             n_t=self.n_t,
             d_t=self.d_t,
         )
-        self.n_fg_pixels_trimmed = 0
-        if self.image_domain_trim:
-            self.n_fg_pixels_trimmed = int(
-                self.lmn_model_space.trim_fg_outer_pixels_for_total_param_divisibility(
-                    n_fg_components=self.n_fg_components,
-                    n_uv_eor=int(self.n_uv_eor),
-                    n_eta=int(self.n_eta),
-                    divisor=4,
-                )
-            )
-
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
             self.beam_type, 

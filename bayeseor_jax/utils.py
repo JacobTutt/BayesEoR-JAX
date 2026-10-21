@@ -209,8 +209,6 @@ def _resolve_uv_grid_from_extents(
     *,
     extent_u_eor: float,
     extent_v_eor: float,
-    extent_u_fg: float,
-    extent_v_fg: float,
     freqs_hz: np.ndarray,
     uvws_m: np.ndarray,
     beam_type: str | None,
@@ -220,10 +218,6 @@ def _resolve_uv_grid_from_extents(
     n_v_eor: int | None,
     du_eor: float | None,
     dv_eor: float | None,
-    n_u_fg: int | None,
-    n_v_fg: int | None,
-    du_fg: float | None,
-    dv_fg: float | None,
 ) -> dict[str, float | int]:
     """
     Resolve anisotropic uv-grid spacings and required axis sizes.
@@ -240,14 +234,6 @@ def _resolve_uv_grid_from_extents(
         dv=dv_eor,
         label="EoR uv grid spacing",
     )
-    du_fg_val, dv_fg_val = _resolve_uv_spacing_from_image_extents(
-        extent_u=extent_u_fg,
-        extent_v=extent_v_fg,
-        du=du_fg,
-        dv=dv_fg,
-        label="FG uv grid spacing",
-    )
-
     uvws_m = np.asarray(uvws_m, dtype=float).reshape(-1, 3)
     freqs_hz = np.asarray(freqs_hz, dtype=float).reshape(-1)
     if uvws_m.size == 0:
@@ -269,18 +255,11 @@ def _resolve_uv_grid_from_extents(
 
     n_u_eor_required = int(np.ceil(u_extent / du_eor_val)) * 2 + 1
     n_v_eor_required = int(np.ceil(v_extent / dv_eor_val)) * 2 + 1
-    n_u_fg_required = int(np.ceil(u_extent / du_fg_val)) * 2 + 1
-    n_v_fg_required = int(np.ceil(v_extent / dv_fg_val)) * 2 + 1
-
     return {
         "du_eor": float(du_eor_val),
         "dv_eor": float(dv_eor_val),
-        "du_fg": float(du_fg_val),
-        "dv_fg": float(dv_fg_val),
         "n_u_eor_required": int(n_u_eor_required),
         "n_v_eor_required": int(n_v_eor_required),
-        "n_u_fg_required": int(n_u_fg_required),
-        "n_v_fg_required": int(n_v_fg_required),
         "n_u_eor": _resolve_model_grid_size(
             value=n_u_eor,
             required=n_u_eor_required,
@@ -290,16 +269,6 @@ def _resolve_uv_grid_from_extents(
             value=n_v_eor,
             required=n_v_eor_required,
             label="n_v_eor",
-        ),
-        "n_u_fg": _resolve_model_grid_size(
-            value=n_u_fg,
-            required=n_u_fg_required,
-            label="n_u_fg",
-        ),
-        "n_v_fg": _resolve_model_grid_size(
-            value=n_v_fg,
-            required=n_v_fg_required,
-            label="n_v_fg",
         ),
         "u_max_inst_model": float(u_max_inst_model),
         "v_max_inst_model": float(v_max_inst_model),

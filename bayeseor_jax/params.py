@@ -44,8 +44,8 @@ class BayesEoRParser(ArgumentParser):
         physical prior implemented through a Jacobian correction in the
         likelihood. Sampler coordinates remain in log10-power space for all
         bins.
-    inverse_lw_power : float, optional
-        Inverse prior power for FG/LSSM coefficients. Defaults to ``1e-16``.
+    foreground_prior_std_mk : list of float, optional
+        Physical prior width for each foreground spectral coefficient field.
     use_intrinsic_noise_fitting : bool, optional
         Fit for global intrinsic noise amplitude. Defaults to False.
     sampler : str, optional
@@ -77,27 +77,8 @@ class BayesEoRParser(ArgumentParser):
         fixed central-time ``(l, m, n)`` chart, i.e. ``1 / fov_l_angle_eor``
         and ``1 / fov_m_angle_eor`` where the angular widths are built from
         ``atan2(l, n)`` and ``atan2(m, n)`` over the time-union pixel support.
-    n_u_fg, n_v_fg : int, optional
-        Number of FG uv pixels along u and v axes. When omitted, they are
-        auto-resolved from the time-union FoV extents and instrument support.
-    du_fg, dv_fg : float, optional
-        FG uv-axis spacing in inverse radians. If omitted, each axis defaults
-        to the spherical-aware local angular-width values derived from the
-        fixed central-time ``(l, m, n)`` chart, i.e. ``1 / fov_l_angle_fg``
-        and ``1 / fov_m_angle_fg`` where the angular widths are built from
-        ``atan2(l, n)`` and ``atan2(m, n)`` over the time-union pixel support.
-    fit_for_monopole : bool, optional
-        Include the uv monopole mode. Defaults to False.
-    n_modes_fg : int, optional
-        Number of foreground/LSSM modes. Defaults to 0.
-    n_powerlaws_fg : int, optional
-        Number of foreground power-law modes. If None, derived from
-        ``beta_fg`` when foreground modes are enabled.
     beta_fg : list of float, optional
         Foreground power-law spectral indices. Defaults to ``[2.63, 2.82]``.
-    fg_model_domain : {"uv", "image"}, optional
-        Spatial basis used for the non-monopole foreground ``[eta0 | LSSM]``
-        block. Defaults to ``"uv"``.
 
     Frequency / LoS Parameters
 
@@ -270,47 +251,7 @@ class BayesEoRParser(ArgumentParser):
             default=None,
             help="EoR v spacing in inverse radians. Defaults to 1 / fov_m_angle_eor from the fixed local (l, m, n) chart.",
         )
-        self.add_argument(
-            "--n-u-fg",
-            type=int,
-            help="Number of FG uv pixels along u. Defaults to the auto-resolved requirement.",
-        )
-        self.add_argument(
-            "--n-v-fg",
-            type=int,
-            help="Number of FG uv pixels along v. Defaults to the auto-resolved requirement.",
-        )
-        self.add_argument(
-            "--du-fg",
-            type=float,
-            default=None,
-            help="FG u spacing in inverse radians. Defaults to 1 / fov_l_angle_fg from the fixed local (l, m, n) chart.",
-        )
-        self.add_argument(
-            "--dv-fg",
-            type=float,
-            default=None,
-            help="FG v spacing in inverse radians. Defaults to 1 / fov_m_angle_fg from the fixed local (l, m, n) chart.",
-        )
-        self.add_argument("--fit-for-monopole", action="store_true", help="Include the uv monopole mode.")
-        self.add_argument("--n-modes-fg", type=int, default=0, help="Number of FG/LSSM modes.")
-        self.add_argument("--n-powerlaws-fg", type=int, help="Number of FG power-law modes.")
         self.add_argument("--beta-fg", type=list[float], default=[2.63, 2.82], help="FG power-law indices.")
-        self.add_argument(
-            "--fg-model-domain",
-            type=str,
-            choices=("image",),
-            default="image",
-            help="Spherical image-domain foreground basis.",
-        )
-        self.add_argument(
-            "--image-domain-trim",
-            action="store_true",
-            help=(
-                "For fg_model_domain=image, trim FG border pixels after the time-union "
-                "mask is built so the total linear parameter count is divisible by 4."
-            ),
-        )
 
         # Frequency / eta
         self.add_argument("--n-freq", type=int, required=True, help="Number of frequency channels.")

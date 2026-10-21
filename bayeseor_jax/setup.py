@@ -74,17 +74,8 @@ def run_setup(
     n_v_eor: int | None = None,
     du_eor: float | None = None,
     dv_eor: float | None = None,
-    n_u_fg: int | None = None,
-    n_v_fg: int | None = None,
-    du_fg: float | None = None,
-    dv_fg: float | None = None,
-    fit_for_monopole: bool = False,
-    image_domain_trim: bool = False,
     sky_mask_time_mode: str = "union",
-    n_modes_fg: int = 0,
-    n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
-    fg_model_domain: str = "image",
     # Frequency / time
     n_freq: int | None = None,
     f0_mhz: float | None = None,
@@ -170,18 +161,14 @@ def run_setup(
     n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
         EoR model UV grid shape and spacing. When omitted, these are
         auto-resolved from the configured sky-mask FoV widths and instrument support.
-    n_u_fg, n_v_fg, du_fg, dv_fg : int/float, optional
-        FG model UV grid shape and spacing. When omitted, these are
-        auto-resolved from the configured sky-mask FoV widths and instrument support.
-    fit_for_monopole : bool, optional
-        Whether to include a dedicated FG monopole block.
     sky_mask_time_mode : {"union", "center"}, optional
         How the fixed EoR/FG HEALPix masks are selected across time.
         ``"union"`` uses the drift-scan union over all configured timesteps.
         ``"center"`` uses only the central timestep FoV when defining the
         fixed sky mask.
-    n_modes_fg, n_powerlaws_fg, beta_fg : optional
-        FG large spectral scale model controls.
+    beta_fg : sequence of float, optional
+        Brightness-temperature power-law indices for the spherical foreground
+        coefficient fields.
 
     n_freq, f0_mhz, df_mhz : optional
         Frequency-axis setup (overridden by data-driven values in raw mode).
@@ -210,8 +197,8 @@ def run_setup(
         old BayesEoR linear-uniform physical prior implemented via a Jacobian
         correction inside the likelihood. Sampler coordinates remain in
         log10-power space for all bins.
-    inverse_lw_power : float, optional
-        Inverse prior power assigned to FG/LSSM latent coefficients.
+    foreground_prior_std_mk : sequence of float, optional
+        Physical prior width for each foreground spectral coefficient field.
     use_intrinsic_noise_fitting : bool, optional
         Whether to include a global intrinsic noise amplitude parameter in the
         likelihood.
@@ -247,10 +234,8 @@ def run_setup(
         if n_freq is None:
             raise ValueError("n_eta is None and n_freq is None; one must be provided")
         n_eta = n_freq
-    if n_powerlaws_fg is None:
-        n_powerlaws_fg = len(beta_fg) if (beta_fg is not None and n_modes_fg > 0) else 0
-    if n_modes_fg > n_powerlaws_fg and n_powerlaws_fg > 0:
-        n_modes_fg = n_powerlaws_fg
+    if not beta_fg:
+        raise ValueError("beta_fg must contain at least one spectral index")
     if len(foreground_prior_std_mk) != 1 + len(beta_fg):
         raise ValueError(
             "foreground_prior_std_mk must contain one width for the constant "
@@ -326,8 +311,6 @@ def run_setup(
     resolved_grid = _resolve_uv_grid_from_extents(
         extent_u_eor=float(lmn_model_space.fov_l_angle_eor),
         extent_v_eor=float(lmn_model_space.fov_m_angle_eor),
-        extent_u_fg=float(lmn_model_space.fov_l_angle_fg),
-        extent_v_fg=float(lmn_model_space.fov_m_angle_fg),
         freqs_hz=np.asarray(freqs_hz, dtype=float),
         uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
         beam_type=beam_type,
@@ -337,19 +320,11 @@ def run_setup(
         n_v_eor=n_v_eor,
         du_eor=du_eor,
         dv_eor=dv_eor,
-        n_u_fg=n_u_fg,
-        n_v_fg=n_v_fg,
-        du_fg=du_fg,
-        dv_fg=dv_fg,
     )
     n_u_eor = int(resolved_grid["n_u_eor"])
     n_v_eor = int(resolved_grid["n_v_eor"])
-    n_u_fg = int(resolved_grid["n_u_fg"])
-    n_v_fg = int(resolved_grid["n_v_fg"])
     du_eor = float(resolved_grid["du_eor"])
     dv_eor = float(resolved_grid["dv_eor"])
-    du_fg = float(resolved_grid["du_fg"])
-    dv_fg = float(resolved_grid["dv_fg"])
 
     setup_args_dict = {
         "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
@@ -361,19 +336,10 @@ def run_setup(
         "n_v_eor": int(n_v_eor),
         "du_eor": float(du_eor),
         "dv_eor": float(dv_eor),
-        "n_u_fg": int(n_u_fg),
-        "n_v_fg": int(n_v_fg),
-        "du_fg": float(du_fg),
-        "dv_fg": float(dv_fg),
-        "fit_for_monopole": bool(fit_for_monopole),
-        "image_domain_trim": bool(image_domain_trim),
         "sky_mask_time_mode": str(sky_mask_time_mode),
         "fg_core_fov": None if fg_core_fov is None else float(fg_core_fov),
         "fg_outer_nside": None if fg_outer_nside is None else int(fg_outer_nside),
-        "n_modes_fg": int(n_modes_fg),
-        "n_powerlaws_fg": int(n_powerlaws_fg),
         "beta_fg": None if beta_fg is None else list(beta_fg),
-        "fg_model_domain": str(fg_model_domain),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
         "df_mhz": float(df_mhz),
@@ -396,8 +362,6 @@ def run_setup(
         "v_extent_with_buffer": float(resolved_grid["v_extent_with_buffer"]),
         "n_u_eor_required": int(resolved_grid["n_u_eor_required"]),
         "n_v_eor_required": int(resolved_grid["n_v_eor_required"]),
-        "n_u_fg_required": int(resolved_grid["n_u_fg_required"]),
-        "n_v_fg_required": int(resolved_grid["n_v_fg_required"]),
         "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
         "beam_type": beam_type,
         "peak_amp": float(peak_amp),
@@ -518,7 +482,6 @@ def run_setup(
         df_mhz=float(df_mhz),
         n_eta=int(n_eta),
         d_eta=float(1.0 / bandwidth_hz),
-        image_domain_trim=bool(image_domain_trim),
         sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
@@ -550,7 +513,6 @@ def run_setup(
     # data-dependent compressed terms needed by the marginalized Gaussian path.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     n_params = bm.build_minimum_likelihood_stack(vis_noisy)
-    setup_args_dict["n_fg_pixels_trimmed"] = int(bm.n_fg_pixels_trimmed)
     setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
     setup_args_dict["use_multires_fg"] = bool(bm.lmn_model_space.use_multires_fg)
     setup_args_dict["n_fg_groups"] = int(bm.lmn_model_space.n_fg_groups)

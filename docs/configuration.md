@@ -77,14 +77,9 @@ These parameters control k-bin coverage and dense matrix size.
 
 | Key | Purpose |
 | --- | --- |
-| `n_u_fg`, `n_v_fg` | Foreground UV grid shape. Defaults inherit the EoR grid. |
-| `du_fg`, `dv_fg` | Optional foreground UV spacing. Defaults derive from `fov_fg`. |
 | `fov_fg` | Foreground model field of view. Defaults to `fov_eor`. |
-| `n_modes_fg` | Number of foreground or LSSM modes. |
-| `n_powerlaws_fg` | Number of power-law foreground modes. |
 | `beta_fg` | Spectral indices for foreground power-law modes. |
-| `fit_for_monopole` | Include a dedicated `(u, v) = (0, 0)` foreground coefficient. |
-| `fg_model_domain` | `uv` or `image`. |
+| `fg_core_fov`, `fg_outer_nside` | Optional coarser grouping of the outer spherical foreground field. |
 
 Use a larger `fov_fg` when beam sidelobes or horizon emission are scientifically relevant.
 
@@ -139,7 +134,7 @@ For raw pyuvdata inputs, selection options may define the actual subset used.
 | --- | --- |
 | `priors` | Power-spectrum prior ranges, one `[min, max]` pair per k bin. |
 | `uniform_priors` | Mask for linear-uniform physical priors. |
-| `inverse_lw_power` | Inverse prior power for foreground/LSSM coefficients. |
+| `foreground_prior_std_mk` | Physical prior width for each foreground spectral coefficient field. |
 | `use_intrinsic_noise_fitting` | Include a global intrinsic noise amplitude. |
 | `sampler` | Nested-sampling backend. Defaults to `multinest`. |
 | `n_live_scale_factor` | Live points as a multiple of parameter dimension. |

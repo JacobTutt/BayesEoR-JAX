@@ -18,18 +18,10 @@ f0_mhz: 158.304048743
 df_mhz: 0.23761898685801028
 
 # Foreground model params
-# By default, the foreground model uv-plane inherits EoR geometry.
-# You can override via n_u_fg, n_v_fg, and fov_fg.
-# n_u_fg: 15
-# n_v_fg: 15
-# fov_fg: 12.9080728652
-# Number of FG/LSSM modes.
-n_modes_fg: 2
-# LSSM power law brightness temperature spectral indices
+# Circular field of view of the spherical image-domain model.
+# fov_fg: 180.0
+# Power-law brightness-temperature spectral indices.
 beta_fg: [2.63, 2.82]
-# Fit for a (u, v) = (0, 0) coefficient in the model uv-plane for each eta
-fit_for_monopole: False
-fg_model_domain: image
 
 # Noise model params
 # The input data are noise free, so we need to simulate and add noise to the
