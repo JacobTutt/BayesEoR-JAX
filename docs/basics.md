@@ -11,7 +11,7 @@ The signal of interest is faint. Foregrounds are much brighter, and the instrume
 The analysis starts from visibility data, `d`, and a model for how sky components are observed by the instrument. The main model components are:
 
 - EoR signal coefficients, represented in a 3D Fourier-like model space.
-- Foreground or large spectral scale coefficients.
+- Spherical image-domain foreground coefficients with smooth spectral fields.
 - The instrument response, including baseline sampling and the primary beam.
 - A noise model.
 - Power-spectrum parameters, `theta`, that control the prior covariance of the EoR coefficients.
@@ -77,9 +77,9 @@ The setup-only mode is designed as a quick installation and configuration check.
 The original BayesEoR documentation remains valuable for the scientific model, visibility workflow, and output interpretation. BayesEoR-JAX changes the implementation backend:
 
 - MAGMA and PyCUDA are replaced by JAX, XLA, and JAXMg.
-- Dense matrix construction and likelihood evaluation are designed for GPU execution.
+- Forward operators are constructed in distributed CPU blocks; likelihood evaluation uses GPU linear algebra.
 - The code is structured around JAX arrays, JIT-compiled kernels, and device sharding.
-- New foreground-model paths support image-domain modelling experiments.
+- The foreground model directly supports spherical, wide-field image-domain emission.
 
 The mathematical vocabulary is intentionally similar so existing BayesEoR users can transfer concepts across.
 

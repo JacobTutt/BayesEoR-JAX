@@ -4,7 +4,7 @@
 
 BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
 
-The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, foreground-like large spectral scale emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. The JAX implementation targets hardware-accelerated, differentiable, and multi-device execution, with native JAXMg linear algebra used by the marginalised likelihood path.
+The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. The JAX implementation targets hardware-accelerated, differentiable, and multi-device execution, with native JAXMg linear algebra used by the marginalised likelihood path.
 
 ## What This Version Adds
 
@@ -13,7 +13,7 @@ BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is 
 - JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
 - A JAXMg-backed marginalised likelihood using GPU-native dense solves and log determinants.
 - MultiNest as the default nested-sampling workflow, with BlackJAX retained as an experimental backend.
-- Image-domain and UV-domain foreground model paths for studying wide-field foreground modelling.
+- A spherical image-domain foreground model propagated through the full beam and fringe response.
 - A configuration-first workflow using YAML files and `jsonargparse`.
 - Test datasets for EoR-only and EoR-plus-foreground runs.
 
@@ -26,7 +26,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.
 - [Forward Model](docs/forward-model.md): how visibility data are modelled through the linear operator `T`.
 - [EoR Model](docs/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
-- [Foregrounds](docs/foregrounds.md): UV-domain, image-domain, monopole, and large spectral scale foreground modelling.
+- [Foregrounds](docs/foregrounds.md): spherical image-domain foreground modelling and distributed operator construction.
 - [Instrument Model](docs/instrument.md): visibility inputs, beam models, time/frequency selection, and noise.
 - [Inference](docs/inference.md): marginalised likelihood, MultiNest, BlackJAX, HMC/NUTS, and MAP helpers.
 - [Configuration](docs/configuration.md): grouped reference for YAML and CLI parameters.

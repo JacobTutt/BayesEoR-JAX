@@ -57,12 +57,12 @@ The dimension grows with:
 
 - EoR UV grid size;
 - line-of-sight modes;
-- foreground UV or image-domain grid size;
-- number of foreground spectral modes;
+- foreground image-domain grid size;
+- number of foreground spectral components;
 - field of view;
 - HEALPix resolution.
 
-Wide-field image-domain foreground models can become very large. The supervisor-update analysis showed that full-resolution 180 degree foreground models can exceed terabyte-scale dense complex arrays, motivating mixed-resolution and targeted high-resolution foreground bases.
+Wide-field image-domain foreground operators can become very large. They are therefore constructed in CPU row blocks and written directly to disk rather than materialised on a GPU. Optional mixed-resolution foreground grids can further reduce the number of image-domain coefficients.
 
 ## JAXMg
 

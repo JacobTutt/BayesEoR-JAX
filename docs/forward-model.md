@@ -15,14 +15,26 @@ where `d` is the visibility vector, `x` contains latent EoR and foreground coeff
 The operator `T` combines:
 
 - EoR model coordinates in `(u, v, eta)` space.
-- Foreground model coordinates in UV or image space.
-- Frequency-axis transforms.
-- HEALPix sky coordinates for image-domain modelling.
+- Foreground coefficients on a spherical HEALPix image grid.
+- EoR Fourier and foreground spectral basis functions.
 - Primary beam response.
 - Baseline sampling and time dependence.
-- Noise weighting used by the likelihood.
 
-The implementation entry point is `BuildMatrices`, which coordinates the UV model spaces, LMN/HEALPix sky coordinates, beam model, NUDFT kernels, and matrix products.
+The two physical operators are constructed explicitly as
+
+```text
+T_21 = F^-1 P F' F_z
+T_fg = F^-1 P Q_z
+T    = [T_21  T_fg].
+```
+
+`build_sky_to_visibility_core` forms the shared beam-weighted fringe response
+`F^-1 P`. `build_T_eor_core` and `build_T_fg_core` then apply the component
+bases. The public `BuildMatrices.build_T_eor`, `build_T_fg`, and `build_T`
+methods distribute time ranges across JAX processes, construct frequency-row
+blocks on CPU, and write the result directly to a shared NumPy memmap. This
+keeps the exact equation-level model while avoiding a full operator allocation
+on any GPU.
 
 ## Cached Matrix Products
 
@@ -58,28 +70,6 @@ Sigma(theta) = T^H N^{-1} T + Phi^{-1}(theta)
 ```
 
 The likelihood then evaluates dense linear algebra involving `Sigma(theta)`, including solves and log determinants. This is where the JAXMg downstream branch is currently used.
-
-## Documentation Diagram To Add
-
-A useful final diagram for this page should show:
-
-```text
-EoR coefficients      Foreground coefficients
-        \                  /
-         \                /
-          -> model vector x
-                  |
-                  v
-      sky/frequency/instrument operator T
-                  |
-                  v
-          visibility prediction T x
-                  |
-                  v
-      likelihood against observed data d
-```
-
-For a second, more technical diagram, show the cached products `T^H N^{-1} T`, `T^H N^{-1} d`, and `d^H N^{-1} d` feeding the marginalised likelihood.
 
 ---
 
