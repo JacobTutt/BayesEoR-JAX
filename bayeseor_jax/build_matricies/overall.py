@@ -77,6 +77,7 @@ class BuildMatrices:
         fov_fg: Optional[float] = None,
         n_t: int = 1,
         d_t: Optional[float] = None,
+        lmn_model_space: Optional[LMN_ModelSpace] = None,
         beam_type: str = 'uniform',
         peak_amp: float = 1.0,
         fwhm_deg: Optional[float] = None,
@@ -177,8 +178,8 @@ class BuildMatrices:
             dv_eor=self.dv_eor,
         )
 
-        # LMN model space: FG pixel set and shared EoR mask (computed at init).
-        self.lmn_model_space = LMN_ModelSpace(
+        # Reuse setup geometry when available; direct callers may construct it here.
+        self.lmn_model_space = lmn_model_space or LMN_ModelSpace(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
             fg_core_fov=self.fg_core_fov,

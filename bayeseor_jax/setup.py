@@ -301,6 +301,8 @@ def run_setup(
     lmn_model_space = LMN_ModelSpace(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
+        fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
+        fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         nside=int(nside),
         sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
@@ -492,6 +494,7 @@ def run_setup(
         fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         n_t=int(n_t),
         d_t=float(d_t),
+        lmn_model_space=lmn_model_space,
         beam_type=beam_type,
         peak_amp=float(peak_amp),
         fwhm_deg=fwhm_deg,

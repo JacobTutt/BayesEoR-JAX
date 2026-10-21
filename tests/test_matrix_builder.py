@@ -102,3 +102,28 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
     np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"), expected)
     assert not (tmp_path / "T_Ninv_T.partial.npy").exists()
     assert not (tmp_path / "T_Ninv_T.partial.npy.ready").exists()
+
+
+def test_builder_reuses_precomputed_image_geometry(tmp_path):
+    geometry = SimpleNamespace(
+        az_za_fg=jnp.zeros((1, 2, 1)),
+        n_fg_groups=1,
+    )
+
+    builder = BuildMatrices(
+        n_u_eor=1,
+        du_eor=1.0,
+        n_v_eor=1,
+        dv_eor=1.0,
+        n_freq=1,
+        f0_mhz=100.0,
+        df_mhz=1.0,
+        n_eta=1,
+        n_t=1,
+        d_t=10.0,
+        lmn_model_space=geometry,
+        uvw_array_m=jnp.zeros((1, 1, 3)),
+        array_save_directory=tmp_path,
+    )
+
+    assert builder.lmn_model_space is geometry
