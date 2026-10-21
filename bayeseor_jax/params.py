@@ -294,9 +294,9 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument(
             "--fg-model-domain",
             type=str,
-            choices=("uv", "image"),
-            default="uv",
-            help="Spatial basis for the non-monopole FG [eta0 | LSSM] block.",
+            choices=("image",),
+            default="image",
+            help="Spherical image-domain foreground basis.",
         )
         self.add_argument(
             "--image-domain-trim",

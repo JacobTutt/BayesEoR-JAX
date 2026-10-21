@@ -28,7 +28,8 @@ n_modes_fg: 2
 # LSSM power law brightness temperature spectral indices
 beta_fg: [2.63, 2.82]
 # Fit for a (u, v) = (0, 0) coefficient in the model uv-plane for each eta
-fit_for_monopole: True
+fit_for_monopole: False
+fg_model_domain: image
 
 # Noise model params
 # The input data are noise free, so we need to simulate and add noise to the

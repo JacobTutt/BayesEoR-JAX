@@ -84,7 +84,7 @@ def run_setup(
     n_modes_fg: int = 0,
     n_powerlaws_fg: int | None = None,
     beta_fg: list[float] = [2.63, 2.82],
-    fg_model_domain: str = "uv",
+    fg_model_domain: str = "image",
     # Frequency / time
     n_freq: int | None = None,
     f0_mhz: float | None = None,

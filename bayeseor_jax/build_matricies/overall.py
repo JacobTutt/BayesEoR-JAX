@@ -239,7 +239,7 @@ class BuildMatrices:
         n_modes_fg: int = 0,
         n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
-        fg_model_domain: str = "uv",
+        fg_model_domain: str = "image",
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
         df_mhz: Optional[float] = None,
@@ -301,12 +301,17 @@ class BuildMatrices:
         else:
             self.beta_fg = list(beta_fg)
         self.fg_model_domain = str(fg_model_domain)
-        if self.fg_model_domain not in {"uv", "image"}:
+        if self.fg_model_domain != "image":
             raise ValueError(
-                "fg_model_domain must be one of {'uv', 'image'}, "
+                "Only the spherical image-domain foreground model is "
+                "supported; "
                 f"got {self.fg_model_domain!r}."
             )
         self.fit_for_monopole = fit_for_monopole
+        if self.fit_for_monopole:
+            raise ValueError(
+                "fit_for_monopole belongs to the removed foreground UV model."
+            )
         self.image_domain_trim = bool(image_domain_trim)
         self.sky_mask_time_mode = str(sky_mask_time_mode)
         # Total FG uv modes (optional monopole exclusion).
@@ -436,16 +441,7 @@ class BuildMatrices:
         self.n_fg_non_monopole_spatial_modes = self._fg_non_monopole_mode_count()
 
     def _fg_non_monopole_mode_count(self) -> int:
-        """
-        Return the spatial width of the non-monopole foreground block.
-
-        For image-domain FG this is no longer necessarily the number of native
-        foreground HEALPix pixels. When multiresolution FG grouping is active,
-        the non-monopole image-domain block is parameterized by
-        ``lmn_model_space.n_fg_groups`` instead.
-        """
-        if self.fg_model_domain == "uv":
-            return int(self.n_uv_fg - int(self.fit_for_monopole))
+        """Return the number of foreground image-domain spatial modes."""
         return int(self.lmn_model_space.n_fg_groups)
 
     def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
@@ -465,11 +461,6 @@ class BuildMatrices:
 
         Notes
         -----
-        This operation only affects the image-domain **non-monopole**
-        foreground block. The EoR block is untouched, the UV-domain FG path is
-        untouched, and the FG monopole block is still built separately from the
-        constant-image template.
-
         If a grouped spatial mode ``g`` contains high-resolution child pixels
         ``p`` then the grouped image response is
 
@@ -481,9 +472,9 @@ class BuildMatrices:
         brightness precision for every group, treating neighbouring children
         as strongly correlated.
         """
-        if self.fg_model_domain != "image" or not self.lmn_model_space.use_multires_fg:
+        if not self.lmn_model_space.use_multires_fg:
             return fg_response
-        labels = self.lmn_model_space.fg_group_labels
+        labels = jnp.asarray(np.asarray(self.lmn_model_space.fg_group_labels))
         n_groups = int(self.lmn_model_space.n_fg_groups)
         grouped = jnp.zeros(
             fg_response.shape[:-1] + (n_groups,),
@@ -514,146 +505,6 @@ class BuildMatrices:
         nuidft_uv_to_lm_eor *= (self.du_eor * self.dv_eor)
 
         return nuidft_uv_to_lm_eor
-
-    def _uv_to_lm_fg(self):
-        """
-        Construct the FG NUDFT kernel (model UV -> image LM/RaDec).
-
-        If monopole is included, the (u, v) = (0, 0) column is moved to the
-        rightmost position to keep it adjacent to LSSM modes downstream in the
-        `UV_ModelSpace` ordering.
-        """
-        # 2D NUDFT for UV -> LM at the central time step (FG pixel set).
-        nuidft_uv_to_lm_fg = build_nudft_matrix(
-            self.uv_model_space.uv_fg,  # (2, n_uv_fg)
-            self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2],  # (2, n_pix_fg)
-            sign=-1
-        )  # (n_pix_fg, n_uv_fg)
-
-        # Pixel area normalization in UV.
-        nuidft_uv_to_lm_fg *= (self.du_fg * self.dv_fg)
-        
-        return nuidft_uv_to_lm_fg
-    
-
-    def _build_Finv_block(self, i_f: int, i_t: int) -> jnp.ndarray:
-        """
-        Build the ``(i_f, i_t)`` block of ``Finv``.
-
-        This is the dense image-domain response for one ``(frequency, time)``
-        block before any ``Fprime`` projection into the model UV grids.
-        """
-        # LMN coordinates for time step i_t (FG pixel set).
-        lmn_fg_it = self.lmn_model_space.lmn_fg[i_t, :, :]
-        # UVW coordinates for frequency i_f.
-        uvw_irad_if = self.inst_uvw_irad[i_f, :, :]
-        # NUDFT: LMN -> UVW at this (i_f, i_t).
-        nudft_lmn_to_uvw = build_nudft_matrix(
-            lmn_fg_it,
-            uvw_irad_if,
-            sign=+1,
-        )
-        # Pixel area normalization in image domain.
-        nudft_lmn_to_uvw *= self.lmn_model_space.pixel_area_sr
-        # Beam response for this time/frequency.
-        beam_it = self.beam_response[i_f, i_t, :]
-        # Apply beam weighting in LMN.
-        return nudft_lmn_to_uvw * beam_it[jnp.newaxis, :]
-
-    def _build_Finv_blocks(self) -> jnp.ndarray:
-        """
-        Build dense per-frequency/per-time ``Finv`` blocks.
-
-        Returns
-        -------
-        jnp.ndarray
-            Tensor with shape ``(n_freq, n_t, n_bls, n_pix_fg)``.
-        """
-        # Vectorized construction over a flattened (frequency, time) grid.
-        t_idx = jnp.arange(self.n_t, dtype=jnp.int32)
-        f_idx = jnp.arange(self.n_freq, dtype=jnp.int32)
-        f_grid = jnp.repeat(f_idx, self.n_t)
-        t_grid = jnp.tile(t_idx, self.n_freq)
-
-        flat_blocks = jax.vmap(
-            lambda i_f, i_t: self._build_Finv_block(i_f, i_t),
-            in_axes=(0, 0),
-            out_axes=0,
-        )(f_grid, t_grid)
-        return flat_blocks.reshape(
-            self.n_freq,
-            self.n_t,
-            self.nbls,
-            self.lmn_model_space.n_pix_fg,
-        )
-
-    def _build_Finv_Fprime_eor_blocks(self, finv_blocks: jnp.ndarray) -> jnp.ndarray:
-        """
-        Project ``Finv`` blocks into the EoR UV grid.
-
-        Parameters
-        ----------
-        finv_blocks : jnp.ndarray
-            Dense ``Finv`` tensor with shape ``(n_freq, n_t, n_bls, n_pix_fg)``.
-
-        Returns
-        -------
-        jnp.ndarray
-            Dense EoR response tensor with shape
-            ``(n_freq, n_t, n_bls, n_uv_eor)``.
-        """
-        # EoR UV -> LM kernel on the shared EoR/FG pixel subset.
-        nuidft_uv_to_lm_eor = self._uv_to_lm_eor()
-        # Restrict the FG pixel set to the EoR/FG shared axis.
-        finv_blocks_eor = finv_blocks[..., self.lmn_model_space.eor_fg_shared_axis]
-        # Project image-domain responses into the EoR UV grid.
-        return jnp.tensordot(finv_blocks_eor, nuidft_uv_to_lm_eor, axes=([-1], [0]))
-
-    def _build_Finv_Fprime_fg_blocks(self, finv_blocks: jnp.ndarray) -> jnp.ndarray:
-        """
-        Project ``Finv`` blocks into the FG UV grid.
-
-        Parameters
-        ----------
-        finv_blocks : jnp.ndarray
-            Dense ``Finv`` tensor with shape ``(n_freq, n_t, n_bls, n_pix_fg)``.
-
-        Returns
-        -------
-        jnp.ndarray
-            Dense FG response tensor with shape
-            ``(n_freq, n_t, n_bls, n_uv_fg)``.
-        """
-        # FG UV -> LM kernel on the full FG pixel set.
-        nuidft_uv_to_lm_fg = self._uv_to_lm_fg()
-        # Project image-domain responses into the FG UV grid.
-        return jnp.tensordot(finv_blocks, nuidft_uv_to_lm_fg, axes=([-1], [0]))
-
-    def _build_Finv_monopole_blocks(self, finv_blocks: jnp.ndarray) -> jnp.ndarray:
-        """
-        Build the FG monopole spatial block from ``Finv``.
-
-        The ``(u, v) = (0, 0)`` FG mode corresponds to a constant image vector,
-        so this block can be built directly from ``Finv`` without forming the
-        full FG UV -> LM kernel.
-
-        Parameters
-        ----------
-        finv_blocks : jnp.ndarray
-            Dense ``Finv`` tensor with shape ``(n_freq, n_t, n_bls, n_pix_fg)``.
-
-        Returns
-        -------
-        jnp.ndarray
-            Monopole response tensor with shape ``(n_freq, n_t, n_bls)``.
-        """
-        # Constant-image template for the FG monopole mode.
-        monopole_template = jnp.ones(
-            (self.lmn_model_space.n_pix_fg,),
-            dtype=finv_blocks.dtype,
-        ) * (self.du_fg * self.dv_fg)
-        # Contract the image-domain axis against the monopole template.
-        return jnp.tensordot(finv_blocks, monopole_template, axes=([-1], [0]))
 
     def _foreground_spectral_basis(self) -> jnp.ndarray:
         """Return the image-domain foreground basis ``Q_z``."""
@@ -915,105 +766,26 @@ class BuildMatrices:
             n_vis = n_freq * n_t * n_bls and
             n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
         """
-        finv_blocks = self._build_Finv_blocks()
-        full_eor = self._build_Finv_Fprime_eor_blocks(finv_blocks)
-
-        # ------------------------
-        # EoR contribution to T
-        # ------------------------
-        # Build frequency->eta basis for EoR (eta=0 excluded).
-        eor_basis = inverse_udft_1d_rect(
-            self.n_freq,
-            self.n_eta,
-            include_eta0=False,
+        response = build_sky_to_visibility_core(
+            self.lmn_model_space.lmn_fg,
+            self.inst_uvw_irad,
+            jnp.transpose(self.beam_response, (1, 0, 2)),
+            self.lmn_model_space.pixel_area_sr,
         )
-        eor_basis = eor_basis * self.d_eta  # (n_freq, n_eta-1)
-
-        # Apply basis per-frequency:
-        # full_eor[f,t,bl,u] * eor_basis[f,eta] -> t_eor[f,t,bl,u,eta]
-        t_eor = full_eor[..., None] * eor_basis[:, None, None, None, :]
-        # Flatten to legacy row order: time slowest, then frequency, then baseline.
-        t_eor = jnp.transpose(t_eor, (1, 0, 2, 3, 4)).reshape(
-            self.n_t * self.n_freq * self.nbls,
-            self.n_uv_eor * (self.n_eta - 1),
+        t_eor = build_T_eor_core(
+            response[..., self.lmn_model_space.eor_fg_shared_axis],
+            self._uv_to_lm_eor(),
+            inverse_udft_1d_rect(
+                self.n_freq,
+                self.n_eta,
+                include_eta0=False,
+            )
+            * self.d_eta,
         )
-
-        # -----------------------
-        # FG contribution to T
-        # -----------------------
-        if self.fg_model_domain == "uv":
-            full_fg = self._build_Finv_Fprime_fg_blocks(finv_blocks)
-            n_non_mp = self.n_uv_fg - int(self.fit_for_monopole)
-            fg_non_mp = full_fg[..., :n_non_mp] if self.fit_for_monopole else full_fg
-        else:
-            full_fg = None
-            n_non_mp = self.n_fg_non_monopole_spatial_modes
-            fg_non_mp = self._aggregate_fg_image_response(finv_blocks)
-
-        n_rows = self.n_t * self.n_freq * self.nbls
-
-        # FG eta0 columns for each non-monopole UV mode.
-        eta0_basis = (
-            jnp.ones((self.n_freq, 1), dtype=finv_blocks.dtype)
-            * self.d_eta
-            * self.n_eta
-        )  # (n_freq, 1)
-        t_fg_eta0 = fg_non_mp * eta0_basis[:, None, None, :]
-        t_fg_eta0 = jnp.transpose(t_fg_eta0, (1, 0, 2, 3)).reshape(
-            n_rows,
-            n_non_mp,
+        t_fg = build_T_fg_core(
+            self._aggregate_fg_image_response(response),
+            self._foreground_spectral_basis(),
         )
-
-        # FG LSSM columns for each non-monopole UV mode.
-        if self.n_modes_fg > 0:
-            lssm_basis = build_lssm_basis(
-                n_freq=self.n_freq,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            )
-            lssm_basis = lssm_basis * self.d_eta * self.n_eta  # (n_freq, n_modes_fg)
-            t_fg_lssm = fg_non_mp[..., None] * lssm_basis[:, None, None, None, :]
-            t_fg_lssm = jnp.transpose(t_fg_lssm, (1, 0, 2, 3, 4)).reshape(
-                n_rows,
-                n_non_mp * self.n_modes_fg,
-            )
-        else:
-            t_fg_lssm = jnp.zeros((n_rows, 0), dtype=finv_blocks.dtype)
-
-        # FG monopole block (eta + LSSM), if enabled.
-        if self.fit_for_monopole:
-            mp_basis = inverse_udft_1d_rect(
-                n_freq=self.n_freq,
-                n_eta=self.n_eta,
-                n_modes=self.n_modes_fg,
-                n_powerlaws=self.n_powerlaws_fg,
-                f0_mhz=self.f0_mhz,
-                df_mhz=self.df_mhz,
-                beta=self.beta_fg,
-            )
-            mp_basis = mp_basis * self.d_eta
-            mp_basis = mp_basis.at[:, self.n_eta // 2].multiply(self.n_eta)
-            mp_basis = mp_basis.at[:, self.n_eta:].multiply(self.n_eta)
-            if self.fg_model_domain == "uv":
-                fg_mp = full_fg[..., -1]  # monopole mode is last FG uv column
-            else:
-                fg_mp = self._build_Finv_monopole_blocks(finv_blocks)
-            t_fg_mp = fg_mp[..., None] * mp_basis[:, None, None, :]
-            t_fg_mp = jnp.transpose(t_fg_mp, (1, 0, 2, 3)).reshape(
-                n_rows,
-                mp_basis.shape[1],
-            )
-        else:
-            t_fg_mp = jnp.zeros((n_rows, 0), dtype=finv_blocks.dtype)
-
-        # Legacy FG column ordering.
-        t_fg = jnp.concatenate([t_fg_eta0, t_fg_lssm, t_fg_mp], axis=1)
-
-        # Final column ordering matches legacy Fz block layout:
-        # [EoR columns][FG columns].
         return jnp.concatenate([t_eor, t_fg], axis=1)
 
     def build_T_directly(self) -> jnp.ndarray:
@@ -1074,9 +846,8 @@ class BuildMatrices:
         boundary is therefore one small row block and UV chunk, not the full
         distributed ``T`` object.
         """
-        if self.fg_model_domain == "image":
-            self.build_T(matrix_name=matrix_name)
-            return
+        self.build_T(matrix_name=matrix_name)
+        return
 
         path = _dense_matrix_path_impl(self, matrix_name)
         layout = get_T_component_layout_impl(self)
