@@ -47,37 +47,6 @@ def _log_build(bm, message: str) -> None:
         print(f"[BuildMatrices] {message}", flush=True)
 
 
-def get_T_component_layout(bm) -> dict[str, dict[str, int]]:
-    """
-    Return the direct-``T`` column layout for EoR and foreground components.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance supplying the UV counts and basis dimensions.
-
-    Returns
-    -------
-    dict[str, dict[str, int]]
-        Mapping from component name to ``{"col_start", "col_stop"}`` slices.
-    """
-    eor_width = int(bm.n_uv_eor * (bm.n_eta - 1))
-    foreground_width = int(bm.n_fg_spatial_modes * bm.n_fg_components)
-
-    col = 0
-    layout: dict[str, dict[str, int]] = {}
-    for name, width in (
-        ("eor", eor_width),
-        ("foreground", foreground_width),
-    ):
-        layout[name] = {
-            "col_start": col,
-            "col_stop": col + width,
-        }
-        col += width
-    return layout
-
-
 def check_if_matrix_exists(bm, matrix_name: str) -> bool:
     """
     Return ``True`` when a saved dense matrix exists on disk.
@@ -237,7 +206,7 @@ def padded_visibility_partition(
     return row0, row1, rows_per_process
 
 
-def save_dense_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
+def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
     """
     Save a dense matrix to disk as `.npy`.
 
@@ -275,42 +244,6 @@ def save_dense_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
         multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
 
 
-def save_matrix(bm, matrix_name: str, matrix) -> None:
-    """
-    Save a matrix to disk as `.npy`.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory.
-    matrix_name : str
-        Logical matrix name.
-    matrix : jax.Array or numpy.ndarray
-        Matrix to persist.
-    """
-    save_dense_matrix(bm, matrix_name, matrix)
-
-
-def load_dense_matrix(bm, matrix_name: str) -> jnp.ndarray:
-    """
-    Load a dense matrix from disk.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory.
-    matrix_name : str
-        Logical matrix name.
-
-    Returns
-    -------
-    jax.numpy.ndarray
-        Dense matrix loaded from the saved `.npy` file.
-    """
-    path = _dense_matrix_path(bm, matrix_name)
-    return jnp.array(np.load(path))
-
-
 def load_matrix(bm, matrix_name: str):
     """
     Load a saved dense matrix from disk.
@@ -327,6 +260,7 @@ def load_matrix(bm, matrix_name: str):
     jax.numpy.ndarray
         Dense matrix loaded from disk.
     """
-    if _dense_matrix_path(bm, matrix_name).exists():
-        return load_dense_matrix(bm, matrix_name)
+    path = _dense_matrix_path(bm, matrix_name)
+    if path.exists():
+        return jnp.array(np.load(path))
     raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
