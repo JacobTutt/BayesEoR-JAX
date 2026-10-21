@@ -1,26 +1,12 @@
-import importlib.util
-from pathlib import Path
-
 import jax.numpy as jnp
 import numpy as np
 
-MODULE_PATH = (
-    Path(__file__).parents[1]
-    / "bayeseor_jax"
-    / "build_matricies"
-    / "forward_model.py"
+from bayeseor_jax import (
+    build_T_eor_core,
+    build_T_fg_core,
+    build_foreground_spectral_basis,
+    build_sky_to_visibility_core,
 )
-SPEC = importlib.util.spec_from_file_location("forward_model", MODULE_PATH)
-forward_model = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(forward_model)
-
-build_T_eor_core = forward_model.build_T_eor_core
-build_T_fg_core = forward_model.build_T_fg_core
-build_foreground_spectral_basis = (
-    forward_model.build_foreground_spectral_basis
-)
-build_sky_to_visibility_core = forward_model.build_sky_to_visibility_core
 
 
 def test_sky_to_visibility_matches_explicit_measurement_equation():
