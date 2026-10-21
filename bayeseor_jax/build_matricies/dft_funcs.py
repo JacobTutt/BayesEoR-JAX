@@ -1,13 +1,7 @@
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-import numpy as np
-from jax.experimental import sparse
 
-from typing import Optional, Sequence, Union
-
-
-from .lssm_model_space import build_lssm_basis
 
 def build_nudft_matrix(
     coords_in: jnp.ndarray, 
@@ -60,141 +54,14 @@ def build_nudft_matrix(
     # 2j * pi * phase converts the geometric distance into a phase angle.
     return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
 
-# def reorder_fuv_to_uvf(
-#     n_uv: int,
-#     n_freq: int,
-# ) -> jnp.ndarray:
-#     """
-#     Build the visibility-ordered -> channel-ordered gridding matrix.
-
-#     This operator reorders a vector arranged by UV-pixel blocks into one
-#     arranged by frequency blocks:
-
-#     Vis-ordered (UV-major):
-#         [ (u0,v0, all f), (u1,v1, all f), ... ]
-
-#     Chan-ordered (Freq-major):
-#         [ (f0, all uv), (f1, all uv), ... ]
-
-#     In matrix terms, this is a pure permutation matrix with exactly one
-#     `1` per row and column.
-
-#     Parameters
-#     ----------
-#     n_uv : int
-#         Number of UV modes.
-#     n_freq : int
-#         Number of frequency channels.
-
-#     Returns
-#     -------
-#     gridding_matrix : jnp.ndarray
-#         Mapping matrix of shape (n_uv*n_freq, n_uv*n_freq).
-#     """
-#     # Row/column index construction without Python loops.
-#     # Row index: (freq-major) linear index = f * n_uv + uv
-#     chan = jnp.arange(n_freq, dtype=jnp.int32)[:, jnp.newaxis]  # (n_freq, 1)
-#     vis = jnp.arange(n_uv, dtype=jnp.int32)[jnp.newaxis, :]     # (1, n_uv)
-
-#     rows = (chan * n_uv + vis).reshape(-1)                     # (n_freq*n_uv,)
-#     # Column index: (uv-major) linear index = uv * n_freq + f
-#     cols = (chan + vis * n_freq).reshape(-1)                   # (n_freq*n_uv,)
-
-#     matrix_dims = (n_uv * n_freq, n_uv * n_freq)
-#     return jnp.zeros(matrix_dims, dtype=jnp.float32).at[rows, cols].set(1.0)
-
-
-# def sparse_block_diag_repeat(block: jnp.ndarray, n_repeats: int) -> sparse.BCOO:
-#     """
-#     Build a sparse block-diagonal matrix by repeating a dense 2D block.
-
-#     Parameters
-#     ----------
-#     block : jnp.ndarray
-#         Dense 2D block of shape (n_rows, n_cols).
-#     n_repeats : int
-#         Number of times to repeat the block along the diagonal.
-
-#     Returns
-#     -------
-#     block_diag : sparse.BCOO
-#         Sparse block-diagonal matrix of shape
-#         (n_repeats * n_rows, n_repeats * n_cols).
-#     """
-#     n_rows, n_cols = block.shape
-#     k = jnp.arange(n_repeats, dtype=jnp.int32)
-
-#     # Base indices for a single block.
-#     r0 = jnp.arange(n_rows, dtype=jnp.int32)[:, jnp.newaxis]
-#     c0 = jnp.arange(n_cols, dtype=jnp.int32)[jnp.newaxis, :]
-#     r0 = jnp.broadcast_to(r0, (n_rows, n_cols)).reshape(-1)
-#     c0 = jnp.broadcast_to(c0, (n_rows, n_cols)).reshape(-1)
-
-#     # Offsets for each block along the diagonal.
-#     row_offsets = (k * n_rows)[:, jnp.newaxis]
-#     col_offsets = (k * n_cols)[:, jnp.newaxis]
-
-#     rows = (row_offsets + r0[jnp.newaxis, :]).reshape(-1)
-#     cols = (col_offsets + c0[jnp.newaxis, :]).reshape(-1)
-
-#     data = jnp.tile(block.reshape(-1), n_repeats)
-#     indices = jnp.stack([rows, cols], axis=1)
-#     shape = (n_repeats * n_rows, n_repeats * n_cols)
-
-#     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
-
-
-# def sparse_block_diag_two(a: sparse.BCOO, b: sparse.BCOO) -> sparse.BCOO:
-#     """
-#     Build a sparse block-diagonal matrix from two BCOO matrices.
-
-#     Parameters
-#     ----------
-#     a, b : sparse.BCOO
-#         2D sparse matrices to place on the block diagonal.
-
-#     Returns
-#     -------
-#     block_diag : sparse.BCOO
-#         Sparse block-diagonal matrix of shape
-#         (a.rows + b.rows, a.cols + b.cols).
-#     """
-
-#     a_rows, a_cols = a.shape
-#     b_rows, b_cols = b.shape
-
-#     # Offsets for the second block.
-#     offset = jnp.array([a_rows, a_cols], dtype=jnp.int32)
-
-#     data = jnp.concatenate([a.data, b.data], axis=0)
-#     indices = jnp.concatenate([a.indices, b.indices + offset], axis=0)
-#     shape = (a_rows + b_rows, a_cols + b_cols)
-
-#     return sparse.BCOO((data, indices), shape=shape, unique_indices=True)
-
-
-    
-
 
 def inverse_udft_1d_rect(
     n_freq: int,
     n_eta: int,
-    n_modes: int = 0,
-    n_powerlaws: Optional[int] = None,
-    beta: Optional[Union[float, Sequence[float], jnp.ndarray]] = None,
-    f0_mhz: Optional[float] = None,
-    df_mhz: Optional[float] = None,
     include_eta0: bool = True
 ) -> jnp.ndarray:
     """
-    Generate a 1D Uniform DFT matrix transforming delay to frequency space as well as
-    optional large spectral scale model (LSSM) basis vectors.
-
-    Used in the construction of `Fz` for the:
-    - Rectilinear EoR Model
-    - Rectilinear Foreground Model
-    
-    For the subharmonic grid, see `inverse_udft_1d_sub`.
+    Generate the 1D DFT matrix mapping EoR delay modes to frequency.
 
     Parameters
     ----------
@@ -202,17 +69,6 @@ def inverse_udft_1d_rect(
         Number of frequency channels.
     n_eta : int
         Number of Line of Sight (LoS, frequency axis) Fourier modes.
-    n_modes : int
-        Number of quadratic Large Spectral Scale Model (LSSM) basis vectors.
-    n_powerlaws : int
-        Number of power law LSSM basis vectors.  Overrides nq, i.e. replaces
-        npl <= nq quadratic basis vectors with power law basis vectors.
-    beta : float or array-like
-        Spectral index(indices) for the `npl` power law LSSM basis vectors.
-    f0_mhz : float
-        Minimum frequency in megahertz.
-    df_mhz : float
-        Frequency channel width in megahertz.
     include_eta0 : bool
         If True, include eta=0 in the DFT, otherwise exclude it.  Defaults
         to True.
@@ -233,26 +89,10 @@ def inverse_udft_1d_rect(
         eta0_idx = n_eta // 2
         index_eta = jnp.concatenate([index_eta[:eta0_idx], index_eta[eta0_idx + 1 :]])
 
-    # Define the 1D IDFT matrix for the Fourier modes. 
-    # As different normalisations are applied to the:
-    # LSSM, full eta grid and central eta=0 mode - these are applied downstream 
+    # Different normalisations for the eta grid are applied downstream.
     phase = (index_f[:, jnp.newaxis] @ index_eta[jnp.newaxis, :]) / float(n_freq)
     
     # Sign is -1 for an Inverse Transform (Delay -> Frequency)
     idft_array = jnp.exp(-2j * jnp.pi * phase).astype(jnp.complex128)
-
-    # Handle Large Spectral Scale Model (LSSM)
-    if n_modes > 0:
-        n_powerlaws = 0 if n_powerlaws is None else n_powerlaws
-        lssm_basis_vectors = build_lssm_basis(
-            n_freq=n_freq,
-            n_modes=n_modes,
-            n_powerlaws=n_powerlaws,
-            f0_mhz=f0_mhz,
-            df_mhz=df_mhz,
-            beta=beta,
-        ).astype(jnp.complex128)
-        # Combine the Fourier basis and LSSM basis
-        idft_array = jnp.hstack((idft_array, lssm_basis_vectors))
 
     return idft_array
