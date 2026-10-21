@@ -276,16 +276,6 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--nside", type=int, required=True, help="HEALPix nside.")
         self.add_argument("--fov-eor", type=float, required=True, help="Circular EoR FoV in degrees.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")
-        self.add_argument(
-            "--fg-core-fov",
-            type=float,
-            help="Optional central high-resolution FG FoV in degrees for multiresolution image-domain FG.",
-        )
-        self.add_argument(
-            "--fg-outer-nside",
-            type=int,
-            help="Optional lower HEALPix nside used outside fg_core_fov for multiresolution image-domain FG.",
-        )
         self.add_argument("--telescope-latlonalt", type=list[float], required=True, help="Telescope location [lat_deg, lon_deg, alt_m].")
 
         # Beam / instrument

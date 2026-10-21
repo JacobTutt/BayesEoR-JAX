@@ -79,7 +79,6 @@ These parameters control k-bin coverage and dense matrix size.
 | --- | --- |
 | `fov_fg` | Foreground model field of view. Defaults to `fov_eor`. |
 | `beta_fg` | Spectral indices for foreground power-law modes. |
-| `fg_core_fov`, `fg_outer_nside` | Optional coarser grouping of the outer spherical foreground field. |
 
 Use a larger `fov_fg` when beam sidelobes or horizon emission are scientifically relevant.
 

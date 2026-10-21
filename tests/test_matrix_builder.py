@@ -49,7 +49,6 @@ def _minimal_builder(tmp_path):
         time_ind_center=0,
         eor_fg_shared_axis=jnp.asarray([0, 1]),
         pixel_area_sr=0.5,
-        use_multires_fg=False,
     )
     return builder
 
@@ -107,7 +106,7 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
 def test_builder_reuses_precomputed_image_geometry(tmp_path):
     geometry = SimpleNamespace(
         az_za_fg=jnp.zeros((1, 2, 1)),
-        n_fg_groups=1,
+        n_pix_fg=1,
     )
 
     builder = BuildMatrices(

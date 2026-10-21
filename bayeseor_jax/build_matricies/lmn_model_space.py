@@ -10,14 +10,6 @@ the pipeline. The key design is:
 - evaluate their time-dependent ``(l, m, n)`` and ``(az, za)`` coordinates for
   the visibility response
 
-The same class also supports an optional multiresolution foreground geometry for
-image-domain foreground modeling:
-
-- a central high-resolution core FoV remains at the native HEALPix ``nside``
-- the outer foreground region can be grouped onto a lower-resolution HEALPix
-  parent grid
-- grouping is still defined on the full high-resolution union mask, so the
-  resulting grouped model remains drift-scan aware
 """
 
 import jax
@@ -45,16 +37,6 @@ class LMN_ModelSpace:
     fov_fg : float, optional
         Circular field of view in degrees for the foreground model.
         Defaults to `fov_eor`.
-    fg_core_fov : float, optional
-        Optional central high-resolution foreground FoV in degrees. When set
-        together with ``fg_outer_nside``, the foreground image model becomes
-        multiresolution: pixels that ever enter this core FoV remain at full
-        resolution, while the outer region may be grouped.
-    fg_outer_nside : int, optional
-        Optional lower HEALPix ``nside`` used to group the outer foreground
-        region. Grouping is only active when both ``fg_core_fov`` and
-        ``fg_outer_nside`` are provided and satisfy
-        ``fg_core_fov < fov_fg`` and ``fg_outer_nside < nside``.
     nside : int, optional
         HEALPix Nside resolution. Defaults to 128.
     sky_mask_time_mode : {"union", "center"}, optional
@@ -82,24 +64,6 @@ class LMN_ModelSpace:
     eor_fg_shared_axis : jnp.ndarray
         Boolean mask over FG pixels indicating which are also in the EoR FoV,
         shape (n_pix_fg,).
-    fg_group_labels : jnp.ndarray
-        Integer group label for every high-resolution FG pixel. Equal labels
-        indicate that those child pixels share one image-domain foreground
-        coefficient in the multiresolution model.
-    fg_group_pixel_counts : jnp.ndarray
-        Number of native high-resolution FG pixels represented by each spatial
-        group. This records the grouped geometry for diagnostics and provides
-        the spatial-group layout used when constructing the image-domain FG
-        prior. It does not scale the prior precision by group size.
-    fg_group_is_highres : jnp.ndarray
-        Boolean flag per spatial group. ``True`` means this group corresponds to
-        a single retained high-resolution FG pixel. ``False`` means it is a
-        grouped outer low-resolution parent built from multiple high-resolution
-        children.
-    n_fg_groups : int
-        Number of effective foreground spatial groups. This equals ``n_pix_fg``
-        in the old full-resolution image-domain model and is smaller whenever
-        multiresolution grouping is active.
     angular_lm_extent_eor, angular_lm_extent_fg : dict
         Central-time local angular-offset extent summaries on the fixed
         HEALPix pixel sets. These are built from the full ``(l, m, n)``
@@ -114,8 +78,6 @@ class LMN_ModelSpace:
         self,
         fov_eor: float,
         fov_fg: Optional[float] = None,
-        fg_core_fov: Optional[float] = None,
-        fg_outer_nside: Optional[int] = None,
         nside: int = 128,
         sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = hera_location,
@@ -128,8 +90,6 @@ class LMN_ModelSpace:
         self.fov_eor = fov_eor
         # If not foreground FoV is provided, use the EoR FoV as default.
         self.fov_fg = fov_fg if fov_fg is not None else fov_eor
-        self.fg_core_fov = fg_core_fov
-        self.fg_outer_nside = fg_outer_nside
         # Check if the EoR and foreground FoVs are the same.
         self.fovs_match = bool(self.fov_fg == self.fov_eor)
 
@@ -169,7 +129,6 @@ class LMN_ModelSpace:
 
         # Compute the (l, m, n) coordinates and (az, za) for FG pixels.
         self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
-        self._refresh_fg_multiresolution()
 
         self.angular_lm_extent_fg = self._angular_lm_extent(
             self.lmn_fg[self.time_ind_center]
@@ -300,117 +259,6 @@ class LMN_ModelSpace:
         pix_indices_fg = jnp.asarray(pix_indices_fg_np, dtype=jnp.int64)
         eor_fg_shared_axis = jnp.isin(pix_indices_fg, pix_indices_eor)
         return pix_indices_eor, pix_indices_fg, eor_fg_shared_axis
-
-    def _refresh_fg_multiresolution(self) -> None:
-        """
-        Build multiresolution FG grouping labels on the current high-res FG mask.
-
-        The grouping rule is conservative at the core boundary:
-
-        - pixels that ever enter the high-resolution core FoV stay high
-          resolution
-        - if a lower-resolution parent contains **any** high-resolution core
-          child, then all FG children of that parent remain high resolution
-        - only fully outer parents, which are untouched by the core, are
-          collapsed into grouped outer coefficients
-
-        At the outer FG boundary the grouped parents may be only partially
-        populated by the time-union mask. In that case the grouped coefficient
-        simply represents the subset of high-resolution children that are
-        actually present in the FG union mask.
-
-        The output of this routine is a grouping map from native high-res FG
-        pixels to effective image-domain spatial coefficients:
-
-        - ``fg_group_labels[p]`` gives the effective coefficient index for
-          high-resolution FG pixel ``p``
-        - ``fg_group_pixel_counts[g]`` is the number of native FG pixels
-          represented by grouped coefficient ``g``
-
-        Downstream, the image-domain FG block of ``T`` is reduced by summing
-        the high-resolution child columns that share a group label.
-        """
-        pix_fg = np.asarray(self.pix_indices_fg, dtype=np.int64)
-        n_pix_fg = int(pix_fg.size)
-        self.pix_indices_fg_core = np.asarray([], dtype=np.int64)
-        self.fg_group_labels = np.arange(n_pix_fg, dtype=np.int64)
-        self.fg_group_pixel_counts = np.ones((n_pix_fg,), dtype=np.int32)
-        self.fg_group_is_highres = np.ones((n_pix_fg,), dtype=bool)
-        self.n_fg_groups = int(n_pix_fg)
-        self.use_multires_fg = False
-
-        if (
-            self.fg_core_fov is None
-            or self.fg_outer_nside is None
-            or int(self.fg_outer_nside) >= int(self.nside)
-            or float(self.fg_core_fov) >= float(self.fov_fg)
-        ):
-            return
-
-        nside_lo = int(self.fg_outer_nside)
-        nside_hi = int(self.nside)
-        if nside_hi % nside_lo != 0:
-            raise ValueError(
-                f"fg_outer_nside={nside_lo} must divide nside={nside_hi}."
-            )
-        ratio = nside_hi // nside_lo
-        if ratio & (ratio - 1):
-            raise ValueError(
-                "fg_outer_nside must differ from nside by a power-of-two factor "
-                f"(got nside={nside_hi}, fg_outer_nside={nside_lo})."
-            )
-
-        radius_rad_core = jnp.radians(float(self.fg_core_fov) / 2.0)
-        pix_indices_core_np = self._query_disc_union(self.field_centers, radius_rad_core)
-        core_mask = np.isin(pix_fg, pix_indices_core_np)
-        self.pix_indices_fg_core = np.asarray(
-            pix_fg[core_mask],
-            dtype=np.int64,
-        )
-
-        child_per_parent = int(ratio * ratio)
-        pix_fg_nested = np.asarray(jhp.ring2nest(nside_hi, pix_fg), dtype=np.int64)
-        parent_nested = pix_fg_nested // child_per_parent
-        parent_ids_with_core = np.unique(parent_nested[core_mask])
-        # Any low-resolution parent touched by the high-resolution core is
-        # promoted back to fully high-resolution treatment. This avoids a
-        # grouped parent straddling the core boundary.
-        core_touched_mask = np.isin(parent_nested, parent_ids_with_core)
-
-        labels = np.full((n_pix_fg,), -1, dtype=np.int64)
-        group_is_highres: list[bool] = []
-        next_label = 0
-
-        hi_axis = np.flatnonzero(core_touched_mask)
-        if hi_axis.size:
-            labels[hi_axis] = np.arange(next_label, next_label + hi_axis.size, dtype=np.int64)
-            group_is_highres.extend([True] * int(hi_axis.size))
-            next_label += int(hi_axis.size)
-
-        outer_axis = np.flatnonzero(~core_touched_mask)
-        if outer_axis.size:
-            outer_parents = parent_nested[outer_axis]
-            unique_outer_parents = np.unique(outer_parents)
-            parent_to_label = {
-                int(parent): int(next_label + i)
-                for i, parent in enumerate(unique_outer_parents.tolist())
-            }
-            labels[outer_axis] = np.asarray(
-                [parent_to_label[int(parent)] for parent in outer_parents],
-                dtype=np.int64,
-            )
-            group_is_highres.extend([False] * int(unique_outer_parents.size))
-            next_label += int(unique_outer_parents.size)
-
-        if np.any(labels < 0):
-            raise ValueError("Failed to assign all FG pixels to multiresolution groups.")
-
-        group_counts = np.bincount(labels, minlength=next_label).astype(np.int32)
-        self.fg_group_labels = np.asarray(labels, dtype=np.int64)
-        self.fg_group_pixel_counts = np.asarray(group_counts, dtype=np.int32)
-        self.fg_group_is_highres = np.asarray(group_is_highres, dtype=bool)
-        self.n_fg_groups = int(next_label)
-        self.use_multires_fg = True
 
     def _angular_lm_extent(self, lmn_coords: jnp.ndarray) -> dict[str, float]:
         """

@@ -88,8 +88,6 @@ def run_setup(
     nside: int = 128,
     fov_eor: float = 10.0,
     fov_fg: float | None = None,
-    fg_core_fov: float | None = None,
-    fg_outer_nside: int | None = None,
     telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0),
     beam_type: str = "uniform",
     peak_amp: float = 1.0,
@@ -301,8 +299,6 @@ def run_setup(
     lmn_model_space = LMN_ModelSpace(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
-        fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
-        fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         nside=int(nside),
         sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
@@ -339,8 +335,6 @@ def run_setup(
         "du_eor": float(du_eor),
         "dv_eor": float(dv_eor),
         "sky_mask_time_mode": str(sky_mask_time_mode),
-        "fg_core_fov": None if fg_core_fov is None else float(fg_core_fov),
-        "fg_outer_nside": None if fg_outer_nside is None else int(fg_outer_nside),
         "beta_fg": None if beta_fg is None else list(beta_fg),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
@@ -490,8 +484,6 @@ def run_setup(
         nside=int(nside),
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
-        fg_core_fov=None if fg_core_fov is None else float(fg_core_fov),
-        fg_outer_nside=None if fg_outer_nside is None else int(fg_outer_nside),
         n_t=int(n_t),
         d_t=float(d_t),
         lmn_model_space=lmn_model_space,
@@ -517,12 +509,6 @@ def run_setup(
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     n_params = bm.build_minimum_likelihood_stack(vis_noisy)
     setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
-    setup_args_dict["use_multires_fg"] = bool(bm.lmn_model_space.use_multires_fg)
-    setup_args_dict["n_fg_groups"] = int(bm.lmn_model_space.n_fg_groups)
-    setup_args_dict["n_fg_group_highres"] = int(np.sum(bm.lmn_model_space.fg_group_is_highres))
-    setup_args_dict["n_fg_group_lowres"] = int(
-        bm.lmn_model_space.n_fg_groups - np.sum(bm.lmn_model_space.fg_group_is_highres)
-    )
 
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.

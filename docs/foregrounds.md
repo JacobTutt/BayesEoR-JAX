@@ -25,8 +25,8 @@ then by image-domain spatial mode.
 
 `fov_fg` may be substantially larger than the cosmological field because
 foreground emission enters through beam sidelobes and the chromatic horizon
-response. Optional `fg_core_fov` and `fg_outer_nside` settings group the outer
-sky at lower angular resolution while retaining the same physical model.
+response. The foreground field uses a single HEALPix resolution; subsequent
+dimensionality reduction is performed in visibility space using the KL basis.
 
 Large operators are divided into contiguous time ranges using the active JAX
 process topology, built in frequency-sized CPU blocks, and written into a

@@ -61,8 +61,6 @@ class BuildMatrices:
         du_eor: float,
         n_v_eor: int,
         dv_eor: float,
-        fg_core_fov: Optional[float] = None,
-        fg_outer_nside: Optional[int] = None,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
@@ -106,8 +104,6 @@ class BuildMatrices:
         self.n_uv_eor = (n_u_eor * n_v_eor) - 1
 
         # Store foreground spectral-model settings.
-        self.fg_core_fov = fg_core_fov
-        self.fg_outer_nside = fg_outer_nside
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
         elif np.isscalar(beta_fg):
@@ -182,8 +178,6 @@ class BuildMatrices:
         self.lmn_model_space = lmn_model_space or LMN_ModelSpace(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
-            fg_core_fov=self.fg_core_fov,
-            fg_outer_nside=self.fg_outer_nside,
             nside=self.nside,
             sky_mask_time_mode=self.sky_mask_time_mode,
             telescope_latlonalt=self.telescope_latlonalt,
@@ -207,48 +201,7 @@ class BuildMatrices:
             self.lmn_model_space.az_za_fg, self.freq_hz
             )  # Shape (n_freq, n_t, n_pix_fg)
 
-        self.n_fg_spatial_modes = int(self.lmn_model_space.n_fg_groups)
-
-    def _aggregate_fg_image_response(self, fg_response: jnp.ndarray) -> jnp.ndarray:
-        """
-        Aggregate the high-resolution FG pixel axis into multiresolution groups.
-
-        Parameters
-        ----------
-        fg_response : jnp.ndarray
-            Array whose final axis is the high-resolution FG pixel axis.
-
-        Returns
-        -------
-        jnp.ndarray
-            Array with the same leading axes and grouped FG spatial modes on
-            the final axis.
-
-        Notes
-        -----
-        If a grouped spatial mode ``g`` contains high-resolution child pixels
-        ``p`` then the grouped image response is
-
-        ``F_grouped[..., g] = sum_p F_hi[..., p]``.
-
-        The corresponding image-domain FG coefficient therefore acts as a
-        single shared brightness/amplitude for every child in that group. The
-        grouped image-domain prior in ``PhiInverse`` retains the same base
-        brightness precision for every group, treating neighbouring children
-        as strongly correlated.
-        """
-        if not self.lmn_model_space.use_multires_fg:
-            return fg_response
-        labels = jnp.asarray(np.asarray(self.lmn_model_space.fg_group_labels))
-        n_groups = int(self.lmn_model_space.n_fg_groups)
-        grouped = jnp.zeros(
-            fg_response.shape[:-1] + (n_groups,),
-            dtype=fg_response.dtype,
-        )
-        # Summing the child columns means one grouped coefficient acts as a
-        # shared brightness/amplitude for every high-resolution child pixel in
-        # that group.
-        return grouped.at[..., labels].add(fg_response)
+        self.n_fg_spatial_modes = int(self.lmn_model_space.n_pix_fg)
 
 
     # ---------------------------
@@ -317,10 +270,9 @@ class BuildMatrices:
             )
 
         if component in {"all", "foreground"}:
-            foreground_response = self._aggregate_fg_image_response(response)
             components.append(
                 build_T_fg_core(
-                    foreground_response,
+                    response,
                     foreground_spectral_basis[i_f : i_f + 1],
                 )
             )
