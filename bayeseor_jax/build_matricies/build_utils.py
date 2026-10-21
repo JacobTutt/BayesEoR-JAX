@@ -62,7 +62,7 @@ def get_T_component_layout(bm) -> dict[str, dict[str, int]]:
         Mapping from component name to ``{"col_start", "col_stop"}`` slices.
     """
     eor_width = int(bm.n_uv_eor * (bm.n_eta - 1))
-    foreground_width = int(bm.n_fg_spatial_modes * (1 + bm.n_modes_fg))
+    foreground_width = int(bm.n_fg_spatial_modes * bm.n_fg_components)
 
     col = 0
     layout: dict[str, dict[str, int]] = {}

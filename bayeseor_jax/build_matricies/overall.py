@@ -25,13 +25,13 @@ from .dft_funcs import (
     inverse_udft_1d_rect,
     build_nudft_matrix,
 )
-from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
 from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
 from .forward_model import (
     build_T_eor_core,
     build_T_fg_core,
+    build_foreground_spectral_basis,
     build_sky_to_visibility_core,
 )
 from .build_utils import (
@@ -65,8 +65,6 @@ class BuildMatrices:
         dv_eor: float,
         fg_core_fov: Optional[float] = None,
         fg_outer_nside: Optional[int] = None,
-        n_modes_fg: int = 0,
-        n_powerlaws_fg: int = 0,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
@@ -110,16 +108,15 @@ class BuildMatrices:
         self.n_uv_eor = (n_u_eor * n_v_eor) - 1
 
         # Store foreground spectral-model settings.
-        self.n_modes_fg = n_modes_fg
         self.fg_core_fov = fg_core_fov
         self.fg_outer_nside = fg_outer_nside
-        self.n_powerlaws_fg = n_powerlaws_fg
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
         elif np.isscalar(beta_fg):
             self.beta_fg = [float(beta_fg)]
         else:
             self.beta_fg = list(beta_fg)
+        self.n_fg_components = 1 + len(self.beta_fg)
         self.image_domain_trim = bool(image_domain_trim)
         self.sky_mask_time_mode = str(sky_mask_time_mode)
 
@@ -201,7 +198,7 @@ class BuildMatrices:
         if self.image_domain_trim:
             self.n_fg_pixels_trimmed = int(
                 self.lmn_model_space.trim_fg_outer_pixels_for_total_param_divisibility(
-                    n_modes_fg=int(self.n_modes_fg),
+                    n_fg_components=self.n_fg_components,
                     n_uv_eor=int(self.n_uv_eor),
                     n_eta=int(self.n_eta),
                     divisor=4,
@@ -295,18 +292,11 @@ class BuildMatrices:
 
     def _foreground_spectral_basis(self) -> jnp.ndarray:
         """Return the image-domain foreground basis ``Q_z``."""
-        constant = jnp.ones((self.n_freq, 1), dtype=jnp.complex128)
-        if self.n_modes_fg == 0:
-            return constant
-        smooth = build_lssm_basis(
-            n_freq=self.n_freq,
-            n_modes=self.n_modes_fg,
-            n_powerlaws=self.n_powerlaws_fg,
-            f0_mhz=self.f0_mhz,
-            df_mhz=self.df_mhz,
-            beta=self.beta_fg,
+        return build_foreground_spectral_basis(
+            self.freq_hz / 1e6,
+            self.f0_mhz,
+            spectral_indices=tuple(-beta for beta in self.beta_fg),
         )
-        return jnp.concatenate([constant, smooth], axis=1)
 
     def _build_forward_operator_row_block(
         self,
@@ -362,9 +352,7 @@ class BuildMatrices:
     def _forward_operator_width(self, component: str) -> int:
         """Return the number of columns in a selected forward operator."""
         eor_width = self.n_uv_eor * (self.n_eta - 1)
-        foreground_width = self.n_fg_spatial_modes * (
-            1 + self.n_modes_fg
-        )
+        foreground_width = self.n_fg_spatial_modes * self.n_fg_components
         if component == "eor":
             return int(eor_width)
         if component == "foreground":

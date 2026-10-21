@@ -17,11 +17,11 @@ def _minimal_builder(tmp_path):
     builder.d_eta = 1.0
     builder.du_eor = 1.0
     builder.dv_eor = 1.0
-    builder.n_modes_fg = 2
-    builder.n_powerlaws_fg = 2
     builder.beta_fg = [2.0, 3.0]
+    builder.n_fg_components = 3
     builder.f0_mhz = 100.0
     builder.df_mhz = 10.0
+    builder.freq_hz = jnp.asarray([100.0e6, 110.0e6])
     builder.n_fg_spatial_modes = 2
     builder.array_save_directory = tmp_path
     builder.inst_uvw_irad = jnp.asarray(

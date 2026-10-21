@@ -507,8 +507,6 @@ def run_setup(
         du_eor=float(du_eor),
         n_v_eor=int(n_v_eor),
         dv_eor=float(dv_eor),
-        n_modes_fg=int(n_modes_fg),
-        n_powerlaws_fg=int(n_powerlaws_fg),
         beta_fg=beta_fg,
         n_freq=int(n_freq),
         f0_mhz=float(f0_mhz),

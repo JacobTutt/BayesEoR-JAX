@@ -584,7 +584,7 @@ class LMN_ModelSpace:
     def trim_fg_outer_pixels_for_total_param_divisibility(
         self,
         *,
-        n_modes_fg: int,
+        n_fg_components: int,
         n_uv_eor: int,
         n_eta: int,
         divisor: int = 4,
@@ -594,9 +594,8 @@ class LMN_ModelSpace:
 
         Parameters
         ----------
-        n_modes_fg : int
-            Number of FG/LSSM spectral modes coupled to each non-monopole FG
-            pixel.
+        n_fg_components : int
+            Number of spectral coefficient fields per foreground spatial mode.
         n_uv_eor : int
             Number of EoR UV modes.
         n_eta : int
@@ -614,16 +613,10 @@ class LMN_ModelSpace:
         matrix-layout counts explicitly rather than reaching into
         ``BuildMatrices`` state.
 
-        For image-domain FG, each retained spatial mode contributes
-        ``1 + n_modes_fg`` non-monopole parameters:
-
-        - one ``eta0`` coefficient
-        - ``n_modes_fg`` LSSM coefficients
-
         The total parameter count checked here is therefore:
 
         ``n_uv_eor * (n_eta - 1)``
-        ``+ n_fg_groups * (1 + n_modes_fg)``
+        ``+ n_fg_groups * n_fg_components``
         Because trimming is only needed to make the *final* parameter axis in
         ``T`` and ``T_Ninv_T`` divisible by ``divisor``, the check is performed
         after any multiresolution regrouping. If grouping is active, removing a
@@ -636,7 +629,7 @@ class LMN_ModelSpace:
         if divisor < 1:
             raise ValueError("divisor must be >= 1")
 
-        per_group_width = 1 + int(n_modes_fg)
+        per_group_width = int(n_fg_components)
         eor_width = int(n_uv_eor) * (int(n_eta) - 1)
         initial_trimmed = int(self.n_fg_pixels_trimmed)
 
