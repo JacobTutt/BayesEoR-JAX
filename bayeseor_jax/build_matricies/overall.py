@@ -15,7 +15,6 @@ import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
 from jax.experimental import multihost_utils
-from jax.experimental.pjit import pjit
 from functools import partial
 from jax.sharding import Mesh, PartitionSpec as P
 
@@ -569,7 +568,7 @@ class BuildMatrices:
 
     @staticmethod
     @partial(
-        pjit,
+        jax.jit,
         in_shardings=(P(("host", "dev"), None), P(("host", "dev")), None, None),
         out_shardings=P(("host", "dev"), None),
         static_argnums=(4, 5),
@@ -949,7 +948,7 @@ class BuildMatrices:
             mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
 
             @partial(
-                pjit,
+                jax.jit,
                 in_shardings=(P(("host", "dev"), None), P(("host", "dev"))),
                 out_shardings=P(None),
             )
