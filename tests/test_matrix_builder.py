@@ -76,3 +76,29 @@ def test_uv_model_space_contains_only_cosmological_modes():
 
     assert model_space.uv_eor.shape == (2, 8)
     assert not hasattr(model_space, "uv_fg")
+
+
+def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
+    builder = BuildMatrices.__new__(BuildMatrices)
+    builder.array_save_directory = tmp_path
+    builder.t_ninv_t_block_cols = 2
+    builder.t_ninv_t_right_block_batch = 1
+
+    T = np.asarray(
+        [
+            [1.0 + 1.0j, 2.0, -1.0j],
+            [0.5, -2.0j, 3.0],
+            [1.5 - 0.5j, 1.0, 2.0j],
+        ],
+        dtype=np.complex128,
+    )
+    Ninv = np.asarray([2.0, 0.5, 3.0], dtype=np.complex128)
+    np.save(tmp_path / "T.npy", T)
+    np.save(tmp_path / "Ninv.npy", Ninv)
+
+    builder.save_T_Ninv_T_blockwise_memmap()
+
+    expected = T.conj().T @ (Ninv[:, None] * T)
+    np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"), expected)
+    assert not (tmp_path / "T_Ninv_T.partial.npy").exists()
+    assert not (tmp_path / "T_Ninv_T.partial.npy.ready").exists()

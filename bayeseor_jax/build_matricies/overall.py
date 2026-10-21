@@ -599,6 +599,9 @@ class BuildMatrices:
         t_path = _dense_matrix_path_impl(self, t_matrix_name)
         ninv_path = _dense_matrix_path_impl(self, ninv_matrix_name)
         out_path = _dense_matrix_path_impl(self, matrix_name)
+        partial_path = out_path.with_name(
+            f"{out_path.stem}.partial{out_path.suffix}"
+        )
         if not t_path.exists():
             raise FileNotFoundError(f"Saved matrix not found: {t_path}")
         if not ninv_path.exists():
@@ -635,7 +638,7 @@ class BuildMatrices:
         # to the same memmap and write only the blocks it owns.
         mm = _prepare_memmap_output_impl(
             self,
-            out_path,
+            partial_path,
             shape=(n_params, n_params),
             dtype=np.dtype(np.complex128),
             sync_name=f"{matrix_name}-blockwise-ready",
@@ -668,7 +671,7 @@ class BuildMatrices:
         mesh = Mesh(devices.reshape(process_count, local_device_count), ("host", "dev"))
 
         total_param_blocks = int((n_params + block_cols - 1) // block_cols)
-        with mesh:
+        with jax.set_mesh(mesh):
             # Convert each process-local host stripe into one global sharded
             # array. After this point, the block kernel can reuse the same
             # cached distributed `T` and `Ninv` for every output block.
@@ -758,8 +761,22 @@ class BuildMatrices:
                 # memmap always reflects the durable progress made so far.
                 mm.flush()
 
-            if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
-                multihost_utils.sync_global_devices(f"{matrix_name}-blockwise-done")
+        del mm
+        distributed = (
+            getattr(jax, "distributed", None) is not None
+            and jax.distributed.is_initialized()
+        )
+        if distributed:
+            multihost_utils.sync_global_devices(f"{matrix_name}-blockwise-done")
+        if process_index == 0:
+            partial_path.replace(out_path)
+            partial_path.with_suffix(
+                partial_path.suffix + ".ready"
+            ).unlink(missing_ok=True)
+        if distributed:
+            multihost_utils.sync_global_devices(
+                f"{matrix_name}-blockwise-published"
+            )
 
 
     def build_d_ninv_d(
@@ -880,7 +897,7 @@ class BuildMatrices:
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
             if pad_rows:
                 local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
-            with mesh:
+            with jax.set_mesh(mesh):
                 T = multihost_utils.host_local_array_to_global_array(
                     local_T, mesh, P(("host", "dev"), None)
                 )
