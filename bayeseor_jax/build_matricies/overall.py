@@ -29,6 +29,11 @@ from .lssm_model_space import build_lssm_basis
 from .uv_model_space import UV_ModelSpace
 from .lmn_model_space import LMN_ModelSpace
 from .beam_model import Beam_Model
+from .forward_model import (
+    build_T_eor_core,
+    build_T_fg_core,
+    build_sky_to_visibility_core,
+)
 from .build_utils import (
     _dense_matrix_path as _dense_matrix_path_impl,
     _log_build,
@@ -650,6 +655,224 @@ class BuildMatrices:
         # Contract the image-domain axis against the monopole template.
         return jnp.tensordot(finv_blocks, monopole_template, axes=([-1], [0]))
 
+    def _foreground_spectral_basis(self) -> jnp.ndarray:
+        """Return the image-domain foreground basis ``Q_z``."""
+        constant = jnp.ones((self.n_freq, 1), dtype=jnp.complex128)
+        if self.n_modes_fg == 0:
+            return constant
+        smooth = build_lssm_basis(
+            n_freq=self.n_freq,
+            n_modes=self.n_modes_fg,
+            n_powerlaws=self.n_powerlaws_fg,
+            f0_mhz=self.f0_mhz,
+            df_mhz=self.df_mhz,
+            beta=self.beta_fg,
+        )
+        return jnp.concatenate([constant, smooth], axis=1)
+
+    def _build_forward_operator_row_block(
+        self,
+        i_t: int,
+        i_f: int,
+        component: str,
+        eor_transverse_basis: jnp.ndarray,
+        eor_spectral_basis: jnp.ndarray,
+        foreground_spectral_basis: jnp.ndarray,
+    ) -> jnp.ndarray:
+        """Build one ``(time, frequency)`` row block on the active device."""
+        if component not in {"all", "eor", "foreground"}:
+            raise ValueError(
+                "component must be one of {'all', 'eor', 'foreground'}"
+            )
+
+        response = build_sky_to_visibility_core(
+            np.asarray(self.lmn_model_space.lmn_fg[i_t : i_t + 1]),
+            np.asarray(self.inst_uvw_irad[i_f : i_f + 1]),
+            np.asarray(
+                self.beam_response[i_f : i_f + 1, i_t : i_t + 1]
+            ).transpose(1, 0, 2),
+            self.lmn_model_space.pixel_area_sr,
+        )
+
+        components = []
+        if component in {"all", "eor"}:
+            eor_response = response[
+                ..., self.lmn_model_space.eor_fg_shared_axis
+            ]
+            components.append(
+                build_T_eor_core(
+                    eor_response,
+                    eor_transverse_basis,
+                    eor_spectral_basis[i_f : i_f + 1],
+                )
+            )
+
+        if component in {"all", "foreground"}:
+            foreground_response = self._aggregate_fg_image_response(response)
+            components.append(
+                build_T_fg_core(
+                    foreground_response,
+                    foreground_spectral_basis[i_f : i_f + 1],
+                )
+            )
+
+        return components[0] if len(components) == 1 else jnp.concatenate(
+            components,
+            axis=1,
+        )
+
+    def _forward_operator_width(self, component: str) -> int:
+        """Return the number of columns in a selected forward operator."""
+        eor_width = self.n_uv_eor * (self.n_eta - 1)
+        foreground_width = self.n_fg_non_monopole_spatial_modes * (
+            1 + self.n_modes_fg
+        )
+        if component == "eor":
+            return int(eor_width)
+        if component == "foreground":
+            return int(foreground_width)
+        if component == "all":
+            return int(eor_width + foreground_width)
+        raise ValueError(
+            "component must be one of {'all', 'eor', 'foreground'}"
+        )
+
+    def _build_forward_operator(
+        self,
+        *,
+        component: str,
+        matrix_name: str,
+    ) -> Path:
+        """Build a forward operator in distributed CPU row blocks.
+
+        JAX processes receive contiguous time ranges according to
+        ``jax.process_index()`` and ``jax.process_count()``. Each process builds
+        one frequency block at a time on its local CPU and writes only its
+        disjoint rows into a shared ``.npy`` memmap.
+        """
+        if component in {"all", "foreground"} and self.fg_model_domain != "image":
+            raise ValueError(
+                "The equation-level foreground operator requires "
+                "fg_model_domain='image'."
+            )
+
+        path = _dense_matrix_path_impl(self, matrix_name)
+        partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
+        n_rows = int(self.n_t * self.n_freq * self.nbls)
+        n_cols = self._forward_operator_width(component)
+        output = _prepare_memmap_output_impl(
+            self,
+            partial_path,
+            shape=(n_rows, n_cols),
+            dtype=np.dtype(np.complex128),
+            sync_name=f"{matrix_name}-forward-operator-ready",
+        )
+
+        cpu_devices = jax.local_devices(backend="cpu")
+        if not cpu_devices:
+            raise RuntimeError("No local JAX CPU device is available.")
+        cpu_device = cpu_devices[0]
+        with jax.default_device(cpu_device):
+            if component in {"all", "eor"}:
+                eor_transverse_basis = jax.device_put(
+                    np.asarray(self._uv_to_lm_eor()),
+                    cpu_device,
+                )
+                eor_spectral_basis = jax.device_put(
+                    np.asarray(
+                        inverse_udft_1d_rect(
+                            self.n_freq,
+                            self.n_eta,
+                            include_eta0=False,
+                        )
+                        * self.d_eta
+                    ),
+                    cpu_device,
+                )
+            else:
+                eor_transverse_basis = jnp.zeros((0, 0), dtype=jnp.complex128)
+                eor_spectral_basis = jnp.zeros((0, 0), dtype=jnp.complex128)
+            foreground_spectral_basis = (
+                jax.device_put(
+                    np.asarray(self._foreground_spectral_basis()),
+                    cpu_device,
+                )
+                if component in {"all", "foreground"}
+                else jnp.zeros((0, 0), dtype=jnp.complex128)
+            )
+
+            process_index = int(jax.process_index())
+            process_count = int(jax.process_count())
+            base_times, extra_times = divmod(int(self.n_t), process_count)
+            local_n_times = base_times + int(process_index < extra_times)
+            time_start = process_index * base_times + min(
+                process_index,
+                extra_times,
+            )
+            time_stop = time_start + local_n_times
+
+            _log_build(
+                self,
+                f"{matrix_name}: process {process_index}/{process_count} "
+                f"building times [{time_start}, {time_stop}) on CPU",
+            )
+            for i_t in range(time_start, time_stop):
+                for i_f in range(self.n_freq):
+                    block = self._build_forward_operator_row_block(
+                        i_t,
+                        i_f,
+                        component,
+                        eor_transverse_basis,
+                        eor_spectral_basis,
+                        foreground_spectral_basis,
+                    ).block_until_ready()
+                    row_start = (i_t * self.n_freq + i_f) * self.nbls
+                    output[row_start : row_start + self.nbls] = np.asarray(
+                        block
+                    )
+            output.flush()
+
+        del output
+        distributed = (
+            getattr(jax, "distributed", None) is not None
+            and jax.distributed.is_initialized()
+        )
+        if distributed:
+            multihost_utils.sync_global_devices(
+                f"{matrix_name}-forward-operator-done"
+            )
+        if jax.process_index() == 0:
+            partial_path.replace(path)
+            partial_path.with_suffix(
+                partial_path.suffix + ".ready"
+            ).unlink(missing_ok=True)
+        if distributed:
+            multihost_utils.sync_global_devices(
+                f"{matrix_name}-forward-operator-published"
+            )
+        return path
+
+    def build_T_eor(self, *, matrix_name: str = "T_eor") -> Path:
+        """Build and save :math:`T_{21}=F^{-1}P F'F_z`."""
+        return self._build_forward_operator(
+            component="eor",
+            matrix_name=matrix_name,
+        )
+
+    def build_T_fg(self, *, matrix_name: str = "T_fg") -> Path:
+        """Build and save :math:`T_{\rm FG}=F^{-1}P Q_z`."""
+        return self._build_forward_operator(
+            component="foreground",
+            matrix_name=matrix_name,
+        )
+
+    def build_T(self, *, matrix_name: str = "T") -> Path:
+        """Build and save the concatenated 21-cm and foreground operators."""
+        return self._build_forward_operator(
+            component="all",
+            matrix_name=matrix_name,
+        )
+
 
     # ------------------------
     # Direct construction of T 
@@ -851,6 +1074,10 @@ class BuildMatrices:
         boundary is therefore one small row block and UV chunk, not the full
         distributed ``T`` object.
         """
+        if self.fg_model_domain == "image":
+            self.build_T(matrix_name=matrix_name)
+            return
+
         path = _dense_matrix_path_impl(self, matrix_name)
         layout = get_T_component_layout_impl(self)
         n_rows = int(self.n_t * self.n_freq * self.nbls)
