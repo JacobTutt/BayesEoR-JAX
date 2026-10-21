@@ -515,47 +515,6 @@ class BuildMatrices:
         sigma_sq = self._sigma_squared_array()
         return 1.0 / sigma_sq
 
-    def build_N(self) -> jnp.ndarray:
-        """
-        Build the noise covariance diagonal (vector form).
-
-        Returns
-        -------
-        N : jnp.ndarray
-            1D vector of shape (n_vis,) containing diag(N), where
-            n_vis = n_freq * n_t * n_bls.
-        """
-        sigma_sq = self._sigma_squared_array()
-        return sigma_sq
-
-    # -----------------------------
-    # Build T^H N^{-1} T (directly)
-    # -----------------------------
-    
-    def build_T_Ninv_T(self, T, Ninv: jnp.ndarray) -> jnp.ndarray:
-        r"""
-        Build T^H N^{-1} T.
-
-        Parameters
-        ----------
-        T : jnp.ndarray
-            Forward operator with shape (n_vis, n_params_eta).
-        Ninv : jnp.ndarray
-            Inverse noise covariance diagonal in vector form with
-            shape (n_vis,), holding diag(N^{-1}).
-
-        Returns
-        -------
-        T_Ninv_T : jnp.ndarray
-            Dense matrix with shape (n_params_eta, n_params_eta), where 
-            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
-        """
-        
-        Ninv_T = Ninv[:, None] * T
-
-        # T^H @ (N^{-1} T) in dense space for robust complex-conjugate handling.
-        return jnp.conj(T).T @ Ninv_T
-    
     # --------------------------------------------------
     # Build T^H N^{-1} T (blockwise, cached T and Ninv)
     # --------------------------------------------------
@@ -803,39 +762,6 @@ class BuildMatrices:
                 multihost_utils.sync_global_devices(f"{matrix_name}-blockwise-done")
 
 
-    # --------------------------------------------
-    # Build T^H N^{-1} d and d^H N^{-1} (directly)
-    # --------------------------------------------
-
-    def build_dbar(
-        self,
-        T: jnp.ndarray,
-        Ninv: jnp.ndarray,
-        vis_noisy: jnp.ndarray,
-    ) -> jnp.ndarray:
-        r"""
-        Build ``dbar = T^H N^{-1} d`` directly from dense inputs.
-
-        Parameters
-        ----------
-        T : jnp.ndarray
-            Forward operator with shape ``(n_vis, n_params_eta)``.
-        Ninv : jnp.ndarray
-            Inverse noise covariance diagonal in vector form with shape
-            ``(n_vis,)``, holding ``diag(N^{-1})``.
-        vis_noisy : jnp.ndarray
-            Complex noisy visibility vector ``d`` with shape ``(n_vis,)``.
-
-        Returns
-        -------
-        jnp.ndarray
-            Compressed data vector with shape ``(n_params_eta,)``.
-        """
-        ninv_d = Ninv * vis_noisy
-        # This is the same dense contraction that later appears inside the
-        # marginalized quadratic term, just compressed once up front.
-        return jnp.conj(T).T @ ninv_d
-
     def build_d_ninv_d(
         self,
         Ninv: jnp.ndarray,
@@ -1081,39 +1007,12 @@ class BuildMatrices:
             self.build_matrix_if_not_here("T", invalidate_existing=False)
             self.build_matrix_if_not_here("Ninv", invalidate_existing=False)
             self.save_T_Ninv_T_blockwise_memmap(matrix_name=matrix_name)
-        else:
-            matrix = self._build_matrix_by_name(matrix_name)
-            save_matrix_impl(self, matrix_name, matrix)
-        elapsed = time.perf_counter() - t_start
-        _log_build(self, f"built and saved {matrix_name} in {elapsed:.3f} s")
-
-    def _build_matrix_by_name(self, matrix_name: str):
-        """Build a supported matrix by name."""
-        _log_build(self, f"building {matrix_name}")
-        t_start = time.perf_counter()
-        matrix = None
-        # if matrix_name == "Fz":
-        #     matrix = self.build_Fz()
-        # elif matrix_name == "Finv_Fprime":
-        #     matrix = self.build_Finv_Fprime()
-        if matrix_name == "Ninv":
-            matrix = self.build_Ninv()
-        elif matrix_name == "N":
-            matrix = self.build_N()
-        elif matrix_name == "T_Ninv_T":
-            T = load_matrix_impl(self, "T")
-            Ninv = load_matrix_impl(self, "Ninv")
-            try:
-                matrix = self.build_T_Ninv_T(T, Ninv)
-            finally:
-                # Drop large intermediates as soon as possible.
-                del T
-                del Ninv
+        elif matrix_name == "Ninv":
+            save_matrix_impl(self, matrix_name, self.build_Ninv())
         else:
             raise ValueError(f"Unsupported matrix name '{matrix_name}'.")
         elapsed = time.perf_counter() - t_start
-        _log_build(self, f"built {matrix_name} in {elapsed:.3f} s")
-        return matrix
+        _log_build(self, f"built and saved {matrix_name} in {elapsed:.3f} s")
 
     def build_minimum_matrix_stack(self) -> None:
         """
