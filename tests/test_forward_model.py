@@ -2,6 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from bayeseor_jax import (
+    Beam_Model,
     build_T_eor_core,
     build_T_fg_core,
     build_foreground_spectral_basis,
@@ -22,14 +23,17 @@ def test_sky_to_visibility_matches_explicit_measurement_equation():
     np.testing.assert_allclose(response, expected, rtol=1e-13, atol=1e-13)
 
 
-def test_sky_to_visibility_masks_pixels_below_horizon():
-    lmn = jnp.asarray([[[0.0], [0.0], [-1.0]]])
-    uvw = jnp.zeros((1, 3, 1))
-    beam = jnp.ones((1, 1, 1))
+def test_beam_has_zero_gain_at_and_below_horizon():
+    coords = jnp.asarray(
+        [[[0.0, 0.0, 0.0], [0.0, jnp.pi / 2, 3 * jnp.pi / 4]]]
+    )
 
-    response = build_sky_to_visibility_core(lmn, uvw, beam, 1.0)
+    beam = Beam_Model("uniform").get_beam_vals(
+        coords,
+        jnp.asarray([100.0e6]),
+    )
 
-    np.testing.assert_array_equal(response, np.zeros((1, 1, 1, 1)))
+    np.testing.assert_array_equal(beam, np.asarray([[[1.0, 0.0, 0.0]]]))
 
 
 def test_T_eor_core_is_R_Fprime_Fz():

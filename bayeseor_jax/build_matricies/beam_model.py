@@ -134,14 +134,10 @@ class Beam_Model:
         # Reshape freqs for broadcasting: (n_freq, 1, 1)
         f = freqs[:, jnp.newaxis, jnp.newaxis]
 
-        # Handle each beam type separately.
         # Analytic beams are evaluated in a fully vectorized manner.
-
-        # If uniform, return an array of ones.
         if self.beam_type == "uniform":
-            return jnp.ones((len(freqs), *za.shape)) # Shape (n_freq, n_t, n_pix)
-
-        if self.beam_type in ["gaussian", "gausscosine"]:
+            beam_vals = jnp.ones((len(freqs), *za.shape))
+        elif self.beam_type in ["gaussian", "gausscosine"]:
             if self.fwhm_deg is not None:
                 # FWHM-based Gaussian is usually frequency-independent in this model
                 # unless fwhm_deg is passed as an array.
@@ -151,32 +147,43 @@ class Beam_Model:
             else:
                 stddev_rad = self._diam_to_stddev(self.diam, f)  # (n_freq, 1, 1)
 
-            # If gaussian:
             if self.beam_type == "gaussian":
-                return self._gaussian_za(za, stddev_rad, self.peak_amp)
-            # If gausscosine:
-            else:   
-                return self._gausscosine(za, stddev_rad, self.peak_amp, self.cosfreq)
-
-        if self.beam_type == "airy":
+                beam_vals = self._gaussian_za(za, stddev_rad, self.peak_amp)
+            else:
+                beam_vals = self._gausscosine(
+                    za,
+                    stddev_rad,
+                    self.peak_amp,
+                    self.cosfreq,
+                )
+        elif self.beam_type == "airy":
             if self.diam is not None:
-                return self._airy_disk(za, self.diam, f)
-            diam_eff = self._fwhm_to_diam(self.fwhm_deg, f)
-            return self._airy_disk(za, diam_eff, f)
-
-        if self.beam_type == "taperairy":
+                beam_vals = self._airy_disk(za, self.diam, f)
+            else:
+                diam_eff = self._fwhm_to_diam(self.fwhm_deg, f)
+                beam_vals = self._airy_disk(za, diam_eff, f)
+        elif self.beam_type == "taperairy":
             stddev_rad = jnp.deg2rad(self._fwhm_to_stddev(self.fwhm_deg))
-            return self._airy_disk(za, self.diam, f) * self._gaussian_za(
-                za, stddev_rad, self.peak_amp)
+            beam_vals = self._airy_disk(
+                za,
+                self.diam,
+                f,
+            ) * self._gaussian_za(za, stddev_rad, self.peak_amp)
+        elif self.beam_type == "tanhairy":
+            beam_vals = self._airy_disk(
+                za,
+                self.diam,
+                f,
+            ) * self._tanh_taper(za, self.tanh_freq, self.tanh_sl_red)
+        elif self.beam_type == "uvbeam":
+            beam_vals = self._get_uvbeam_vals_vectorized(az, za, freqs)
+        else:
+            raise ValueError(f"Unsupported beam_type: {self.beam_type}")
 
-        if self.beam_type == "tanhairy":
-            return self._airy_disk(za, self.diam, f) * self._tanh_taper(
-                za, self.tanh_freq, self.tanh_sl_red)
-
-        if self.beam_type == "uvbeam":
-            return self._get_uvbeam_vals_vectorized(az, za, freqs)
-
-        raise ValueError(f"Unsupported beam_type: {self.beam_type}")
+        # The ground has zero gain. Applying this once to the cached beam cube
+        # avoids rebuilding the same time-dependent horizon mask in every
+        # sky-to-visibility response block.
+        return jnp.where(za[jnp.newaxis, :, :] < jnp.pi / 2, beam_vals, 0.0)
 
     def _get_uvbeam_vals_vectorized(self, az, za, freqs):
         """Loop over time to use the non-JAX UVBeam interp function."""

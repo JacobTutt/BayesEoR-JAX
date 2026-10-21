@@ -29,8 +29,9 @@ def build_sky_to_visibility_core(
         below is equivalent to the negative phase in the paper's
         ``r_i - r_j`` convention.
     beam
-        Primary-beam power response with shape
-        ``(n_time, n_frequency, n_pixel)``.
+        Horizon-limited primary-beam power response with shape
+        ``(n_time, n_frequency, n_pixel)``. Pixels at or below the horizon
+        must already have zero gain.
     pixel_area_sr
         Solid angle of one equal-area sky pixel in steradians.
 
@@ -58,11 +59,10 @@ def build_sky_to_visibility_core(
 
     phase = jnp.einsum("fcb,tcp->tfbp", uvw_lambda, lmn)
     fringe = jnp.exp(2j * jnp.pi * phase)
-    visible_beam = jnp.where(lmn[:, None, 2, :] > 0.0, beam, 0.0)
     return (
         jnp.asarray(pixel_area_sr, dtype=jnp.float64)
         * fringe
-        * visible_beam[:, :, None, :]
+        * beam[:, :, None, :]
     )
 
 
