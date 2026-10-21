@@ -76,7 +76,7 @@ class LMN_ModelSpace:
     times_jd : np.ndarray
         Observation times in Julian Date with shape (n_t,).
     lmn_fg : jnp.ndarray
-        (l, m, n) array for FG pixels with shape (n_t, n_pix_fg, 3).
+        (l, m, n) array for FG pixels with shape (n_t, 3, n_pix_fg).
     az_za_fg : jnp.ndarray
         (az, za) array for FG pixels with shape (n_t, n_pix_fg, 2).
     eor_fg_shared_axis : jnp.ndarray
@@ -181,10 +181,14 @@ class LMN_ModelSpace:
         self.fov_m_angle_eor = self.angular_lm_extent_eor["m_angle_range_padded"]
         self.fov_l_angle_fg = self.angular_lm_extent_fg["l_angle_range_padded"]
         self.fov_m_angle_fg = self.angular_lm_extent_fg["m_angle_range_padded"]
-        self.n_fg_pixels_trimmed = 0
 
 
-    def _construct_time_array(self, jd_center: float, n_t: int, d_t: float) -> Tuple[np.ndarray, np.ndarray, int]:
+    def _construct_time_array(
+        self,
+        jd_center: float,
+        n_t: int,
+        d_t: float,
+    ) -> Tuple[np.ndarray, int]:
         """
         Create Julian Date time stamps centered on the supplied JD.
 
@@ -509,34 +513,3 @@ class LMN_ModelSpace:
             az_za_fg = az_za_fg.at[i_t].set(jnp.stack([az_fg, za_fg], axis=0))
 
         return lmn_fg, az_za_fg
-    
-
-    def _refresh_fg_state(self) -> None:
-        """
-        Recompute all FG-dependent cached quantities after a pixel trim.
-
-        This refreshes both the ordinary FG geometry and the optional
-        multiresolution grouping metadata so that later T-building code always
-        sees a self-consistent FG pixel/group description. In particular,
-        trimming pixels changes:
-
-        - the FG HEALPix mask itself
-        - the time-dependent ``(l, m, n)`` and ``(az, za)`` coordinates
-        - the EoR/FG shared axis
-        - any multiresolution group labels/counts
-        - the angular support summaries later used for auto-sizing
-        """
-        self.n_pix_fg = len(self.pix_indices_fg)
-        self.eor_fg_shared_axis = jnp.isin(self.pix_indices_fg, self.pix_indices_eor)
-        self.lmn_fg, self.az_za_fg = self._lmn_in_fov(self.times_jd)
-        self._refresh_fg_multiresolution()
-        self.angular_lm_extent_fg = self._angular_lm_extent(
-            self.lmn_fg[self.time_ind_center]
-        )
-        self.angular_lm_extent_eor = self._angular_lm_extent(
-            self.lmn_fg[self.time_ind_center, :, self.eor_fg_shared_axis]
-        )
-        self.fov_l_angle_eor = self.angular_lm_extent_eor["l_angle_range_padded"]
-        self.fov_m_angle_eor = self.angular_lm_extent_eor["m_angle_range_padded"]
-        self.fov_l_angle_fg = self.angular_lm_extent_fg["l_angle_range_padded"]
-        self.fov_m_angle_fg = self.angular_lm_extent_fg["m_angle_range_padded"]
