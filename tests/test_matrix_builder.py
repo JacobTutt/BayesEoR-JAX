@@ -69,7 +69,6 @@ def test_component_builders_match_concatenated_operator(tmp_path):
     assert foreground.shape == (4, 6)
     assert joint.shape == (4, 7)
     np.testing.assert_allclose(joint, np.concatenate([eor, foreground], axis=1))
-    np.testing.assert_allclose(joint, builder._build_T_directly_impl())
 
 
 def test_uv_model_space_contains_only_cosmological_modes():

@@ -480,100 +480,6 @@ class BuildMatrices:
             matrix_name=matrix_name,
         )
 
-
-    # ------------------------
-    # Direct construction of T 
-    # ------------------------
-
-    def _build_T_directly_impl(self) -> jnp.ndarray:
-        r"""
-        Construct ``T = (F^{-1}F')F_z`` directly, without explicitly building ``F_z``.
-
-        Intuition
-        ---------
-        ``F^{-1}F'`` gives, for each observing frequency ``f``, a dense spatial
-        response block over ``(t, bl, spatial_mode)``.
-
-        The EoR block always uses UV-space spatial modes:
-
-        - ``full_eor[f, t, bl, u_eor]``
-
-        The non-monopole FG block can use either:
-
-        - UV-space modes ``full_fg[f, t, bl, u_fg]``, or
-        - image-space modes ``finv_blocks[f, t, bl, pix_fg]``
-
-        ``F_z`` then only applies 1D spectral basis expansions per UV mode:
-
-        - EoR: eta basis with eta=0 removed
-        - FG non-monopole: ``[eta0 | LSSM]``
-        - FG monopole (optional): ``[full eta | LSSM]`` monopole block
-
-        So instead of forming huge block-diagonal/permutation matrices and
-        multiplying, we apply those basis vectors directly via broadcasted
-        products, then reshape/concatenate into the same final column ordering
-        as ``build_T``.
-
-        Returns
-        -------
-        T : jnp.ndarray
-            Dense matrix with shape
-            (n_vis, n_params_eta), where
-            n_vis = n_freq * n_t * n_bls and
-            n_params_eta = n_uv_eor * (n_eta - 1) + n_eta0 + n_lssm + n_mp.
-        """
-        response = build_sky_to_visibility_core(
-            self.lmn_model_space.lmn_fg,
-            self.inst_uvw_irad,
-            jnp.transpose(self.beam_response, (1, 0, 2)),
-            self.lmn_model_space.pixel_area_sr,
-        )
-        t_eor = build_T_eor_core(
-            response[..., self.lmn_model_space.eor_fg_shared_axis],
-            self._uv_to_lm_eor(),
-            inverse_udft_1d_rect(
-                self.n_freq,
-                self.n_eta,
-                include_eta0=False,
-            )
-            * self.d_eta,
-        )
-        t_fg = build_T_fg_core(
-            self._aggregate_fg_image_response(response),
-            self._foreground_spectral_basis(),
-        )
-        return jnp.concatenate([t_eor, t_fg], axis=1)
-
-    def build_T_directly(self) -> jnp.ndarray:
-        """
-        Build T using an automatically selected JAX executor.
-
-        - single-device runs: use a ``jax.jit`` executor
-        - multi-device runs:  use a ``jax.jit`` executor with output sharding
-          and run in mesh context
-        """
-        multi_device = self.mm.n_dev > 1
-        jit_kwargs = {"static_argnums": (0,)}
-        if multi_device:
-            jit_kwargs["out_shardings"] = self.sharding_mat
-        build_t_fn = jax.jit(BuildMatrices._build_T_directly_impl, **jit_kwargs)
-
-        if multi_device:
-            with self.mm.mesh:
-                return build_t_fn(self)
-        return build_t_fn(self)
-    
-    # -----------------------------------------------
-    # Direct construction of T (stepwise UV chunking)
-    # -----------------------------------------------
-
-    def save_T_stepwise_row_memmap(
-        self,
-        *,
-        matrix_name: str = "T",
-    ) -> None:
-        """Compatibility wrapper for the distributed forward-operator builder."""
-        self.build_T(matrix_name=matrix_name)
     # ------------------------
     # Noise covariance matrices
     # ------------------------
@@ -1177,7 +1083,7 @@ class BuildMatrices:
         _log_build(self, f"building and saving {matrix_name}")
         t_start = time.perf_counter()
         if matrix_name == "T":
-            self.save_T_stepwise_row_memmap(matrix_name=matrix_name)
+            self.build_T(matrix_name=matrix_name)
         elif matrix_name == "T_Ninv_T":
             self.build_matrix_if_not_here("T", invalidate_existing=False)
             self.build_matrix_if_not_here("Ninv", invalidate_existing=False)
@@ -1197,9 +1103,7 @@ class BuildMatrices:
         #     matrix = self.build_Fz()
         # elif matrix_name == "Finv_Fprime":
         #     matrix = self.build_Finv_Fprime()
-        if matrix_name == "T":
-            matrix = self.build_T_directly()
-        elif matrix_name == "Ninv":
+        if matrix_name == "Ninv":
             matrix = self.build_Ninv()
         elif matrix_name == "N":
             matrix = self.build_N()
