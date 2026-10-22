@@ -1,4 +1,4 @@
-"""Decompose, truncate and save a reduced KL foreground operator using distributed SVD.
+"""Decompose, truncate and save a KL operator with CPU JAX or distributed JAXMG.
 
 The input already contains the physical foreground prior. Only the retained
 left singular modes are saved, with noise whitening undone so the resulting
@@ -13,6 +13,8 @@ from pathlib import Path
 import time
 
 import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
@@ -70,15 +72,20 @@ def select_foreground_rank(singular_values, n_vis, f=0.1):
 
 
 def _svd_mesh():
-    """Arrange the existing one-process-per-GPU job on a near-square mesh.
+    """Select one local CPU device or arrange a near-square distributed GPU mesh.
 
     Returns
     -------
     jax.sharding.Mesh
-        Two-dimensional GPU mesh with axes svd_rows and svd_cols. Distributed
-        JAX must be initialised by the launcher; this does not start workers.
+        Mesh with axes svd_rows and svd_cols. CPU construction uses one device
+        in one process. Distributed GPU JAX must already be initialised by the
+        launcher; this function does not start workers.
     """
     devices = jax.devices()
+    if jax.default_backend() == "cpu":
+        if jax.process_count() != 1:
+            raise RuntimeError("Native JAX foreground SVD requires a single CPU process")
+        return Mesh(np.asarray(devices[:1]).reshape(1, 1), ("svd_rows", "svd_cols"))
     if any(device.platform != "gpu" for device in devices):
         raise RuntimeError("Foreground SVD requires a JAX GPU backend")
     if jax.local_device_count() != 1 or jax.process_count() != len(devices):
@@ -134,7 +141,7 @@ def _raise_if_any(failed, message):
 
 
 def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1, tile_size=128):
-    r"""Distribute, decompose and truncate A, then save T_fg,r = N^1/2 U_r S_r.
+    r"""Decompose and truncate A, then save T_fg,r = N^1/2 U_r S_r.
 
     Parameters
     ----------
@@ -154,7 +161,7 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
         over the original visibility vector. Defaults to 0.1; see
         select_foreground_rank for the precise criterion.
     tile_size : int, optional
-        Positive JAXMG square tile width, default 128.
+        Positive JAXMG square tile width, default 128. Unused on CPU.
 
     Returns
     -------
@@ -164,7 +171,11 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
 
     Notes
     -----
-    Every process calls together, with one GPU per process and shared storage.
+    On CPU, native JAX computes an unpadded, thin SVD on one device in one
+    process. The input, thin singular-vector matrices and solver workspace
+    must fit in local RAM. This path requires neither CUDA nor JAXMG.
+
+    On GPU, every process calls together, with one GPU per process and shared storage.
     Only local shards are read from disk; zero padding permits the distributed
     JAXMG GESVD. Full U is never gathered, and Vh is not computed. This is a
     dense SVD: the input, U and solver workspace must fit the allocated GPUs.
@@ -172,8 +183,9 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
 
     This function always computes its requested product, independently of setup
     and cache policy. It neither constructs A nor changes the inference prior.
-    Existing outputs are replaced only after successful computation. No GPU
-    fallback or approximate/randomised decomposition is used.
+    Existing outputs are replaced only after successful computation. The JAX
+    backend selects the implementation; a GPU solver failure does not trigger
+    a CPU fallback. Neither path uses approximate/randomised decomposition.
     """
     tile_size = operator.index(tile_size)
     if tile_size < 1:
@@ -182,7 +194,7 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
     if source.ndim != 2 or source.dtype != np.complex128 or min(source.shape) < 1:
         raise ValueError("Weighted operator must be a nonempty complex128 matrix")
     n_vis, n_parameter = source.shape
-    select_foreground_rank([], n_vis, f)  # Validate the threshold before GPU allocation.
+    select_foreground_rank([], n_vis, f)  # Validate before allocating solver arrays.
     inverse_noise = np.load(ninv_path, mmap_mode="r")
     if inverse_noise.shape != (n_vis,):
         raise ValueError("Inverse noise must match the original visibility rows")
@@ -200,17 +212,21 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
                            *(other for other in products if other != product))
     _, temporary = _check_output_path(path, weighted_operator_path, ninv_path)
     mesh = _svd_mesh()
-    try:
-        from jaxmg import gesvd
-    except ImportError as exc:
-        raise RuntimeError("Foreground SVD requires JAXMG with the gesvd interface") from exc
+    native_cpu = jax.default_backend() == "cpu"
+    if not native_cpu:
+        try:
+            from jaxmg import gesvd
+        except ImportError as exc:
+            raise RuntimeError("Foreground SVD requires JAXMG with the gesvd interface") from exc
     specs = P("svd_rows", "svd_cols")
-    padded_shape = _svd_padded_shape(source.shape, mesh.devices.shape, tile_size)
+    padded_shape = source.shape if native_cpu else _svd_padded_shape(
+        source.shape, mesh.devices.shape, tile_size,
+    )
     start = time.perf_counter()
     invalid_input = False
 
     def load_shard(index):
-        # Read only this GPU's rectangle; nonexistent rows/columns stay zero.
+        # Read this device's rectangle; GPU padding stays zero.
         nonlocal invalid_input
         r0, r1 = _slice_bounds(index[0], padded_shape[0])
         c0, c1 = _slice_bounds(index[1], padded_shape[1])
@@ -225,20 +241,27 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
     matrix.block_until_ready()
     _raise_if_any(invalid_input, "Weighted operator contains nonfinite entries")
     if jax.process_index() == 0:
-        LOGGER.info("Foreground SVD: %s padded to %s on GPU grid %s",
-                    source.shape, padded_shape, mesh.devices.shape)
+        LOGGER.info("Foreground SVD: %s padded to %s on %s grid %s",
+                    source.shape, padded_shape, "CPU" if native_cpu else "GPU", mesh.devices.shape)
     svd_start = time.perf_counter()
-    u, singular_values, status = gesvd(
-        matrix, T_A=tile_size, mesh=mesh, matrix_specs=specs,
-        compute_u=True, compute_vh=False, full_matrices=False,
-        return_status=True, donate=True,
-    )
-    status.block_until_ready()
+    if native_cpu:
+        u, singular_values, vh = jnp.linalg.svd(matrix, full_matrices=False)
+        jax.block_until_ready((u, singular_values, vh))
+        # The reduced operator needs only left modes, not parameter-space modes.
+        del vh, matrix
+    else:
+        u, singular_values, status = gesvd(
+            matrix, T_A=tile_size, mesh=mesh, matrix_specs=specs,
+            compute_u=True, compute_vh=False, full_matrices=False,
+            return_status=True, donate=True,
+        )
+        status.block_until_ready()
+        _raise_if_any(any(np.any(np.asarray(shard.data) != 0) for shard in status.addressable_shards),
+                      "JAXMG GESVD failed")
     svd_seconds = time.perf_counter() - svd_start
-    _raise_if_any(any(np.any(np.asarray(shard.data) != 0) for shard in status.addressable_shards),
-                  "JAXMG GESVD failed")
     # JAXMG replicates s; discard the extra singular modes introduced by padding.
     values = np.asarray(singular_values)[:min(n_vis, n_parameter)]
+    _raise_if_any(not np.all(np.isfinite(values)), "Foreground SVD returned nonfinite singular values")
     rank, tail_rms = select_foreground_rank(values, n_vis, f)
     output = _prepare_memmap_output(temporary, shape=(n_vis, rank), dtype=np.dtype(np.complex128),
                                     sync_name=f"{path.name}-allocated")
@@ -268,7 +291,8 @@ def T_fg_svd_build_save(weighted_operator_path, ninv_path, *, output_path, f=0.1
         inverse_noise_path=str(Path(ninv_path).resolve()),
         reduced_operator_path=str(path.resolve()),
         original_shape=list(source.shape), padded_shape=list(padded_shape),
-        process_grid=list(mesh.devices.shape), tile_size=tile_size,
+        process_grid=list(mesh.devices.shape), tile_size=None if native_cpu else tile_size,
+        backend="jax_cpu" if native_cpu else "jaxmg",
         retained_rank=rank, threshold_over_noise_rms=float(f),
         discarded_rms_over_noise_rms=float(tail_rms[rank]),
         coefficient_prior="standard-normal", svd_seconds=svd_seconds,
