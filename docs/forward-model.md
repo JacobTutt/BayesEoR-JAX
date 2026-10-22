@@ -92,6 +92,48 @@ temporary file is published under its final name. Joint assembly copies the
 saved component columns in blocks rather than rebuilding them or loading the
 full arrays onto a GPU. This stage remains independent of KL reduction.
 
+## Prior- and Noise-Weighted Foreground Mapping
+
+The physical operator is kept separate from the uncertainty model. For KL
+construction, `T_fg_weighted` evaluates
+
+```text
+A = W T_fg L,
+Sigma_q = L L^H,     W N W^H = I.
+```
+
+Choosing Hermitian covariance roots gives `W = N^(-1/2)` and
+`L = Sigma_q^(1/2)`. Consequently `A A^H` is the prior-predictive foreground
+covariance in noise-whitened visibility space. These functions apply the supplied
+factors only; the decomposition and truncation are separate stages.
+
+For independent coefficients and noise, pass vectors instead of dense matrices:
+
+```python
+import jax.numpy as jnp
+from bayeseor_jax import T_fg_weighted, weight_foreground_operator
+
+# Repeat each component's physical prior width over its pixels, not vice versa.
+prior_std = jnp.repeat(component_prior_std, lmn_fg.shape[-1])
+# Ninv_diagonal contains inverse variances E[|n_i|^2]^-1, not inverse RMS.
+noise_whitener = jnp.sqrt(jnp.real(Ninv_diagonal))
+A = jax.jit(T_fg_weighted)(
+    lmn_fg, uvw_lambda, beam_fg, pixel_area_sr, Q,
+    prior_sqrt=prior_std, noise_whitener=noise_whitener,
+)
+# Or apply the identical weighting to a previously constructed matrix/block:
+A_from_cached = weight_foreground_operator(Tfg_block, prior_std, noise_whitener)
+```
+
+The factor arrays must match the supplied matrix rows and columns. Per-pixel
+prior widths and per-visibility noise levels need not be uniform. Dense square
+factors support correlations, but mix their respective axes: independently
+weighting diagonal sub-blocks is then generally incorrect. The caller supplies
+valid covariance factors in consistent physical units. A nonzero prior mean
+is propagated separately as a mean visibility contribution, not included in `A`.
+Neither function saves an array or selects a device; the existing physical
+operator caches and inference setup are unchanged.
+
 ## Code Organisation
 
 The physical model and its construction live together under `bayeseor_jax/model/`:

@@ -5,6 +5,8 @@ from importlib import import_module
 from .model import (
     T_21,
     T_fg,
+    T_fg_weighted,
+    weight_foreground_operator,
     T_21_build_save,
     T_fg_build_save,
     assemble_joint_operator,
@@ -69,6 +71,8 @@ def __getattr__(name):
 __all__ = [
     "T_21",
     "T_fg",
+    "T_fg_weighted",
+    "weight_foreground_operator",
     "T_21_build_save",
     "T_fg_build_save",
     "assemble_joint_operator",

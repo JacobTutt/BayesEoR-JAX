@@ -19,8 +19,9 @@ These functions perform numerical construction only. Geometry modules define
 the coordinates; ``construction/forward.py`` chooses CPU blocks, distributes
 their construction, and saves the assembled matrices. ``BuildMatrices``
 supplies the configured input arrays. The compact factors below implement
-these products without forming full Kronecker matrices. No unit conversion,
-prior weighting, or KL compression is applied.
+these products without forming full Kronecker matrices. ``T_fg_weighted``
+additionally applies supplied prior and noise factors to prepare the foreground
+operator for decomposition. No unit conversion or KL compression is applied.
 """
 
 from __future__ import annotations
@@ -508,6 +509,130 @@ def T_fg(
     response = build_sky_to_visibility_operator(lmn, uvw_lambda, beam, pixel_area_sr)
     # Apply spectral weights independently at every selected sky pixel.
     return build_T_fg_core(response, spectral_operator)
+
+
+def weight_foreground_operator(
+    operator: jax.Array,
+    prior_sqrt: jax.Array,
+    noise_whitener: jax.Array,
+) -> jax.Array:
+    r"""Prior-weight and noise-whiten a foreground coefficient-to-visibility matrix.
+
+    Parameters
+    ----------
+    operator : jax.Array
+        Physical foreground operator, shape ``(n_visibility, n_coefficient)``.
+        Columns use spectral-component/pixel order; rows use
+        time/frequency/baseline order, as returned by ``T_fg``.
+    prior_sqrt : jax.Array
+        Factor ``L`` satisfying ``Sigma_q = L @ L.conj().T``. Supply either
+        its diagonal as a vector of length ``n_coefficient`` (the prior
+        standard deviations), or a square matrix for correlated coefficients.
+        Entries have the units of the corresponding physical coefficients.
+    noise_whitener : jax.Array
+        Factor ``W`` satisfying ``W @ N @ W.conj().T = I``. Supply either
+        its diagonal as a vector of length ``n_visibility`` (inverse complex
+        noise RMS, equivalently ``sqrt(Ninv)``), or a square whitening matrix.
+        Noise RMS must use the units of the visibilities predicted by
+        ``operator`` acting on the physical coefficients.
+
+    Returns
+    -------
+    weighted_operator : jax.Array
+        ``A = W @ operator @ L``, with the same shape as ``operator``. Maps
+        standard-normal foreground deviations into noise-whitened visibilities.
+
+    Notes
+    -----
+    With Hermitian covariance roots this is
+
+    .. math::
+
+        A = N^{-1/2} T_{\rm FG} \Sigma_q^{1/2}, \qquad
+        A A^\dagger = W T_{\rm FG} \Sigma_q T_{\rm FG}^\dagger W^\dagger.
+
+    Thus an SVD of ``A`` or eigendecomposition of ``A @ A.conj().T`` can
+    recover its noise-relevant visibility modes. This function only applies
+    the factors: it does not construct a covariance, decompose, truncate,
+    save, or choose a device. The caller supplies valid covariance factors;
+    shape checks remain compatible with ``jax.jit`` and differentiation.
+    Prior means affect the predicted mean, not this uncertainty operator.
+
+    For diagonal factors, matching row/column subsets can be weighted
+    independently. Dense factors mix rows/columns and require the complete
+    contracted axes; slicing their diagonal blocks generally changes the model.
+    """
+    operator = jnp.asarray(operator)
+    prior_sqrt = jnp.asarray(prior_sqrt)
+    noise_whitener = jnp.asarray(noise_whitener)
+    if operator.ndim != 2:
+        raise ValueError("operator must be a two-dimensional matrix")
+    n_visibility, n_coefficient = operator.shape
+    if prior_sqrt.shape not in ((n_coefficient,), (n_coefficient, n_coefficient)):
+        raise ValueError("prior_sqrt must match the foreground coefficient axis")
+    if noise_whitener.shape not in ((n_visibility,), (n_visibility, n_visibility)):
+        raise ValueError("noise_whitener must match the visibility axis")
+
+    # Diagonal priors scale columns without allocating a dense covariance root.
+    weighted = (
+        operator * prior_sqrt[None, :] if prior_sqrt.ndim == 1
+        else operator @ prior_sqrt
+    )
+    # Independent noise scales rows; correlated noise mixes visibility samples.
+    return (
+        noise_whitener[:, None] * weighted if noise_whitener.ndim == 1
+        else noise_whitener @ weighted
+    )
+
+
+def T_fg_weighted(
+    lmn: jax.Array,
+    uvw_lambda: jax.Array,
+    beam: jax.Array,
+    pixel_area_sr: float,
+    spectral_operator: jax.Array,
+    *,
+    prior_sqrt: jax.Array,
+    noise_whitener: jax.Array,
+) -> jax.Array:
+    r"""Evaluate the prior- and noise-weighted physical foreground mapping.
+
+    Parameters
+    ----------
+    lmn : jax.Array
+        Foreground pixel directions, shape ``(n_time, 3, n_pixel)``.
+    uvw_lambda : jax.Array
+        Baselines in wavelengths, shape ``(n_frequency, 3, n_baseline)``.
+    beam : jax.Array
+        Horizon-masked gains, shape ``(n_time, n_frequency, n_pixel)``.
+    pixel_area_sr : float
+        Equal-area pixel solid angle in steradians.
+    spectral_operator : jax.Array
+        Foreground spectral factors, shape ``(n_frequency, n_component)``.
+    prior_sqrt : jax.Array
+        Prior standard deviations in component/pixel order, or a square
+        covariance factor, as defined in ``weight_foreground_operator``.
+    noise_whitener : jax.Array
+        Inverse noise RMS in time/frequency/baseline order, or a square
+        whitening matrix, as defined in ``weight_foreground_operator``.
+
+    Returns
+    -------
+    weighted_operator : jax.Array
+        ``A = W T_fg L``, shape
+        ``(n_time*n_frequency*n_baseline, n_component*n_pixel)``.
+
+    Notes
+    -----
+    Composes the unchanged physical ``T_fg`` with prior weighting and noise
+    whitening. It is JAX-native, including under ``jax.jit`` and automatic
+    differentiation; distribution, saving and decomposition remain separate.
+    To reuse an already constructed matrix, call ``weight_foreground_operator``
+    instead. Correlated factors require complete contracted axes, as described
+    there; diagonal factors permit independently evaluated visibility blocks.
+    """
+    operator = T_fg(lmn, uvw_lambda, beam, pixel_area_sr, spectral_operator)
+    return weight_foreground_operator(operator, prior_sqrt, noise_whitener)
 
 
 def build_foreground_spectral_operator(

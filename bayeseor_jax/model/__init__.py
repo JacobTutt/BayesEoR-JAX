@@ -11,6 +11,8 @@ from .observation.image_geometry import ImageGeometry, build_image_geometry
 from .operators import (
     T_21,
     T_fg,
+    T_fg_weighted,
+    weight_foreground_operator,
     build_foreground_spectral_operator,
     build_nudft_matrix,
     build_sky_to_visibility_operator,
@@ -28,6 +30,8 @@ from .instrument.noise import generate_gaussian_noise
 __all__ = [
     "T_21",
     "T_fg",
+    "T_fg_weighted",
+    "weight_foreground_operator",
     "T_21_build_save",
     "T_fg_build_save",
     "assemble_joint_operator",
