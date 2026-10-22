@@ -1,9 +1,8 @@
-"""Verify basis-independent marginalisation, substituting only the native solver."""
+"""Verify basis-independent marginalisation with the native CPU implementation."""
 
 import importlib.util
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -21,10 +20,7 @@ from bayeseor_jax.model.construction.likelihood_products import (
 
 @pytest.fixture
 def likelihood_class(monkeypatch):
-    def potrs(matrix, rhs, **kwargs):
-        return jnp.linalg.solve(matrix, rhs), jnp.linalg.slogdet(matrix)[1]
-
-    monkeypatch.setitem(sys.modules, 'jaxmg', SimpleNamespace(potrs=potrs))
+    monkeypatch.setitem(sys.modules, 'jaxmg', None)
     spec = importlib.util.spec_from_file_location(
         'bayeseor_jax.inference._likelihood_under_test',
         Path(__file__).parents[1] / 'bayeseor_jax/inference/likelihood_marg.py',

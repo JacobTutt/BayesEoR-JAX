@@ -1,4 +1,4 @@
-"""JAXMg-backed conditional MAP solves for BayesEoR-JAX."""
+"""CPU and GPU conditional MAP solves for BayesEoR-JAX."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from pathlib import Path
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-import jaxmg
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
 from ..model.construction.parallel_layout import build_solver_mesh
 from .phi import PhiInverse
+from .linear_solver import build_gaussian_solver
 from .prior import linear_uniform_log_jacobian, theta_power_to_linear
 from ..utils import load_sharded_npy
 
@@ -38,7 +38,8 @@ class MaximumAPosteriori:
     stored normal matrix is row-sharded over a 1D solver mesh, while the
     right-hand side and scalar normalization term are replicated. Each call
     builds the diagonal prior precision implied by ``theta`` and uses
-    ``jaxmg.potrs`` to solve the system and return the MAP coefficient vector.
+    a JAX Cholesky factorisation on CPU or ``jaxmg.potrs`` on GPU to solve
+    the system and return the MAP coefficient vector.
 
     Parameters
     ----------
@@ -68,7 +69,7 @@ class MaximumAPosteriori:
     n_power_params : int
         Number of power-spectrum parameters in ``theta``.
     jaxmg_tile_size : int, optional
-        Tile size forwarded to ``jaxmg.potrs``.
+        Tile size forwarded to ``jaxmg.potrs`` on GPU; ignored on CPU.
     mesh : jax.sharding.Mesh or None, optional
         Optional pre-built 1D solver mesh. When omitted, all visible devices
         are used via ``build_solver_mesh()``.
@@ -155,11 +156,11 @@ class MaximumAPosteriori:
                 NamedSharding(self.mesh, P()),
             )
 
-        self._map_impl = self._build_jaxmg_map_impl()
+        self._map_impl = self._build_map_impl()
         
-    def _build_jaxmg_map_impl(self):
+    def _build_map_impl(self):
         """
-        Build the compiled JAXMg kernel for the conditional MAP solve.
+        Build the compiled CPU or GPU kernel for the conditional MAP solve.
 
         The kernel consumes the compressed likelihood terms together with a
         sampled parameter vector ``theta``. For each call it:
@@ -173,6 +174,7 @@ class MaximumAPosteriori:
         """
         mesh = self.mesh
         tile_size = int(self.jaxmg_tile_size)
+        solve = build_gaussian_solver(mesh, tile_size)
 
         @partial(
             jax.shard_map,
@@ -202,7 +204,7 @@ class MaximumAPosteriori:
             return sigma_local.at[local_indices, diag_cols].add(local_phi)
 
         @jax.jit
-        def _jaxmg_map(
+        def _map(
             t_ninv_t: jax.Array,
             dbar: jax.Array,
             theta: jax.Array,
@@ -226,19 +228,12 @@ class MaximumAPosteriori:
             )
 
             sigma = _build_sigma_work_matrix(t_ninv_t, phi_i, inv_alpha2)
-            sigma_inv_dbar, log_sigma_det = jaxmg.potrs(
-                sigma,
-                dbar_scaled,
-                T_A=tile_size,
-                mesh=mesh,
-                in_specs=(P("x", None),),
-                return_logdet=True,
-            )
+            sigma_inv_dbar, log_sigma_det = solve(sigma, dbar_scaled)
             sigma_inv_dbar = jnp.ravel(sigma_inv_dbar)
             quadratic = jnp.real(jnp.vdot(dbar_scaled, sigma_inv_dbar))
             return sigma_inv_dbar, quadratic, phi_i, log_sigma_det, alpha2
 
-        return _jaxmg_map
+        return _map
 
     def _theta_from_dmps(self, dmps: float | np.ndarray) -> np.ndarray:
         """Convert linear ``dmps`` values into sampler-space ``theta``."""

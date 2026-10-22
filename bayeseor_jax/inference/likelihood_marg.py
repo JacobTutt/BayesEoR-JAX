@@ -8,13 +8,13 @@ from pathlib import Path
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-import jaxmg
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
 from ..model.construction.parallel_layout import build_solver_mesh
 from ..utils import load_sharded_npy
 from .phi import PhiInverse
+from .linear_solver import build_gaussian_solver
 from .prior import Prior, linear_uniform_log_jacobian, theta_power_to_linear
 
 
@@ -27,15 +27,16 @@ class MarginalisedLikelihood:
 
     ``T^H N^{-1} T``, ``T^H N^{-1} d``, and ``d^H N^{-1} d``.
 
-    The implementation is intentionally centered on the JAXMg solve path. The
+    CPU inference uses a standard JAX Cholesky factorisation; GPU inference
+    uses JAXMG. Both evaluate the same Gaussian target. The
     large dense matrix is kept row-sharded over a 1D device mesh, while the
     right-hand side vector and scalar normalization term are replicated. Each
     likelihood call builds the diagonal prior precision ``Phi^{-1}``, forms
 
     ``Sigma = T^H N^{-1} T + Phi^{-1}``
 
-    in a sharded work matrix, and then calls ``jaxmg.potrs(...,
-    return_logdet=True)`` to obtain both ``Sigma^{-1} dbar`` and
+    in a work matrix, and then uses one factorisation to obtain both
+    ``Sigma^{-1} dbar`` and
     ``log|Sigma|``.
 
     Visibilities contain both each measured value and its conjugate, as
@@ -85,7 +86,7 @@ class MarginalisedLikelihood:
         - ``d_ninv_d.npy``
         and ignores the explicit array arguments.
     jaxmg_tile_size : int, optional
-        Tile size forwarded to ``jaxmg.potrs``.
+        Tile size forwarded to ``jaxmg.potrs`` on GPU; ignored on CPU.
     mesh : jax.sharding.Mesh or None, optional
         Optional pre-built 1D solver mesh. When omitted, the likelihood uses
         all visible devices via ``build_solver_mesh()``. On a single GPU this
@@ -133,9 +134,7 @@ class MarginalisedLikelihood:
         self.n_power_params = n_power_params
         self.jaxmg_tile_size = int(jaxmg_tile_size)
 
-        # The marginalized likelihood always runs on the row-sharded JAXMg
-        # solver layout, even on a single GPU. A 1-GPU run simply uses a mesh
-        # of size one, which keeps the execution path identical across scales.
+        # A local CPU uses the same layout with a single-device mesh.
         self.mesh = build_solver_mesh() if mesh is None else mesh
         self._log_likelihood_impl = None
 
@@ -157,7 +156,7 @@ class MarginalisedLikelihood:
                     )
 
             # Load the saved compressed likelihood terms directly onto the
-            # solver layout expected by the JAXMg kernel:
+            # common CPU/GPU solver layout:
             # - ``T_Ninv_T`` row-sharded over mesh axis ``x``
             # - ``dbar`` replicated
             # - ``d_ninv_d`` replicated
@@ -196,13 +195,13 @@ class MarginalisedLikelihood:
                 NamedSharding(self.mesh, P()),
             )
 
-        # Build the compiled JAXMg kernel once after the static layout and
+        # Build the compiled kernel once after the static layout and
         # stored terms are in place.
-        self._log_likelihood_impl = self._build_jaxmg_impl()
+        self._log_likelihood_impl = self._build_likelihood_impl()
 
-    def _build_jaxmg_impl(self):
+    def _build_likelihood_impl(self):
         """
-        Build the compiled JAXMg likelihood kernel for the current mesh.
+        Build the compiled likelihood kernel for the current CPU or GPU mesh.
 
         The returned function expects:
         - ``t_ninv_t`` row-sharded over ``("x", None)``
@@ -212,7 +211,7 @@ class MarginalisedLikelihood:
 
         Internally it uses a small ``shard_map`` helper to construct the local
         rows of the solver work matrix ``Sigma`` and then calls
-        ``jaxmg.potrs`` to compute both the solve and the log-determinant in
+        the selected solver to compute the solution and log-determinant in
         one factorization pass.
         """
         mesh = self.mesh
@@ -220,6 +219,7 @@ class MarginalisedLikelihood:
 
         if mesh is None:
             raise ValueError("MarginalisedLikelihood requires a solver mesh.")
+        solve = build_gaussian_solver(mesh, tile_size)
 
         @partial(
             jax.shard_map,
@@ -269,14 +269,14 @@ class MarginalisedLikelihood:
             return sigma_local.at[local_indices, diag_cols].add(local_phi)
 
         @jax.jit
-        def _jaxmg_log_likelihood(
+        def _log_likelihood(
             t_ninv_t: jax.Array,
             dbar: jax.Array,
             d_ninv_d: jax.Array,
             theta: jax.Array,
         ) -> jax.Array:
             """
-            Evaluate the marginalized log-likelihood through the JAXMg solver.
+            Evaluate the marginalized log-likelihood through the selected solver.
 
             The Hermitian-augmented Gaussian target is:
 
@@ -317,17 +317,10 @@ class MarginalisedLikelihood:
                 dbar,
             )
 
-            # Build the sharded solver matrix and ask JAXMg for both the solve
+            # Build the solver matrix and obtain both the solve
             # and ``log|Sigma|`` from the same factorization.
             sigma = _build_sigma_work_matrix(t_ninv_t, phi_i, inv_alpha2)
-            sigma_inv_dbar, log_sigma_det = jaxmg.potrs(
-                sigma,
-                dbar_scaled,
-                T_A=tile_size,
-                mesh=mesh,
-                in_specs=(P("x", None),),
-                return_logdet=True,
-            )
+            sigma_inv_dbar, log_sigma_det = solve(sigma, dbar_scaled)
             sigma_inv_dbar = jnp.ravel(sigma_inv_dbar)
 
             # ``log_phi_det`` is trivial because ``Phi^{-1}`` is diagonal.
@@ -347,15 +340,15 @@ class MarginalisedLikelihood:
             )
             return base + noise_term + jacobian_term
 
-        return _jaxmg_log_likelihood
+        return _log_likelihood
 
     def log_likelihood(self, theta: jax.Array) -> jax.Array:
         """
         Evaluate marginalized Gaussian log-likelihood.
 
         This integrates out the latent linear coefficient vector analytically,
-        evaluates the resulting dense system with ``jaxmg.potrs`` on the stored
-        row-sharded solver mesh, and returns the Hermitian-augmented Gaussian
+        evaluates the resulting dense system on the stored CPU or GPU
+        solver mesh, and returns the Hermitian-augmented Gaussian
         target with fixed normalisation terms omitted and optional intrinsic-noise
         and Jacobian corrections.
         """

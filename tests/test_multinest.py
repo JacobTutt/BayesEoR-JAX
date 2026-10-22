@@ -62,13 +62,7 @@ def test_multinest_runner_needs_no_removed_dependencies(tmp_path, monkeypatch):
 
 
 def test_fg_only_runner_saves_analytic_evidence_and_map_without_multinest(tmp_path, monkeypatch):
-    calls = []
-
-    def potrs(matrix, rhs, **kwargs):
-        calls.append(1)
-        return jnp.linalg.solve(matrix, rhs), jnp.linalg.slogdet(matrix)[1]
-
-    monkeypatch.setitem(sys.modules, "jaxmg", SimpleNamespace(potrs=potrs))
+    monkeypatch.setitem(sys.modules, "jaxmg", None)
     monkeypatch.setitem(sys.modules, "pymultinest", None)
     monkeypatch.setitem(sys.modules, "pymultinest.solve", None)
     root = Path(__file__).parents[1] / "bayeseor_jax/inference"
@@ -101,7 +95,6 @@ def test_fg_only_runner_saves_analytic_evidence_and_map_without_multinest(tmp_pa
     np.testing.assert_allclose(np.load(tmp_path / "map_coefficients.npy"), expected_map)
     assert summary["sampler"] == "analytic"
     assert summary["n_dim"] == 0
-    assert len(calls) == 1
     assert json.loads((tmp_path / "summary.json").read_text()) == summary
     with pytest.raises(ValueError, match="no sampler checkpoint"):
         modules["run_ns"].run_nestedsampling(setup, tmp_path, resume=True)

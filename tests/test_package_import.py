@@ -14,7 +14,7 @@ import sys
 from types import SimpleNamespace
 import bayeseor_jax as api
 from bayeseor_jax import inference
-sys.modules['jaxmg'] = SimpleNamespace()
+sys.modules['jaxmg'] = None
 sys.modules['pymultinest.solve'] = SimpleNamespace(solve=lambda **kwargs: None)
 sys.modules['bayeseor_jax.setup'] = SimpleNamespace(SetupResult=object)
 from bayeseor_jax.inference.run_ns import run_multinest, run_nestedsampling
