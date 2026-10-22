@@ -21,11 +21,11 @@ from .operators import (
     build_T_fg_core,
     build_transverse_fourier_operator,
 )
-from .construction.builder import BuildMatrices
-from .construction.forward import (
+from .construction.model_builder import BuildMatrices
+from .construction.operator_construction import (
     T_21_build_save, T_fg_build_save, T_fg_weighted_build_save, assemble_joint_operator,
 )
-from .construction.reduce_kl_construction import T_fg_svd_build_save
+from .construction.kl_reduction import T_fg_svd_build_save
 from .cosmology.transforms import Cosmology
 from .instrument.baselines import InstrumentModel
 from .instrument.noise import generate_gaussian_noise

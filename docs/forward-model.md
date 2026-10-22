@@ -66,7 +66,7 @@ matrix block; it does not automatically provide a matrix-free solver.
 For disk-backed construction, every participating process makes the same calls:
 
 ```python
-from bayeseor_jax.model.construction.forward import (
+from bayeseor_jax.model.construction.operator_construction import (
     T_21_build_save, T_fg_build_save, assemble_joint_operator,
 )
 
@@ -236,12 +236,12 @@ model/
 │   └── power_spectrum.py       # Physical k coordinates and binning
 ├── operators.py                # Numerical mappings between model spaces
 └── construction/
-    ├── builder.py              # Physical input preparation and component writers
-    ├── forward.py              # CPU construction and saved-component assembly
-    ├── reduce_kl_construction.py # Distributed KL reduction of a weighted operator
-    ├── likelihood.py           # Noise-weighted Gram matrix and data contractions
+    ├── model_builder.py        # Physical input preparation and component writers
+    ├── operator_construction.py # CPU construction and saved-component assembly
+    ├── kl_reduction.py         # Distributed KL reduction of a weighted operator
+    ├── likelihood_products.py  # Noise-weighted Gram matrix and data contractions
     ├── storage.py              # Cache checks, saved arrays and publication
-    └── distribution.py         # Device meshes and visibility-row partitions
+    └── parallel_layout.py      # CPU resources, device meshes and row partitions
 ```
 
 The mathematical operators do not manage files or device allocation. The builder
@@ -250,6 +250,11 @@ construction helpers. Numerical builders return arrays; methods that construct
 large saved operators return their file paths.
 
 Public imports such as `from bayeseor_jax import BuildMatrices` remain unchanged.
+Within `model.construction`, the modules formerly named `builder`, `forward`,
+`reduce_kl_construction`, `likelihood` and `distribution` are now `model_builder`,
+`operator_construction`, `kl_reduction`, `likelihood_products` and `parallel_layout`,
+respectively. Direct module imports must use these new paths; function names
+and numerical behaviour are unchanged.
 The former `build_matricies` package has been removed; direct module imports
 should use the paths above. The old `model.instrument`, `model.noise`,
 `model.cosmology_transforms`, and `model.k_cube` implementations now live in
@@ -273,7 +278,7 @@ rebuilds a missing component:
 ```python
 from bayeseor_jax.model.instrument.noise import build_noise_variance
 from bayeseor_jax.model.construction.storage import save_array
-from bayeseor_jax.model.construction.likelihood import (
+from bayeseor_jax.model.construction.likelihood_products import (
     save_gram_matrix, save_data_projection, save_data_power,
 )
 

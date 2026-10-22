@@ -19,8 +19,8 @@ from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
 from .model.instrument.noise import build_noise_variance
-from .model.construction.forward import assemble_joint_operator
-from .model.construction.likelihood import save_gram_matrix, save_data_projection, save_data_power
+from .model.construction.operator_construction import assemble_joint_operator
+from .model.construction.likelihood_products import save_gram_matrix, save_data_projection, save_data_power
 from .model.construction.storage import ensure_cached, save_array
 from .model.cosmology.transforms import Cosmology
 from .model.cosmology.power_spectrum import (

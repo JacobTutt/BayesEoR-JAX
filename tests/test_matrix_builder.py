@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import jax.numpy as jnp
 import numpy as np
 
-from bayeseor_jax.model.construction.builder import BuildMatrices
-from bayeseor_jax.model.construction.forward import assemble_joint_operator
-from bayeseor_jax.model.construction.likelihood import save_gram_matrix
+from bayeseor_jax.model.construction.model_builder import BuildMatrices
+from bayeseor_jax.model.construction.operator_construction import assemble_joint_operator
+from bayeseor_jax.model.construction.likelihood_products import save_gram_matrix
 from bayeseor_jax.model.operators import T_fg
 
 

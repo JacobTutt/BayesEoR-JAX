@@ -7,7 +7,7 @@ def test_package_import_does_not_require_optional_solver_or_sampler():
 def test_model_layout_preserves_public_exports():
     import bayeseor_jax as api
     from bayeseor_jax import model
-    from bayeseor_jax.model.construction.builder import BuildMatrices
+    from bayeseor_jax.model.construction.model_builder import BuildMatrices
     from bayeseor_jax.model.cosmology.fourier_geometry import FourierGeometry
     from bayeseor_jax.model.cosmology.transforms import Cosmology
     from bayeseor_jax.model.instrument.baselines import InstrumentModel

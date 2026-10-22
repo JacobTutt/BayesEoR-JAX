@@ -9,7 +9,7 @@ from bayeseor_jax import (
     T_21, T_fg, T_21_build_save, T_fg_build_save,
     T_fg_weighted_build_save, assemble_joint_operator,
 )
-from bayeseor_jax.model.construction import distribution, forward
+from bayeseor_jax.model.construction import parallel_layout, operator_construction
 from bayeseor_jax.model.operators import (
     build_sky_to_visibility_operator, build_T_21_core, build_T_fg_core,
 )
@@ -143,17 +143,17 @@ def test_weighted_writer_partitions_rows_with_global_noise_indices(
     del shared
 
     # Emulate ranks sequentially while keeping the real partitioning and CPU block evaluation.
-    monkeypatch.setattr(forward, '_prepare_memmap_output', lambda path, **kwargs: np.load(path, mmap_mode='r+'))
-    monkeypatch.setattr(forward, 'publish_output', lambda *args: None)
+    monkeypatch.setattr(operator_construction, '_prepare_memmap_output', lambda path, **kwargs: np.load(path, mmap_mode='r+'))
+    monkeypatch.setattr(operator_construction, 'publish_output', lambda *args: None)
     for rank in range(process_count):
-        resources = distribution.CPUResources(rank, process_count, jax.local_devices(backend='cpu')[0], 1)
-        monkeypatch.setattr(forward, 'discover_cpu_resources', lambda: resources)
+        resources = parallel_layout.CPUResources(rank, process_count, jax.local_devices(backend='cpu')[0], 1)
+        monkeypatch.setattr(operator_construction, 'discover_cpu_resources', lambda: resources)
         before = np.load(partial).copy()
         T_fg_weighted_build_save(
             lmn, uvw, beam, area, foreground,
             prior_sqrt=prior, noise_whitener=noise, output_path=path,
         )
-        start, stop = distribution.partition_blocks(6, process_count, rank)
+        start, stop = parallel_layout.partition_blocks(6, process_count, rank)
         outside = np.ones(12, dtype=bool)
         outside[start * 2:stop * 2] = False
         np.testing.assert_array_equal(np.load(partial)[outside], before[outside])
@@ -173,16 +173,16 @@ def test_invalid_inputs_do_not_replace_existing_operator(tmp_path, inputs):
 
 @pytest.mark.parametrize('n_blocks,n_processes', [(6, 4), (2, 5), (0, 3), (9, 3)])
 def test_time_frequency_partition_has_no_overlap_or_missing_rows(n_blocks, n_processes):
-    ranges = [distribution.partition_blocks(n_blocks, n_processes, rank) for rank in range(n_processes)]
+    ranges = [parallel_layout.partition_blocks(n_blocks, n_processes, rank) for rank in range(n_processes)]
     assert [i for start, stop in ranges for i in range(start, stop)] == list(range(n_blocks))
     counts = [stop - start for start, stop in ranges]
     assert max(counts) - min(counts) <= 1
 
 
 def test_cpu_resource_discovery_respects_affinity_and_slurm(monkeypatch):
-    monkeypatch.setattr(distribution.os, 'sched_getaffinity', lambda _: {2, 3, 4, 5}, raising=False)
+    monkeypatch.setattr(parallel_layout.os, 'sched_getaffinity', lambda _: {2, 3, 4, 5}, raising=False)
     monkeypatch.setenv('SLURM_CPUS_PER_TASK', '2')
-    resources = distribution.discover_cpu_resources()
+    resources = parallel_layout.discover_cpu_resources()
     assert resources.cpu_count == 2
     assert resources.device.platform == 'cpu'
     assert resources.process_count == jax.process_count()

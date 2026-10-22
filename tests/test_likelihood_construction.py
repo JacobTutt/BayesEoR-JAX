@@ -5,8 +5,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from bayeseor_jax.model.construction.forward import assemble_joint_operator
-from bayeseor_jax.model.construction.likelihood import (
+from bayeseor_jax.model.construction.operator_construction import assemble_joint_operator
+from bayeseor_jax.model.construction.likelihood_products import (
     build_gram_matrix, build_data_projection, build_data_power,
     save_gram_matrix, save_data_projection, save_data_power,
 )

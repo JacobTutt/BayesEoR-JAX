@@ -1,4 +1,4 @@
-"""Partition visibility rows and arrange JAX devices for distributed construction."""
+"""Discover CPU resources, partition visibility rows and arrange JAX device meshes."""
 
 import os
 from dataclasses import dataclass

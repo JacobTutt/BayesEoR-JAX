@@ -27,7 +27,7 @@ def main():
         local_device = 0 if len(visible) == 1 else int(os.environ["SLURM_LOCALID"])
         jax.distributed.initialize(local_device_ids=[local_device])
 
-    from bayeseor_jax.model.construction.reduce_kl_construction import T_fg_svd_build_save
+    from bayeseor_jax.model.construction.kl_reduction import T_fg_svd_build_save
 
     if jax.process_index() == 0:
         args.output_dir.mkdir(parents=True, exist_ok=False)

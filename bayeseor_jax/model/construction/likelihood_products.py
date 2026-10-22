@@ -14,7 +14,7 @@ import numpy as np
 from jax.experimental import multihost_utils
 from jax.sharding import Mesh, PartitionSpec as P
 
-from .distribution import padded_visibility_partition
+from .parallel_layout import padded_visibility_partition
 from .storage import _check_output_path, _prepare_memmap_output, _slice_bounds, publish_output, save_array
 
 

@@ -16,7 +16,7 @@ the pixel solid angle and primary beam. ``T_21`` and ``T_fg`` compose the
 response and component factors for supplied blocks of visibility rows.
 
 These functions perform numerical construction only. Geometry modules define
-the coordinates; ``construction/forward.py`` chooses CPU blocks, distributes
+the coordinates; ``construction/operator_construction.py`` chooses CPU blocks, distributes
 their construction, and saves the assembled matrices. ``BuildMatrices``
 supplies the configured input arrays. The compact factors below implement
 these products without forming full Kronecker matrices. ``T_fg_weighted``

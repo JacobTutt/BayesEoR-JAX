@@ -20,7 +20,7 @@ from ..operators import (
     build_spectral_fourier_operator,
     build_transverse_fourier_operator,
 )
-from .forward import T_21_build_save, T_fg_build_save, T_fg_weighted_build_save
+from .operator_construction import T_21_build_save, T_fg_build_save, T_fg_weighted_build_save
 
 jax.config.update("jax_enable_x64", True)
 

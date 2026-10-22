@@ -12,7 +12,7 @@ import jax
 import numpy as np
 
 from ..operators import T_21, T_fg, T_fg_weighted
-from .distribution import discover_cpu_resources, partition_blocks
+from .parallel_layout import discover_cpu_resources, partition_blocks
 from .storage import _prepare_memmap_output, publish_output
 
 

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from astropy.cosmology import Planck18
 
-from bayeseor_jax.model.construction.distribution import padded_visibility_partition
+from bayeseor_jax.model.construction.parallel_layout import padded_visibility_partition
 from bayeseor_jax.model.cosmology.transforms import Cosmology
 from bayeseor_jax.model.instrument.baselines import InstrumentModel
 from bayeseor_jax.model.instrument.noise import generate_gaussian_noise
