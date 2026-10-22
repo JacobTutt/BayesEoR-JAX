@@ -1,5 +1,11 @@
 # BayesEoR-JAX
 
+[![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow.png)](assets/diagrams/workflow.png)
+
+*The component images illustrate the model spaces and inference stages.
+The cosmological cube thumbnails were derived from supplied 21cmSPACE simulations.
+Select the diagram to view it at full resolution.*
+
 Recovering a cosmological 21-cm signal requires more than a flexible description
 of the measured data. Foreground emission and the cosmological signal are both
 propagated through the chromatic instrumental response, producing visibility
@@ -34,12 +40,6 @@ amplitudes determine the signal prior, while Bayesian-evidence evaluation
 supports comparison and validation of competing models.
 
 ## Complete workflow
-
-[![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow.png)](assets/diagrams/workflow.png)
-
-*The component images illustrate the model spaces and inference stages.
-The cosmological cube thumbnails were derived from supplied 21cmSPACE simulations.
-Select the diagram to view it at full resolution.*
 
 1. **Define the physical components.** Choose the cosmological Fourier grid and
    foreground image-domain amplitudes, together with their priors.
