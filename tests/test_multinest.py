@@ -108,13 +108,14 @@ def test_fg_only_runner_saves_analytic_evidence_and_map_without_multinest(tmp_pa
 
 
 @pytest.mark.parametrize("file_root", ["data-", "short-"])
-@pytest.mark.parametrize("weighted", [True, False])
-def test_multinest_analysis_preserves_weights_and_log_power(tmp_path, file_root, weighted):
+def test_multinest_analysis_preserves_weights_and_log_power(tmp_path, file_root):
     samples = np.array([[.2, 8., 0., 1.], [.3, 6., .5, 1.5], [.5, 4., 1., 2.]])
     np.savetxt(tmp_path / f"{file_root}.txt", samples)
-    result = DataContainer([tmp_path], store_samples=True, posterior_weighted=weighted)
-    np.testing.assert_allclose(result.k_vals[0], [1., 2.])
+    np.savetxt(tmp_path / "k-vals.txt", [.1, .2])
+    result = DataContainer([tmp_path])
+    np.testing.assert_allclose(result.k_vals[0], [.1, .2])
     np.testing.assert_allclose(result.samples[0], samples[:, 2:])
-    expected = np.average(10**samples[:, 2:], axis=0, weights=samples[:, 0] if weighted else None)
+    expected = np.average(10**samples[:, 2:], axis=0, weights=samples[:, 0])
     np.testing.assert_allclose(result.avgs[0], expected)
-    assert result.posteriors[0].shape == (2, 31)
+    np.testing.assert_allclose(result.weights[0], samples[:, 0])
+    np.testing.assert_allclose(result.log_likelihoods[0], -.5 * samples[:, 1])

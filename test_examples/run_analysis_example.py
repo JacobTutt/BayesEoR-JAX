@@ -14,7 +14,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bayeseor_jax import * 
+from bayeseor_jax import BayesEoRParser, DataContainer, write_log_files
+from bayeseor_jax.analyze import (
+    plot_power_spectra, plot_posteriors, plot_power_spectra_and_posteriors,
+)
 
 
 def _json_ready(value):
@@ -77,15 +80,15 @@ def run_output_analysis(
     summary_path = analysis_dir / "posterior_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
-    fig = data.plot_power_spectra(plot_priors=True, labels=[label])
+    fig, _ = plot_power_spectra(data, plot_priors=True)
     fig.savefig(analysis_dir / "power_spectrum.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    fig = data.plot_posteriors(plot_priors=True)
+    fig, _ = plot_posteriors(data, plot_priors=True)
     fig.savefig(analysis_dir / "posteriors.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    fig = data.plot_power_spectra_and_posteriors(plot_priors=True, labels=[label])
+    fig, _ = plot_power_spectra_and_posteriors(data, plot_priors=True)
     fig.savefig(analysis_dir / "power_spectrum_and_posteriors.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
@@ -107,6 +110,8 @@ def run_example(
     Additional BayesEoR parser arguments can be supplied through
     `extra_bayeseor_args`, for example output and matrix-cache directories.
     """
+    from bayeseor_jax import run_setup, run_nestedsampling
+
     parser = BayesEoRParser()
     args_list = ["--config", config_path]
     if do_sampling:
