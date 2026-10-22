@@ -12,6 +12,7 @@ theme:
   name: material
   custom_dir: docs/overrides
   logo: assets/branding/diagram-light.svg
+  favicon: assets/branding/favicon.png
   features:
     - navigation.tabs
     - navigation.sections

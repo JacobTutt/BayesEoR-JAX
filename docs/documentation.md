@@ -45,6 +45,10 @@ active `data-md-color-scheme` so the correct artwork also appears when the user
 changes the theme manually. The small `partials/logo.html` override applies the
 same pairing to the header and mobile navigation.
 
+`favicon.png` is a 96-pixel square rendering of the same array-and-sky artwork,
+with padding and a white background for contrast in both light and dark browser
+chrome. The `theme.favicon` setting supplies it to every documentation page.
+
 The **Documentation** GitHub Actions workflow runs a strict build for relevant
 pushes and pull requests. Documentation dependencies are installed separately from
 the normal CPU and HPC environments.
