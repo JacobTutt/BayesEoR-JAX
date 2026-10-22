@@ -10,134 +10,6 @@ from typing import Any
 from jsonargparse import ActionConfigFile, ArgumentParser
 
 
-@dataclass(frozen=True, kw_only=True)
-class ModelConfig:
-    """Requested spectral, beam and storage settings for physical operators.
-
-    Parameters
-    ----------
-    model : {"eor", "fg", "eor+fg"}
-        Components to construct, independently of the simulated data contents.
-    beta_fg : sequence of float
-        Positive power-law indices following the constant foreground component.
-    beam_type, peak_amp, fwhm_deg, diam, cosfreq, tanh_freq, tanh_sl_red,
-    pol, freq_interp_kind : optional
-        Primary-beam settings; angles are in degrees, diameter in metres.
-        See ``Beam_Model`` for individual analytic and file-backed models.
-    array_save_directory : pathlib.Path or str
-        Directory for saved component operators and likelihood products.
-
-    Notes
-    -----
-    Actual frequencies, baselines and image/Fourier coordinates are supplied
-    separately to the builder. Requested settings are not overwritten when
-    the observation determines those resolved inputs.
-    """
-    model: str = 'eor+fg'
-    beta_fg: tuple[float, ...] = (2.63, 2.82)
-    beam_type: str = 'uniform'
-    peak_amp: float = 1.0
-    fwhm_deg: float | None = None
-    diam: float | None = None
-    cosfreq: float | None = None
-    tanh_freq: float | None = None
-    tanh_sl_red: float | None = None
-    pol: str = 'xx'
-    freq_interp_kind: str = 'cubic'
-    array_save_directory: Path | str = './matrices/'
-
-
-@dataclass(frozen=True, kw_only=True)
-class RunConfig(ModelConfig):
-    """Requested settings for data preparation, model construction and inference.
-
-    Parameters
-    ----------
-    data_path, inst_model, noise_data_path : pathlib.Path or str, optional
-        Visibility input and optional instrument/noise products.
-    n_u_eor, n_v_eor, du_eor, dv_eor, n_eta : optional
-        Requested Fourier-grid dimensions and spacings; None permits setup to
-        infer them from the selected observation and image geometry.
-    n_freq, f0_mhz, df_mhz, n_t, d_t, jd_center : optional
-        Requested observation axes (MHz, seconds and Julian dates). Raw data
-        determine the actual axes; preprocessed vectors require these settings.
-    nside, fov_eor, fov_fg, telescope_latlonalt : optional
-        HEALPix resolution, field diameters in degrees and telescope location
-        (latitude/longitude in degrees, altitude in metres). If nside is None,
-        setup estimates it from the longest selected baseline and highest
-        selected frequency, using the same resolution for both components.
-    priors, uniform_priors : optional
-        Log10 power bounds and the per-bin linear-uniform prior mask.
-    foreground_prior_std_mk, foreground_kl_path : optional
-        Physical spectral-component widths, or a preconstructed KL operator
-        whose coefficients instead have unit prior variance.
-    output_dir, save_dir, clobber : optional
-        Metadata/preprocessed output directories and overwrite permission.
-    quiet, run, resume, n_live_scale_factor, random_key : optional
-        Driver and MultiNest controls. These are not physical model inputs.
-
-    Notes
-    -----
-    Data selection and noise controls retain the YAML/CLI names documented in
-    ``docs/configuration.md``. Construct directly in Python or obtain from
-    ``BayesEoRParser.parse_args``. Use ``dataclasses.replace`` for a new run
-    configuration; setup leaves this object unchanged. Sequence inputs are
-    read-only by convention, even when supplied as lists or NumPy arrays.
-    """
-    data_path: Path | str | None = None
-    inst_model: Path | str | None = None
-    noise_data_path: Path | str | None = None
-    n_u_eor: int | None = None
-    n_v_eor: int | None = None
-    du_eor: float | None = None
-    dv_eor: float | None = None
-    n_freq: int | None = None
-    f0_mhz: float | None = None
-    df_mhz: float | None = None
-    n_eta: int | None = None
-    n_t: int = 1
-    d_t: float | None = None
-    jd_center: float | None = None
-    nside: int | None = None
-    fov_eor: float = 10.0
-    fov_fg: float | None = None
-    telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0)
-    antenna_selection: str = 'cross'
-    bl_cutoff: float | None = None
-    freq_idx_min: int | None = None
-    freq_min: float | None = None
-    freq_center: float | None = None
-    n_freqs_select: int | None = None
-    jd_idx_min: int | None = None
-    jd_min: float | None = None
-    n_times_select: int | None = None
-    form_pi: bool = True
-    pi_norm: float = 1.0
-    redundant_avg: bool = False
-    uniform_redundancy: bool = False
-    calc_noise: bool = False
-    sigma: float | None = None
-    noise_seed: int = 742123
-    save_vis: bool = False
-    save_model: bool = False
-    save_dir: Path | str = './'
-    output_dir: Path | str = './'
-    clobber: bool = False
-    effective_noise_path: Path | str | None = None
-    priors: Any = None
-    uniform_priors: Any = None
-    foreground_prior_std_mk: tuple[float, ...] = (
-        8690.961932554002, 2479547.297490031, 1406322.413511489,
-    )
-    foreground_kl_path: Path | str | None = None
-    use_intrinsic_noise_fitting: bool = False
-    quiet: bool = False
-    run: bool = False
-    resume: bool = False
-    n_live_scale_factor: float = 25.0
-    random_key: int = 0
-
-
 class BayesEoRParser(ArgumentParser):
     """Read the existing YAML/CLI options into a typed run configuration.
 
@@ -319,3 +191,131 @@ class BayesEoRParser(ArgumentParser):
             values["pol"] = values["pol"].lower()
         config = RunConfig(**values)
         return asdict(config) if isinstance(args, dict) else config
+
+
+@dataclass(frozen=True, kw_only=True)
+class ModelConfig:
+    """Requested spectral, beam and storage settings for physical operators.
+
+    Parameters
+    ----------
+    model : {"eor", "fg", "eor+fg"}
+        Components to construct, independently of the simulated data contents.
+    beta_fg : sequence of float
+        Positive power-law indices following the constant foreground component.
+    beam_type, peak_amp, fwhm_deg, diam, cosfreq, tanh_freq, tanh_sl_red,
+    pol, freq_interp_kind : optional
+        Primary-beam settings; angles are in degrees, diameter in metres.
+        See ``Beam_Model`` for individual analytic and file-backed models.
+    array_save_directory : pathlib.Path or str
+        Directory for saved component operators and likelihood products.
+
+    Notes
+    -----
+    Actual frequencies, baselines and image/Fourier coordinates are supplied
+    separately to the builder. Requested settings are not overwritten when
+    the observation determines those resolved inputs.
+    """
+    model: str = 'eor+fg'
+    beta_fg: tuple[float, ...] = (2.63, 2.82)
+    beam_type: str = 'uniform'
+    peak_amp: float = 1.0
+    fwhm_deg: float | None = None
+    diam: float | None = None
+    cosfreq: float | None = None
+    tanh_freq: float | None = None
+    tanh_sl_red: float | None = None
+    pol: str = 'xx'
+    freq_interp_kind: str = 'cubic'
+    array_save_directory: Path | str = './matrices/'
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunConfig(ModelConfig):
+    """Requested settings for data preparation, model construction and inference.
+
+    Parameters
+    ----------
+    data_path, inst_model, noise_data_path : pathlib.Path or str, optional
+        Visibility input and optional instrument/noise products.
+    n_u_eor, n_v_eor, du_eor, dv_eor, n_eta : optional
+        Requested Fourier-grid dimensions and spacings; None permits setup to
+        infer them from the selected observation and image geometry.
+    n_freq, f0_mhz, df_mhz, n_t, d_t, jd_center : optional
+        Requested observation axes (MHz, seconds and Julian dates). Raw data
+        determine the actual axes; preprocessed vectors require these settings.
+    nside, fov_eor, fov_fg, telescope_latlonalt : optional
+        HEALPix resolution, field diameters in degrees and telescope location
+        (latitude/longitude in degrees, altitude in metres). If nside is None,
+        setup estimates it from the longest selected baseline and highest
+        selected frequency, using the same resolution for both components.
+    priors, uniform_priors : optional
+        Log10 power bounds and the per-bin linear-uniform prior mask.
+    foreground_prior_std_mk, foreground_kl_path : optional
+        Physical spectral-component widths, or a preconstructed KL operator
+        whose coefficients instead have unit prior variance.
+    output_dir, save_dir, clobber : optional
+        Metadata/preprocessed output directories and overwrite permission.
+    quiet, run, resume, n_live_scale_factor, random_key : optional
+        Driver and MultiNest controls. These are not physical model inputs.
+
+    Notes
+    -----
+    Data selection and noise controls retain the YAML/CLI names documented in
+    ``docs/configuration.md``. Construct directly in Python or obtain from
+    ``BayesEoRParser.parse_args``. Use ``dataclasses.replace`` for a new run
+    configuration; setup leaves this object unchanged. Sequence inputs are
+    read-only by convention, even when supplied as lists or NumPy arrays.
+    """
+    data_path: Path | str | None = None
+    inst_model: Path | str | None = None
+    noise_data_path: Path | str | None = None
+    n_u_eor: int | None = None
+    n_v_eor: int | None = None
+    du_eor: float | None = None
+    dv_eor: float | None = None
+    n_freq: int | None = None
+    f0_mhz: float | None = None
+    df_mhz: float | None = None
+    n_eta: int | None = None
+    n_t: int = 1
+    d_t: float | None = None
+    jd_center: float | None = None
+    nside: int | None = None
+    fov_eor: float = 10.0
+    fov_fg: float | None = None
+    telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0)
+    antenna_selection: str = 'cross'
+    bl_cutoff: float | None = None
+    freq_idx_min: int | None = None
+    freq_min: float | None = None
+    freq_center: float | None = None
+    n_freqs_select: int | None = None
+    jd_idx_min: int | None = None
+    jd_min: float | None = None
+    n_times_select: int | None = None
+    form_pi: bool = True
+    pi_norm: float = 1.0
+    redundant_avg: bool = False
+    uniform_redundancy: bool = False
+    calc_noise: bool = False
+    sigma: float | None = None
+    noise_seed: int = 742123
+    save_vis: bool = False
+    save_model: bool = False
+    save_dir: Path | str = './'
+    output_dir: Path | str = './'
+    clobber: bool = False
+    effective_noise_path: Path | str | None = None
+    priors: Any = None
+    uniform_priors: Any = None
+    foreground_prior_std_mk: tuple[float, ...] = (
+        8690.961932554002, 2479547.297490031, 1406322.413511489,
+    )
+    foreground_kl_path: Path | str | None = None
+    use_intrinsic_noise_fitting: bool = False
+    quiet: bool = False
+    run: bool = False
+    resume: bool = False
+    n_live_scale_factor: float = 25.0
+    random_key: int = 0
