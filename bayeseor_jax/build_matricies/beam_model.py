@@ -5,6 +5,21 @@ The time-dependent (azimuth, zenith angle) coordinates from image geometry
 locate each celestial pixel within the instrumental beam. The resulting
 frequency-dependent gains weight sky brightness before the three-dimensional
 Fourier mapping to visibilities. Pixels at or below the horizon have zero gain.
+
+Supported beam types
+--------------------
+- ``uniform``: unit power response above the horizon (the default).
+- ``gaussian``: Gaussian profile with a specified angular width or an
+  aperture-derived, frequency-dependent width.
+- ``airy``: Airy power pattern for a circular aperture.
+- ``gausscosine``: Gaussian profile modulated by a cosine-squared response.
+- ``taperairy``: Airy power pattern multiplied by a Gaussian taper.
+- ``tanhairy``: Airy power pattern multiplied by a hyperbolic-tangent taper.
+- A beamfits file path: an arbitrary tabulated beam loaded through
+  ``pyuvdata.UVBeam`` and interpolated onto the sky-pixel directions and
+  observing frequencies. Both HEALPix and azimuth/zenith-angle beam grids
+  are supported; ``pol`` selects the polarisation and ``freq_interp_kind``
+  selects the frequency interpolation method (cubic by default).
 """
 import warnings
 
@@ -28,7 +43,7 @@ class Beam_Model:
     Parameters
     ----------
     beam_type : str, optional
-        Can be either a path to a pyuvdata-compatible beam file or one of
+        Can be either a path to a beamfits file readable by UVBeam or one of
         'uniform', 'gaussian', 'airy', 'gausscosine', 'taperairy', or 'tanhairy'.
         Defaults to 'uniform'.
     peak_amp : float, optional
