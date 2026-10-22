@@ -407,6 +407,12 @@ class BuildMatrices:
             frequency_offsets_hz,
             d_eta=self.fourier_geometry.d_eta,
         )
+        # Q_z's compact spectral factors use MHz and signed power-law exponents.
+        self.foreground_spectral_operator = build_foreground_spectral_operator(
+            self.freq_hz / 1e6,
+            self.f0_mhz,
+            spectral_indices=tuple(-beta for beta in self.beta_fg),
+        )
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
             self.beam_type, 
@@ -424,30 +430,6 @@ class BuildMatrices:
             )  # Shape (n_freq, n_t, n_pix_fg)
 
         self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
-
-    def _foreground_spectral_operator(self) -> jnp.ndarray:
-        r"""Evaluate the foreground spectral factors at the selected frequencies.
-
-        Returns
-        -------
-        Q : jax.Array
-            Constant and power-law spectral factors, shape (n_freq,
-            n_fg_components).
-
-        Notes
-        -----
-        Uses the configured instance state; no explicit input arguments.
-
-        Return shape ``(n_freq, n_fg_components)`` with a constant column
-        followed by power laws referenced to ``f0_mhz``. The same factors
-        convert the amplitude coefficients of every foreground pixel into
-        its brightness spectrum.
-        """
-        return build_foreground_spectral_operator(
-            self.freq_hz / 1e6,
-            self.f0_mhz,
-            spectral_indices=tuple(-beta for beta in self.beta_fg),
-        )
 
     def T_21_build_save(self, *, matrix_name: str = "T_21") -> Path:
         r"""Save the cosmological operator using the configured observation and Fourier grid.
@@ -506,7 +488,7 @@ class BuildMatrices:
         beam = np.asarray(self.beam_response).transpose(1, 0, 2)
         return T_fg_build_save(
             self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
-            self.image_geometry.pixel_area_sr, self._foreground_spectral_operator(),
+            self.image_geometry.pixel_area_sr, self.foreground_spectral_operator,
             output_path=_dense_matrix_path_impl(self, matrix_name),
         )
 

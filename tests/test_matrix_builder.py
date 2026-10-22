@@ -40,6 +40,9 @@ def _minimal_builder(tmp_path):
     )
     builder.transverse_fourier_operator = jnp.asarray([[1.0], [-1.0]])
     builder.spectral_fourier_operator = jnp.asarray([[-1.0], [1.0]])
+    builder.foreground_spectral_operator = jnp.asarray(
+        [[1.0, 1.0, 1.0], [1.0, 1.1**-2, 1.1**-3]]
+    )
     builder.image_geometry = SimpleNamespace(
         lmn_fg=jnp.asarray(
             [
@@ -69,6 +72,16 @@ def test_component_builders_match_concatenated_operator(tmp_path):
     assert foreground.shape == (4, 6)
     assert joint.shape == (4, 7)
     np.testing.assert_allclose(joint, np.concatenate([eor, foreground], axis=1))
+
+
+def test_foreground_builder_uses_prepared_spectral_operator(tmp_path):
+    builder = _minimal_builder(tmp_path)
+    original = np.load(builder.T_fg_build_save())
+
+    builder.foreground_spectral_operator *= 2
+    rebuilt = np.load(builder.T_fg_build_save())
+
+    np.testing.assert_allclose(rebuilt, 2 * original)
 
 
 def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
@@ -145,9 +158,10 @@ def test_builder_reuses_precomputed_geometries(tmp_path):
         du_eor=1.0,
         n_v_eor=1,
         dv_eor=1.0,
-        n_freq=1,
+        beta_fg=[2.0, 3.0],
+        n_freq=2,
         f0_mhz=100.0,
-        df_mhz=1.0,
+        df_mhz=100.0,
         n_eta=1,
         d_eta=1.0,
         n_t=1,
@@ -160,3 +174,7 @@ def test_builder_reuses_precomputed_geometries(tmp_path):
 
     assert builder.image_geometry is image_geometry
     assert builder.fourier_geometry is fourier_geometry
+    np.testing.assert_allclose(
+        builder.foreground_spectral_operator,
+        [[1.0, 1.0, 1.0], [1.0, 0.25, 0.125]],
+    )
