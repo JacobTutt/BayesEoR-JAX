@@ -130,7 +130,7 @@ def build_fourier_geometry(
     dv: float,
     d_eta: float,
 ) -> FourierGeometry:
-    r"""Define the Fourier grid on which cosmological coefficients are placed.
+    r"""Define the rectilinear Fourier grid of the cosmological 21-cm brightness field.
 
     Parameters
     ----------
@@ -155,12 +155,48 @@ def build_fourier_geometry(
 
     Notes
     -----
-    ``n_u``, ``n_v``, and ``n_eta`` count modes before zero-mode exclusions;
-    ``du`` and ``dv`` are transverse spacings and ``d_eta`` is in inverse Hz.
-    Return a ``FourierGeometry`` representing
-    ``(n_u*n_v - 1) * (n_eta - 1)`` coefficients. The transverse monopole
-    and eta zero mode are excluded consistently for operators and k binning.
-    No image coordinates, beam response, or transform matrices are built here.
+    The intrinsic cosmological brightness field is parameterised by complex
+    amplitudes on a three-dimensional rectilinear ``(u, v, eta)`` grid, rather
+    than by independent image-pixel amplitudes. The transverse coordinates
+    ``u`` and ``v`` are Fourier duals of the reference-time image direction
+    cosines ``(l, m)``, while ``eta`` is the Fourier dual of observing
+    frequency. These are model coordinates, not the baselines sampled by the
+    instrument. The transverse representation uses a local tangent-plane
+    description of the cosmological field.
+
+    This basis provides a natural parameterisation for power-spectrum
+    inference. At a reference redshift, the modes map to comoving wavenumbers as
+
+    .. math::
+
+        k_x = 2\pi u / D_M, \qquad
+        k_y = 2\pi v / D_M, \qquad
+        k_z = 2\pi\eta / |d\chi/d\nu|.
+
+    Here ``D_M`` is the transverse comoving distance and ``|dchi/dnu|`` is
+    the line-of-sight distance per unit frequency. Under the statistically
+    homogeneous and isotropic Gaussian signal model, distinct Fourier modes
+    are uncorrelated and their prior variances are determined by the power
+    spectrum at ``|k|``. Grouping modes into spherical k bins therefore links
+    the coefficient prior directly to the power-spectrum amplitudes inferred
+    downstream, while the individual amplitudes can be analytically marginalised.
+    Coordinate conversion, binning, and prior construction are separate from
+    this geometry builder.
+
+    Every retained transverse pair is combined with every retained eta mode.
+    The ``(u, v)=(0, 0)`` pair and ``eta=0`` plane are excluded, leaving
+    ``(n_u*n_v - 1) * (n_eta - 1)`` coefficients. Flattening orders v first,
+    then u, with eta varying fastest. The spacings ``du``, ``dv``, and
+    ``d_eta`` also supply the Fourier integration weights; they are normally
+    chosen from the reciprocal transverse model extents and observing bandwidth.
+
+    Downstream, ``F_z`` maps eta modes to frequency and ``F'`` maps transverse
+    modes to brightness at the selected HEALPix pixel centres. The primary
+    beam and full three-dimensional fringe response then propagate this field
+    into the measured visibilities, where instrumental coupling mixes the
+    mode signatures. This function defines only coordinates and spacings; it
+    does not construct a brightness realisation, prior covariance, or any of
+    those operators.
     """
     # Reject invalid dimensions and integration weights before building axes.
     if min(n_u, n_v, n_eta) < 1:
