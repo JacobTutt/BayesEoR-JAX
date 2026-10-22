@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
-from bayeseor_jax.model.construction import foreground_svd as svd
+from bayeseor_jax.model.construction import reduce_kl_construction as svd
 from bayeseor_jax.model.operators import weight_foreground_operator
 
 

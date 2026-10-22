@@ -211,7 +211,7 @@ model/
 └── construction/
     ├── builder.py              # Physical input preparation and component writers
     ├── forward.py              # CPU construction and saved-component assembly
-    ├── foreground_svd.py       # Distributed KL reduction of a weighted operator
+    ├── reduce_kl_construction.py # Distributed KL reduction of a weighted operator
     ├── likelihood.py           # Noise-weighted Gram matrix and data contractions
     ├── storage.py              # Cache checks, saved arrays and publication
     └── distribution.py         # Device meshes and visibility-row partitions

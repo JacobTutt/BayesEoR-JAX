@@ -1,4 +1,4 @@
-"""Reduce a prior- and noise-weighted foreground operator using distributed SVD.
+"""Construct a reduced KL foreground operator using distributed SVD.
 
 The input already contains the physical foreground prior. Only the retained
 left singular modes are saved, with noise whitening undone so the resulting

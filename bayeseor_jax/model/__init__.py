@@ -23,7 +23,7 @@ from .operators import (
 )
 from .construction.builder import BuildMatrices
 from .construction.forward import T_21_build_save, T_fg_build_save, assemble_joint_operator
-from .construction.foreground_svd import T_fg_svd_build_save
+from .construction.reduce_kl_construction import T_fg_svd_build_save
 from .cosmology.transforms import Cosmology
 from .instrument.baselines import InstrumentModel
 from .instrument.noise import generate_gaussian_noise
