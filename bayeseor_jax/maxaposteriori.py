@@ -12,7 +12,7 @@ import jaxmg
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
-from .build_matricies.jax_grid import build_solver_mesh
+from .model.construction.distribution import build_solver_mesh
 from .inference.phi import PhiInverse
 from .inference.prior import linear_uniform_log_jacobian, theta_power_to_linear
 from .utils import load_sharded_npy

@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 
-from .build_matricies import (
+from .model import (
     BuildMatrices,
     build_fourier_geometry,
     build_image_geometry,
@@ -20,8 +20,8 @@ from .build_matricies import (
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
-from .model.cosmology_transforms import Cosmology
-from .model.k_cube import (
+from .model.cosmology.transforms import Cosmology
+from .model.cosmology.power_spectrum import (
     calc_mean_binned_k_vals,
     compress_to_nonempty_k_bins,
     generate_k_modes_in_physical_coordinates,

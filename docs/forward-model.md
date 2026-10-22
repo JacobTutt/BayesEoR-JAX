@@ -29,7 +29,7 @@ T    = [T_21  T_fg].
 ```
 
 All transformations between Fourier, image, frequency, and visibility spaces
-are defined in `forward_operators.py`; the geometry modules contain only their
+are defined in `model/operators.py`; the geometry modules contain only their
 coordinate definitions.
 
 `build_sky_to_visibility_operator` forms the shared beam-weighted fringe
@@ -39,6 +39,41 @@ methods distribute time ranges across JAX processes, construct frequency-row
 blocks on CPU, and write the result directly to a shared NumPy memmap. This
 keeps the exact equation-level model while avoiding a full operator allocation
 on any GPU.
+
+## Code Organisation
+
+The physical model and its construction live together under `bayeseor_jax/model/`:
+
+```text
+model/
+├── instrument/
+│   ├── beam.py                 # Analytic and interpolated primary-beam responses
+│   ├── baselines.py            # Sampled baselines, redundancy and antenna pairs
+│   └── noise.py                # Instrumental thermal-noise generation
+├── observation/
+│   └── image_geometry.py       # HEALPix selection and time-dependent directions
+├── cosmology/
+│   ├── fourier_geometry.py     # Cosmological (u, v, eta) coefficient grid
+│   ├── transforms.py           # Frequency and comoving-distance conversions
+│   └── power_spectrum.py       # Physical k coordinates and binning
+├── operators.py                # Numerical mappings between model spaces
+└── construction/
+    ├── builder.py              # BuildMatrices orchestration
+    ├── storage.py              # Saved arrays and shared memory-mapped files
+    └── distribution.py         # Device meshes and visibility-row partitions
+```
+
+The mathematical operators do not manage files or device allocation. The builder
+combines the physical ingredients and delegates those execution details to the
+construction helpers. Numerical builders return arrays; methods that construct
+large saved operators return their file paths.
+
+Public imports such as `from bayeseor_jax import BuildMatrices` remain unchanged.
+The former `build_matricies` package has been removed; direct module imports
+should use the paths above. The old `model.instrument`, `model.noise`,
+`model.cosmology_transforms`, and `model.k_cube` implementations now live in
+`model.instrument.baselines`, `model.instrument.noise`, `model.cosmology.transforms`,
+and `model.cosmology.power_spectrum`, respectively.
 
 ## Cached Matrix Products
 

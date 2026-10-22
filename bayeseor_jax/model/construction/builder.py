@@ -22,10 +22,10 @@ from jax.sharding import Mesh, PartitionSpec as P
 
 from astropy.constants import c
 
-from .fourier_geometry import FourierGeometry, build_fourier_geometry
-from .image_geometry import ImageGeometry, build_image_geometry
-from .beam_model import Beam_Model
-from .forward_operators import (
+from ..cosmology.fourier_geometry import FourierGeometry, build_fourier_geometry
+from ..observation.image_geometry import ImageGeometry, build_image_geometry
+from ..instrument.beam import Beam_Model
+from ..operators import (
     build_T_21_core,
     build_T_fg_core,
     build_foreground_spectral_operator,
@@ -33,16 +33,17 @@ from .forward_operators import (
     build_spectral_fourier_operator,
     build_transverse_fourier_operator,
 )
-from .build_utils import (
+from .storage import (
     _dense_matrix_path as _dense_matrix_path_impl,
     _log_build,
     _prepare_memmap_output as _prepare_memmap_output_impl,
     _slice_bounds as _slice_bounds_impl,
     check_if_matrix_exists as check_if_matrix_exists_impl,
     load_matrix as load_matrix_impl,
-    padded_visibility_partition as padded_visibility_partition_impl,
     save_matrix as save_matrix_impl,
 )
+
+from .distribution import padded_visibility_partition as padded_visibility_partition_impl
 
 
 class BuildMatrices:

@@ -16,7 +16,7 @@ the pixel solid angle and primary beam. The two ``build_T_*_core`` functions
 combine these factors for supplied blocks of visibility rows.
 
 These functions perform numerical construction only. Geometry modules define
-the coordinates; ``BuildMatrices`` in ``overall.py`` chooses the blocks,
+the coordinates; ``BuildMatrices`` in ``construction/builder.py`` chooses the blocks,
 distributes their construction, and saves the assembled matrices. The compact
 factors below implement these products without forming full Kronecker
 matrices. No unit conversion, prior weighting, or KL compression is applied.

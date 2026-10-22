@@ -17,7 +17,7 @@ import numpy as np
 from jax.experimental import multihost_utils
 from jax.sharding import NamedSharding
 
-from .build_matricies.beam_model import Beam_Model
+from .model.instrument.beam import Beam_Model
 
 jax.config.update("jax_enable_x64", True)
 LOGGER = logging.getLogger(__name__)

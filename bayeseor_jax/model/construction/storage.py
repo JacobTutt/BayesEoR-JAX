@@ -1,7 +1,6 @@
 """Store forward-model arrays and coordinate access across JAX processes.
 
-These helpers manage paths, shared memory-mapped files, and visibility-row
-partitions. They preserve the operator ordering supplied by the builders and
+These helpers manage paths and shared memory-mapped files. They preserve the operator ordering supplied by the builders and
 perform no transformation of the sky model or observational coordinates.
 """
 
@@ -221,64 +220,6 @@ def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
     start = 0 if sl.start is None else int(sl.start)
     stop = extent if sl.stop is None else int(sl.stop)
     return start, stop
-
-
-def padded_visibility_partition(
-    n_vis: int,
-    process_count: int,
-    local_device_count: int,
-    process_index: int,
-) -> tuple[int, int, int]:
-    r"""Assign a contiguous range of measured visibility rows to one process.
-
-    Parameters
-    ----------
-    n_vis : int
-        Number of measured complex visibilities before any padding.
-    process_count : int
-        Number of JAX processes sharing the visibility rows.
-    local_device_count : int
-        Number of devices on each process across which its rows are sharded.
-    process_index : int
-        Zero-based index of the process requesting its visibility-row range.
-
-    Returns
-    -------
-    row_start : int
-        First assigned row in the original visibility array.
-    row_stop : int
-        Exclusive stop, bounded above by n_vis; may precede start for an empty
-        assignment.
-    padded_row_count : int
-        Number of local rows including trailing zeros for even device sharding.
-
-    Notes
-    -----
-    The cached distributed builders shard the visibility axis across hosts and
-    then across local devices. When ``n_vis`` does not divide that layout
-    exactly, this returns a process-local stripe length rounded up so each host
-    can pad with trailing zero rows. That leaves ``T^H N^{-1} T`` and
-    ``T^H N^{-1} d`` unchanged provided the padded rows of ``T`` and the
-    corresponding ``N^{-1}`` / ``N^{-1} d`` entries are set to zero.
-
-    Return ``(row_start, row_stop, padded_row_count)``. Start and stop index
-    the original visibility vector; the count includes zero-padding required
-    for the local devices. For processes beyond the data extent, the slice
-    is empty even if the returned start exceeds stop.
-    """
-    n_vis = int(n_vis)
-    process_count = max(1, int(process_count))
-    local_device_count = max(1, int(local_device_count))
-    process_index = int(process_index)
-
-    rows_per_process = (n_vis + process_count - 1) // process_count
-    rows_per_process = (
-        (rows_per_process + local_device_count - 1) // local_device_count
-    ) * local_device_count
-
-    row0 = process_index * rows_per_process
-    row1 = min(row0 + rows_per_process, n_vis)
-    return row0, row1, rows_per_process
 
 
 def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:

@@ -25,8 +25,8 @@ from pyuvdata import UVData
 from pyuvdata import __version__ as pyuvdata_version
 from pyuvdata.utils import polstr2num
 
-from .model.instrument import InstrumentModel
-from .model.noise import generate_gaussian_noise
+from .model.instrument.baselines import InstrumentModel
+from .model.instrument.noise import generate_gaussian_noise
 from .utils import load_numpy_dict, save_numpy_dict
 
 LOGGER = logging.getLogger(__name__)

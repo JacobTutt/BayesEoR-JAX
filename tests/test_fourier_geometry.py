@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from bayeseor_jax import FourierGeometry, build_fourier_geometry
-from bayeseor_jax.model.k_cube import generate_k_modes_in_physical_coordinates
+from bayeseor_jax.model.cosmology.power_spectrum import generate_k_modes_in_physical_coordinates
 
 
 def test_fourier_geometry_defines_retained_uv_eta_grid():

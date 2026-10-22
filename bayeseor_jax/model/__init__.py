@@ -1,11 +1,42 @@
-"""Public exports for model-space helper utilities."""
+"""Physical models and their mappings into interferometric visibility space.
 
-from .cosmology_transforms import Cosmology
-from .instrument import InstrumentModel
-from .noise import generate_gaussian_noise
+Instrument responses, observation geometry, and cosmological coordinates feed
+the numerical operators. Construction helpers distribute and save those
+operators and their noise-weighted products for inference.
+"""
+
+from .instrument.beam import Beam_Model
+from .cosmology.fourier_geometry import FourierGeometry, build_fourier_geometry
+from .observation.image_geometry import ImageGeometry, build_image_geometry
+from .operators import (
+    build_foreground_spectral_operator,
+    build_nudft_matrix,
+    build_sky_to_visibility_operator,
+    build_spectral_fourier_operator,
+    build_T_21_core,
+    build_T_fg_core,
+    build_transverse_fourier_operator,
+)
+from .construction.builder import BuildMatrices
+from .cosmology.transforms import Cosmology
+from .instrument.baselines import InstrumentModel
+from .instrument.noise import generate_gaussian_noise
 
 __all__ = [
+    "Beam_Model",
+    "BuildMatrices",
     "Cosmology",
+    "FourierGeometry",
+    "ImageGeometry",
     "InstrumentModel",
+    "build_fourier_geometry",
+    "build_image_geometry",
+    "build_foreground_spectral_operator",
+    "build_nudft_matrix",
+    "build_sky_to_visibility_operator",
+    "build_spectral_fourier_operator",
+    "build_T_21_core",
+    "build_T_fg_core",
+    "build_transverse_fourier_operator",
     "generate_gaussian_noise",
 ]

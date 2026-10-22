@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import jax.numpy as jnp
 import numpy as np
 
-from bayeseor_jax.build_matricies.overall import BuildMatrices
+from bayeseor_jax.model.construction.builder import BuildMatrices
 
 
 def _minimal_builder(tmp_path):

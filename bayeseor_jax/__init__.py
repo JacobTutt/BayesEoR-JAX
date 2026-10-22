@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-from .build_matricies import (
+from .model import (
     Beam_Model,
     BuildMatrices,
     FourierGeometry,

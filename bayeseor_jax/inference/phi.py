@@ -115,7 +115,7 @@ def build_kbin_index_per_voxel(
     valid_mask: jax.Array,
 ) -> jax.Array:
     """
-    Build an index map from native ``k_cube.py`` assignments.
+    Build an index map from ``model/cosmology/power_spectrum.py`` assignments.
 
     Valid entries keep their bin ID and invalid entries are set to ``-1``.
     """

@@ -4,6 +4,25 @@ def test_package_import_does_not_require_optional_solver_or_sampler():
     assert bayeseor_jax.BuildMatrices is not None
 
 
+def test_model_layout_preserves_public_exports():
+    import bayeseor_jax as api
+    from bayeseor_jax import model
+    from bayeseor_jax.model.construction.builder import BuildMatrices
+    from bayeseor_jax.model.cosmology.fourier_geometry import FourierGeometry
+    from bayeseor_jax.model.cosmology.transforms import Cosmology
+    from bayeseor_jax.model.instrument.baselines import InstrumentModel
+    from bayeseor_jax.model.instrument.beam import Beam_Model
+    from bayeseor_jax.model.observation.image_geometry import ImageGeometry
+    from bayeseor_jax.model.operators import build_T_21_core, build_T_fg_core
+
+    for value in (
+        BuildMatrices, FourierGeometry, Cosmology, InstrumentModel,
+        Beam_Model, ImageGeometry, build_T_21_core, build_T_fg_core,
+    ):
+        assert getattr(api, value.__name__) is value
+        assert getattr(model, value.__name__) is value
+
+
 def test_foreground_example_uses_spherical_model_options_only():
     from bayeseor_jax.params import BayesEoRParser
 
