@@ -28,8 +28,9 @@ foreground emission enters through beam sidelobes and the chromatic horizon
 response. The foreground field uses a single HEALPix resolution. The saved
 physical operator can subsequently be weighted by its prior and noise factors
 for KL construction. `T_fg_svd_build_save` decomposes that saved weighted matrix
-on GPUs and writes its noise-thresholded reduced operator as a separate stage;
-see [the construction workflow](forward-model.md#distributed-foreground-svd-and-truncation).
+using native JAX on CPU or JAXMG on GPUs and writes its noise-thresholded reduced
+operator as a separate stage;
+see [the construction workflow](forward-model.md#foreground-svd-and-truncation).
 
 To analyse with a preconstructed KL operator, set
 `foreground_kl_path: arrays/T_fg_reduced.npy`. Setup uses its retained columns

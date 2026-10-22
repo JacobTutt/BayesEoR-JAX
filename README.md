@@ -66,9 +66,9 @@ python -c "import jax, bayeseor_jax, pymultinest; print(jax.devices())"
 
 The HPC wheels require Python 3.11 and compatible site runtimes; they are not
 universal GPU binaries. See [Installation](docs/installation.md) for requirements,
-existing environments, source builds and running the examples. Large distributed
-KL construction remains HPC-only; CPU inference supports original or precomputed
-reduced bases.
+existing environments, source builds and running the examples. Laptop KL
+construction uses native JAX SVD; larger distributed decompositions use JAXMG.
+Both produce the same reduced-operator format for inference.
 
 For a CSD3 Slurm workflow, including example one-GPU nested-sampling jobs, see [CSD3 Getting Started](docs/csd3.md).
 

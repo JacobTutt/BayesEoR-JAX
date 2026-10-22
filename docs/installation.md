@@ -23,9 +23,11 @@ It does **not** install CUDA or JAXMG. Likelihood and MAP calculations use a
 standard JAX Cholesky factorisation on a single CPU device, which can use
 multiple CPU threads.
 
-This path is for small analyses, development and plotting. Original foreground
-bases and already reduced KL operators are supported. The distributed KL
-construction routine, `T_fg_svd_build_save`, remains an HPC operation.
+This path supports small analyses, development and plotting, including native
+JAX KL construction through `T_fg_svd_build_save`. The dense SVD input, thin
+singular-vector matrices and workspace must fit in local RAM. Larger distributed
+decompositions require the HPC installation; both paths save the same reduced
+operator and diagnostics. See [KL construction](forward-model.md#foreground-svd-and-truncation).
 
 ## 2. HPC installation: supported Linux NVIDIA systems
 

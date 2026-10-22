@@ -165,12 +165,12 @@ reread. The weight vectors can vary across coefficients and visibilities;
 dense covariance factors are not supported by this block writer. No reduction
 is performed until the separate decomposition call below.
 
-## Distributed Foreground SVD and Truncation
+## Foreground SVD and Truncation
 
 `T_fg_svd_build_save` takes the **already prior- and noise-weighted** matrix
-`A = N^(-1/2) T_fg Sigma_q^(1/2)` saved as a complex128 `.npy` file. It loads
-the matrix directly into distributed GPU shards, runs JAXMG GESVD, chooses the
-retained rank and saves the reduced operator in one call:
+`A = N^(-1/2) T_fg Sigma_q^(1/2)` saved as a complex128 `.npy` file. On a laptop
+it uses native JAX SVD on CPU; on GPU it uses distributed JAXMG GESVD. Both choose
+the retained rank and save the reduced operator with the same interface:
 
 ```python
 from bayeseor_jax import T_fg_svd_build_save, assemble_joint_operator
@@ -200,7 +200,13 @@ visibility space, not on every visibility or realised sky. A zero-column operato
 is permitted if the whole contribution lies below the threshold; `f=0` retains
 all modes with nonzero computed singular values.
 
-The launcher must initialise distributed JAX with **one Python process per GPU**,
+On CPU, run a single Python process. The thin SVD needs no padding, CUDA or JAXMG;
+`tile_size` is ignored. The full input, thin left/right singular-vector matrices
+and workspace must fit in local RAM. This is an exact dense decomposition for
+smaller problems, not an out-of-core solver. To explicitly select CPU in an HPC
+environment, set `JAX_PLATFORMS=cpu` before starting Python.
+
+On GPU, the launcher must initialise distributed JAX with **one Python process per GPU**,
 and every process calls the function. A near-square mesh and tile-aligned zero
 padding make both rectangular inputs and thin left-vector outputs shardable.
 Padding is removed from saved arrays and excluded from `N_d` and rank selection.
@@ -210,7 +216,7 @@ This routine currently assumes diagonal noise even though the pure weighting
 function also permits dense noise factors.
 
 Alongside the operator it saves `<stem>.singular_values.npy` and
-`<stem>.svd.json`, recording the original/padded dimensions, process grid,
+`<stem>.svd.json`, recording the backend, original/padded dimensions, process grid,
 retained rank, achieved discarded RMS and timings. Solver failures are checked
 before replacing any completed operator. Each call recomputes the SVD; there is
 no implicit reuse that could ignore a changed `f`.
