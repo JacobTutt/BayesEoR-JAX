@@ -21,7 +21,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 
 ## Documentation
 
-- [Installation](docs/installation.md): install paths for core development, supported JAXMg wheels, source builds, JAX checks, and MultiNest setup.
+- [Installation](docs/installation.md): CPU and GPU environments, JAX checks, and MultiNest setup.
 - [CSD3 Getting Started](docs/csd3.md): CSD3 environment setup, MultiNest library setup, and one-GPU Slurm scripts for the test analyses.
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.
 - [Forward Model](docs/forward-model.md): how visibility data are modelled through the linear operator `T`.
@@ -51,7 +51,7 @@ conda env create -f environment.yml
 conda activate bayeseor
 ```
 
-**HPC / NVIDIA GPU:** CUDA 12 JAX and the matching Linux JAXMG wheel.
+**HPC / NVIDIA GPU:** Python 3.12 and `jaxmg[cuda12]` from PyPI.
 
 ```bash
 conda env create -f environment-hpc.yml
@@ -64,9 +64,9 @@ Check the installation:
 python -c "import jax, bayeseor_jax, pymultinest; print(jax.devices())"
 ```
 
-The HPC wheels require Python 3.11 and compatible site runtimes; they are not
-universal GPU binaries. See [Installation](docs/installation.md) for requirements,
-existing environments, source builds and running the examples. Laptop KL
+The HPC installation supports Linux x86_64 and aarch64 with a compatible NVIDIA
+driver. See [Installation](docs/installation.md) for requirements,
+existing environments and running the examples. Laptop KL
 construction uses native JAX SVD; larger distributed decompositions use JAXMG.
 Both produce the same reduced-operator format for inference.
 

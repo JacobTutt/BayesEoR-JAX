@@ -78,36 +78,18 @@ matrix is reused when only the observations change; one device uses the same pat
 
 ## JAXMg
 
-The marginalised likelihood uses JAXMg for dense Hermitian positive-definite solves and log determinants. The JAXMg fork used by this project adds log-determinant support needed by BayesEoR-JAX.
+Single-device likelihood and MAP calculations use native JAX on CPU or GPU.
+Multi-GPU inference uses JAXMG for dense Hermitian positive-definite solves and
+log determinants; GPU KL construction uses its SVD routine.
 
-The provided extras install prebuilt JAXMg wheels for specific hardware families:
+The `hpc` extra installs `jaxmg[cuda12]` from PyPI on supported Linux x86_64
+and aarch64 systems. Use Python 3.12+ and a compatible NVIDIA driver; no
+cluster-specific wheels or extras are needed. See [Installation](installation.md).
 
-- `csd3`: Linux x86_64 CUDA wheel.
-- `isambard`: Linux ARM64 CUDA wheel.
-
-Unsupported systems should build JAXMg from source, then install BayesEoR-JAX without one of these extras.
-
-## CSD3-Like Systems
-
-The CSD3 wheel was built for a CUDA 12 style x86_64 environment. For source builds on CSD3, previous working builds used:
-
-- `gcc/11`
-- `cuda/12.1`
-- `cudnn/8.9_cuda-12.1`
-
-The CSD3 cuDNN module exposed versioned headers and libraries, so the source build needed a local compatibility directory for generic cuDNN header/library names. That is a JAXMg build issue, not a BayesEoR-JAX runtime setting.
-
-For the recommended CSD3 conda environment, MultiNest shared-library setup, and one-GPU nested-sampling scripts, see [CSD3 Getting Started](csd3.md).
-
-## Isambard-Like Systems
-
-The Isambard wheel targets Linux ARM64 CUDA systems. Use:
-
-```bash
-pip install "bayeseor-jax[isambard] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
-```
-
-For multi-node JAX jobs, scripts may need distributed initialisation and NCCL environment settings appropriate to the cluster. Keep those settings in job scripts, not in portable package documentation.
+Distributed JAXMG execution requires one Python process per GPU, with
+distributed JAX initialised before creating the device mesh. Scheduler and
+network settings belong in the job scripts. For CSD3 examples and MultiNest
+shared-library setup, see [CSD3 Getting Started](csd3.md).
 
 ## Practical Run Advice
 

@@ -2,7 +2,7 @@
 
 **Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
-This is a step-by-step CSD3 setup guide for running the BayesEoR-JAX test examples. It uses a Python 3.11 conda environment, a prebuilt JAXMg wheel for a supported CUDA system, and MultiNest as the default sampler.
+This is a step-by-step CSD3 setup guide for running the BayesEoR-JAX test examples. It uses a Python 3.12 conda environment, JAXMG from PyPI, and MultiNest as the default sampler.
 
 The recommended [HPC installation](installation.md) now installs native MultiNest
 through Conda as well as the Python wrapper. The manual instructions below are
@@ -38,7 +38,7 @@ BAYESEOR/
 
 ## 3. Create The Conda Environment
 
-Create a fresh Python 3.11 environment. The examples use conda-forge by default:
+Create a fresh Python 3.12 environment. The examples use conda-forge by default:
 
 ```bash
 module load miniconda/3
@@ -46,7 +46,7 @@ module load miniconda/3
 conda create -y \
   -p ./conda-env \
   -c conda-forge \
-  python=3.11 pip
+  python=3.12 pip
 ```
 
 Activate it:
@@ -64,13 +64,13 @@ Install the package from the clone:
 
 ```bash
 cd BayesEoR-v2
-pip install -e ".[csd3]"
+pip install -e ".[hpc]"
 cd ..
 ```
 
-The `csd3` extra installs the prebuilt JAXMg wheel for CSD3-like Linux x86_64 CUDA systems. The main package dependencies also install the Python `pymultinest` wrapper.
-
-For a different supported system, use the matching extra instead of `csd3`.
+The `hpc` extra installs `jaxmg[cuda12]` from PyPI and is shared across supported
+Linux NVIDIA systems. The main package dependencies also install the Python
+`pymultinest` wrapper.
 
 ## 5. Build The MultiNest Library
 

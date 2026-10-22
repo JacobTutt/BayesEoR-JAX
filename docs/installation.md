@@ -36,28 +36,21 @@ conda env create -f environment-hpc.yml
 conda activate bayeseor-hpc
 ```
 
-This adds CUDA 12 JAX and the architecture-matched JAXMG wheel: the CSD3 build
-for Linux x86_64 or the Isambard build for Linux aarch64. These are **Python 3.11,
-site-built wheels**, not universal cluster binaries. The matching NVIDIA driver
-and native runtime libraries must be available. Likelihood and MAP solves use
-native JAX on a single CPU or GPU and JAXMG for distributed GPU inference.
+This uses Python 3.12 and installs `jaxmg[cuda12]` from PyPI, which supplies
+compatible JAX/CUDA dependencies and the cuSOLVERMp runtime. Pip selects the
+Linux x86_64 or aarch64 wheel automatically; no cluster-specific extra or
+GitHub wheel URL is required. A compatible NVIDIA driver is still required.
+See the [JAXMG installation guide](https://flatironinstitute.github.io/jaxmg/latest/install/)
+for supported hardware and CUDA versions.
 
-The existing `[csd3]` and `[isambard]` extras remain supported; `[hpc]`
-selects between them by architecture. GPU extras are not for macOS or Windows.
+In an existing Python 3.12+ environment, use `python -m pip install -e ".[hpc]"`.
+The former `[csd3]` and `[isambard]` extras have been replaced by `[hpc]`.
 
-If your cluster does not match a wheel, build the downstream
-[JAXMG library](https://github.com/JacobTutt/jaxmg) against the cluster's runtime,
-then install BayesEoR-JAX and CUDA JAX without a wheel extra:
-
-```bash
-python -m pip install -e . "jax[cuda12]"
-```
-
-Single-GPU likelihood and MAP solves need only CUDA JAX, not JAXMG. GPU KL
-construction still uses JAXMG, independently of this inference solver choice.
-JAXMG must expose `potrs(..., return_logdet=True)` for multi-GPU inference and `gesvd`
-for GPU KL reduction. A package with the same name is not necessarily
-API-compatible. See [CSD3](csd3.md) for site/job examples.
+Likelihood and MAP solves use native JAX on one CPU or GPU and JAXMG across
+multiple GPUs. Single-GPU inference alone can use
+`python -m pip install -e . "jax[cuda12]"` without JAXMG; GPU KL construction
+still uses JAXMG. Distributed JAXMG execution requires one Python process per
+GPU and initialisation of distributed JAX before constructing the device mesh.
 
 ## Verify the installation
 
