@@ -130,6 +130,7 @@ def run_setup(
     priors: Any = None,
     uniform_priors: Any = None,
     foreground_prior_std_mk: tuple[float, ...] = DEFAULT_FOREGROUND_PRIOR_STD_MK,
+    foreground_kl_path: Path | str | None = None,
     use_intrinsic_noise_fitting: bool = False,
     **_: Any,
 ) -> SetupResult:
@@ -201,7 +202,15 @@ def run_setup(
         correction inside the likelihood. Sampler coordinates remain in
         log10-power space for all bins.
     foreground_prior_std_mk : sequence of float, optional
-        Physical prior width for each foreground spectral coefficient field.
+        Physical prior width for each foreground spectral coefficient field,
+        repeated across its pixels. Ignored when foreground_kl_path is supplied.
+    foreground_kl_path : pathlib.Path or str, optional
+        Preconstructed, unwhitened reduced foreground operator from
+        T_fg_svd_build_save, with the same visibility ordering as the data.
+        Replaces construction of T_fg and selects a unit coefficient prior;
+        the physical foreground uncertainty is already absorbed in this file.
+        Its observation and physical prior must match the intended analysis.
+        This option does not run a decomposition or alter the saved operator.
     use_intrinsic_noise_fitting : bool, optional
         Whether to include a global intrinsic noise amplitude parameter in the
         likelihood.
@@ -239,7 +248,7 @@ def run_setup(
         n_eta = n_freq
     if not beta_fg:
         raise ValueError("beta_fg must contain at least one spectral index")
-    if len(foreground_prior_std_mk) != 1 + len(beta_fg):
+    if foreground_kl_path is None and len(foreground_prior_std_mk) != 1 + len(beta_fg):
         raise ValueError(
             "foreground_prior_std_mk must contain one width for the constant "
             "field and one for each beta_fg power law"
@@ -247,6 +256,15 @@ def run_setup(
 
     output_dir = Path(output_dir).expanduser().resolve()
     array_save_directory = Path(array_save_directory).expanduser().resolve()
+    if foreground_kl_path is not None:
+        foreground_kl_path = Path(foreground_kl_path).expanduser().resolve()
+        # A supplied operator is an input, never a target of setup's output writers.
+        output_names = ("T_21.npy", "T.npy", "Ninv.npy", "T_Ninv_T.npy", "dbar.npy", "d_ninv_d.npy")
+        if foreground_kl_path in {(array_save_directory / name).resolve() for name in output_names}:
+            raise ValueError("foreground_kl_path must not be a setup output path")
+        reduced = np.load(foreground_kl_path, mmap_mode="r")
+        if reduced.ndim != 2 or reduced.dtype != np.complex128:
+            raise ValueError("The KL foreground operator must be a complex128 matrix")
     save_dir = Path(save_dir).expanduser().resolve()
 
     vis_dict = get_vis_data(
@@ -405,7 +423,8 @@ def run_setup(
         "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
         "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
         "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
-        "foreground_prior_std_mk": list(foreground_prior_std_mk),
+        "foreground_prior_std_mk": list(foreground_prior_std_mk) if foreground_kl_path is None else None,
+        "foreground_kl_path": str(foreground_kl_path) if foreground_kl_path is not None else None,
         "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
     }
 
@@ -506,11 +525,20 @@ def run_setup(
         array_save_directory=str(array_save_directory),
     )
 
-    # Construct the components independently. This setup uses the original
-    # foreground basis; a reduced operator can be supplied to assembly in a
-    # staged workflow, together with its corresponding prior at inference time.
+    # Select the foreground response and its matching prior together. Everything
+    # downstream uses the same joint operator and likelihood-product functions.
     t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=clobber)
-    foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=clobber)
+    if foreground_kl_path is None:
+        foreground_std = np.repeat(foreground_prior_std_mk, bm.n_fg_spatial_modes)
+        if (not np.isrealobj(foreground_std) or not np.all(np.isfinite(foreground_std))
+                or np.any(foreground_std <= 0)):
+            raise ValueError("foreground prior widths must be finite, real and positive")
+        foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=clobber)
+    else:
+        foreground_path = foreground_kl_path
+        if reduced.shape[0] != np.asarray(vis_dict["vis_noisy"]).size:
+            raise ValueError("The KL foreground operator must match the visibility rows")
+        foreground_std = np.ones(reduced.shape[1])
     t_path = array_save_directory / "T.npy"
     ensure_cached(
         t_path,
@@ -581,8 +609,7 @@ def run_setup(
         ps_box_size_para_mpc=ps_box_size_para_mpc,
         inst_to_cosmo_vol=float(cosmo.inst_to_cosmo_vol(z)),
         n_par=int(n_params),
-        foreground_prior_std_mk=foreground_prior_std_mk,
-        n_fg_spatial_modes=int(bm.n_fg_spatial_modes),
+        foreground_prior_std=foreground_std,
     )
     
     likelihood_class = MarginalisedLikelihood(

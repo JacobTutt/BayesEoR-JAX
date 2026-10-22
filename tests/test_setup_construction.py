@@ -7,9 +7,11 @@ from types import SimpleNamespace
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 
-def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, monkeypatch):
+@pytest.fixture
+def setup_case(tmp_path, monkeypatch):
     # The test stops at likelihood configuration, before any JAXMg solve.
     monkeypatch.setitem(
         sys.modules, "bayeseor_jax.inference.likelihood_marg",
@@ -53,6 +55,12 @@ def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, 
     arguments = dict(data_path=tmp_path / "data.npy", n_freq=3, n_eta=3,
                      array_save_directory=tmp_path, output_dir=tmp_path,
                      priors=[[-1., 1.]], nside=1)
+    return setup, arguments, vis
+
+
+def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, setup_case):
+    setup, arguments, vis = setup_case
+    data = vis['vis_noisy']
     result = setup.run_setup(**arguments, sigma=.5)
     operator = np.load(tmp_path / "T.npy")
     inverse_noise = np.load(tmp_path / "Ninv.npy")
@@ -79,3 +87,73 @@ def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, 
     np.testing.assert_allclose(np.load(tmp_path / "Ninv.npy"), inverse_noise / 4)
     np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"),
                                operator.conj().T @ (inverse_noise[:, None] * operator) / 4)
+
+
+@pytest.mark.parametrize('rank', [0, 3, 6])
+def test_setup_selects_kl_operator_and_unit_prior(tmp_path, setup_case, monkeypatch, rank):
+    setup, arguments, vis = setup_case
+    original = setup.run_setup(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.])
+    original_t = np.load(tmp_path / 'T.npy')
+    np.testing.assert_allclose(original.phi_inverse_class.foreground_precision,
+                               [1., 1., .25, .25, .0625, .0625])
+    rng = np.random.default_rng(7)
+    reduced = (rng.normal(size=(6, rank)) + 1j * rng.normal(size=(6, rank))).astype(np.complex128)
+    reduced_path = tmp_path / 'reduced.npy'
+    np.save(reduced_path, reduced)
+    saved_bytes = reduced_path.read_bytes()
+
+    def unexpected_build(*args, **kwargs):
+        raise AssertionError('A supplied KL operator must not rebuild the physical foreground')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(setup.BuildMatrices, 'T_fg_build_save', unexpected_build)
+        # Even different physical widths must not be applied a second time.
+        result = setup.run_setup(**arguments, sigma=.5, foreground_kl_path=reduced_path,
+                                 foreground_prior_std_mk=[100., 200., 400.])
+    operator = np.load(tmp_path / 'T.npy')
+    np.testing.assert_array_equal(operator[:, :16], original_t[:, :16])
+    np.testing.assert_array_equal(operator[:, 16:], reduced)
+    np.testing.assert_array_equal(result.phi_inverse_class.foreground_precision, np.ones(rank))
+    assert result.phi_inverse_class.n_par == 16 + rank
+    assert reduced_path.read_bytes() == saved_bytes
+    inverse_noise = np.load(tmp_path / 'Ninv.npy')
+    np.testing.assert_allclose(np.load(tmp_path / 'T_Ninv_T.npy'),
+                               operator.conj().T @ (inverse_noise[:, None] * operator), atol=1e-12)
+    np.testing.assert_allclose(np.load(tmp_path / 'dbar.npy'),
+                               operator.conj().T @ (inverse_noise * vis['vis_noisy']), atol=1e-12)
+    np.testing.assert_array_equal(
+        result.phi_inverse_class.evaluate(jnp.ones(1))[:16],
+        original.phi_inverse_class.evaluate(jnp.ones(1))[:16],
+    )
+
+    # Switching back invalidates cached joint products, including equal-sized bases.
+    setup.run_setup(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.])
+    np.testing.assert_array_equal(np.load(tmp_path / 'T.npy'), original_t)
+
+
+def test_kl_setup_does_not_need_original_foreground_file(tmp_path, setup_case, monkeypatch):
+    setup, arguments, _ = setup_case
+    path = tmp_path / 'reduced.npy'
+    np.save(path, np.ones((6, 2), dtype=np.complex128))
+    monkeypatch.setattr(setup.BuildMatrices, 'T_fg_build_save', lambda **kwargs: pytest.fail('Unexpected build'))
+    setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path)
+    assert not (tmp_path / 'T_fg.npy').exists()
+
+
+@pytest.mark.parametrize('matrix', [np.ones((5, 2), dtype=np.complex128), np.ones((6, 2)), np.ones(6)])
+def test_setup_rejects_incompatible_kl_matrix(tmp_path, setup_case, matrix):
+    setup, arguments, _ = setup_case
+    path = tmp_path / 'reduced.npy'
+    np.save(path, matrix)
+    with pytest.raises(ValueError, match='KL foreground operator'):
+        setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path)
+
+
+def test_kl_input_cannot_be_overwritten_by_setup(tmp_path, setup_case):
+    setup, arguments, _ = setup_case
+    path = tmp_path / 'T_21.npy'
+    np.save(path, np.ones((6, 2), dtype=np.complex128))
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='setup output'):
+        setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path, clobber=True)
+    assert path.read_bytes() == before

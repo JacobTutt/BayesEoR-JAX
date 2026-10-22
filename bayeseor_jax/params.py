@@ -46,6 +46,9 @@ class BayesEoRParser(ArgumentParser):
         bins.
     foreground_prior_std_mk : list of float, optional
         Physical prior width for each foreground spectral coefficient field.
+    foreground_kl_path : str, optional
+        Saved unwhitened KL foreground operator. Uses a standard-normal prior
+        instead of foreground_prior_std_mk; does not run the decomposition.
     use_intrinsic_noise_fitting : bool, optional
         Fit for global intrinsic noise amplitude. Defaults to False.
     sampler : str, optional
@@ -210,6 +213,10 @@ class BayesEoRParser(ArgumentParser):
             help="Physical prior width for each foreground spectral field in mK.",
         )
         self.add_argument("--use-intrinsic-noise-fitting", action="store_true", help="Fit a global noise level.")
+        self.add_argument(
+            "--foreground-kl-path", type=str, default=None,
+            help="Use a saved unwhitened KL foreground operator with a standard-normal prior.",
+        )
         self.add_argument(
             "--sampler",
             type=str,

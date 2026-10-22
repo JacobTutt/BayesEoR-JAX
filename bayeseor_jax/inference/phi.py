@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 
@@ -18,9 +19,27 @@ class PhiInverse:
     """Construct the diagonal prior precision for the joint coefficients.
 
     The cosmological block is set by the sampled spherical power-spectrum
-    amplitudes. The foreground block uses one physical brightness-temperature
-    prior width per spectral coefficient field, repeated across all spherical
-    image-domain modes in component-major order.
+    amplitudes. The foreground block accepts one standard deviation per operator
+    column, independent of its representation: physical widths for the original
+    coefficients or unit widths for prior-standardised KL coefficients.
+
+    Parameters
+    ----------
+    bin_id_per_k_mode, valid_mask : array-like
+        Spherical bin assignments and validity flags for cosmological columns.
+    k_vals : array-like
+        Representative physical wavenumbers of the sampled power-spectrum bins.
+    ps_box_size_ra_mpc, ps_box_size_dec_mpc, ps_box_size_para_mpc : float
+        Comoving dimensions used in the Fourier power normalisation.
+    inst_to_cosmo_vol : float
+        Instrumental-to-cosmological volume conversion.
+    n_par : int
+        Total number of cosmological and foreground coefficient columns.
+    foreground_prior_std : array-like
+        Finite, positive real standard deviations, one per foreground column
+        in operator order. Pass ones for a reduced KL operator; its physical
+        prior has already been absorbed. An empty vector supports zero retained
+        foreground modes.
     """
 
     def __init__(
@@ -33,8 +52,7 @@ class PhiInverse:
         ps_box_size_para_mpc: float,
         inst_to_cosmo_vol: float | jax.Array,
         n_par: int,
-        foreground_prior_std_mk=DEFAULT_FOREGROUND_PRIOR_STD_MK,
-        n_fg_spatial_modes: int = 0,
+        foreground_prior_std: jax.Array,
     ) -> None:
         self.kbin_index_per_voxel = build_kbin_index_per_voxel(
             bin_id_per_k_mode=bin_id_per_k_mode,
@@ -57,35 +75,17 @@ class PhiInverse:
         )
         self.n_par = int(n_par)
         self.n_eor_voxels = int(self.kbin_index_per_voxel.shape[0])
-        self.n_fg_spatial_modes = int(n_fg_spatial_modes)
-        foreground_std = jnp.asarray(
-            foreground_prior_std_mk,
-            dtype=jnp.float64,
-        )
-        if foreground_std.ndim != 1 or foreground_std.size == 0:
-            raise ValueError(
-                "foreground_prior_std_mk must be a non-empty vector"
-            )
-        if bool(jnp.any(foreground_std <= 0.0)):
-            raise ValueError("foreground prior widths must be positive")
-
+        foreground_std = np.asarray(foreground_prior_std)
         n_foreground = self.n_par - self.n_eor_voxels
-        expected_foreground = (
-            self.n_fg_spatial_modes * int(foreground_std.size)
-        )
-        if n_foreground != expected_foreground:
+        if foreground_std.shape != (n_foreground,):
             raise ValueError(
                 "foreground prior length mismatch: the joint model contains "
-                f"{n_foreground} foreground coefficients, but "
-                f"{self.n_fg_spatial_modes} spatial modes and "
-                f"{int(foreground_std.size)} spectral fields imply "
-                f"{expected_foreground}"
+                f"{n_foreground} foreground coefficients; supply one width per column"
             )
-        component_precision = 1.0 / jnp.square(foreground_std)
-        self.foreground_precision = jnp.repeat(
-            component_precision,
-            self.n_fg_spatial_modes,
-        )
+        if (not np.isrealobj(foreground_std) or not np.all(np.isfinite(foreground_std))
+                or np.any(foreground_std <= 0)):
+            raise ValueError("foreground prior widths must be finite, real and positive")
+        self.foreground_precision = 1.0 / jnp.square(jnp.asarray(foreground_std, dtype=jnp.float64))
 
     def evaluate(self, theta_power_linear: jax.Array) -> jax.Array:
         """Return the joint EoR and foreground prior-precision diagonal."""
