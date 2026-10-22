@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 
 from bayeseor_jax.model.construction.operator_construction import assemble_joint_operator
+from bayeseor_jax.model.construction import likelihood_products as products
 from bayeseor_jax.model.construction.likelihood_products import (
     build_gram_matrix, build_data_projection, build_data_power,
     save_gram_matrix, save_data_projection, save_data_power,
+    save_likelihood_products,
 )
 from bayeseor_jax.model.construction.storage import ensure_cached, save_array
 
@@ -46,6 +48,83 @@ def test_pure_products_are_jittable(inputs):
     np.testing.assert_allclose(jax.jit(build_data_projection)(matrix, weights, data),
                                np.asarray(matrix).conj().T @ (np.asarray(weights) * np.asarray(data)))
     np.testing.assert_allclose(jax.jit(build_data_power)(weights, data), np.vdot(data, weights * data).real)
+
+
+@pytest.mark.parametrize("n_parameter", [0, 5])
+def test_shared_products_load_once_and_reuse_gram(tmp_path, inputs, monkeypatch, n_parameter):
+    matrix, weights, data = inputs
+    matrix = matrix[:, :n_parameter]
+    t_path, n_path = tmp_path / "T.npy", tmp_path / "Ninv.npy"
+    np.save(t_path, matrix)
+    loads, noise_loads, builds = [], [], []
+    load_operator = products._load_sharded_operator
+    load_noise = products._load_inverse_noise
+    write_gram = products._save_gram_matrix
+
+    def track_load(*args):
+        loaded = load_operator(*args)
+        assert loaded[0].size == jax.device_count()
+        assert len(loaded[1].addressable_shards) == jax.local_device_count()
+        loads.append(True)
+        return loaded
+
+    def track_noise(*args):
+        noise_loads.append(True)
+        return load_noise(*args)
+
+    def track_build(*args):
+        builds.append(True)
+        return write_gram(*args)
+
+    monkeypatch.setattr(products, "_load_sharded_operator", track_load)
+    monkeypatch.setattr(products, "_load_inverse_noise", track_noise)
+    monkeypatch.setattr(products, "_save_gram_matrix", track_build)
+
+    def prepare(observations, **kwargs):
+        paths = save_likelihood_products(t_path, n_path, observations, output_directory=tmp_path,
+                                         block_cols=2, right_block_batch=2, **kwargs)
+        np.testing.assert_allclose(np.load(paths[0]), matrix.conj().T @ (weights[:, None] * matrix), atol=1e-12)
+        np.testing.assert_allclose(np.load(paths[1]), matrix.conj().T @ (weights * observations), atol=1e-12)
+        np.testing.assert_allclose(np.load(paths[2]), np.vdot(observations, weights * observations).real)
+        return paths
+
+    paths = prepare(data)
+    assert len(loads) == len(noise_loads) == len(builds) == 1
+    stamp = paths[0].stat().st_mtime_ns
+    prepare(2 * data)
+    assert len(loads) == len(noise_loads) == 2
+    assert len(builds) == 1
+    assert paths[0].stat().st_mtime_ns == stamp
+    weights = weights * 2
+    np.save(n_path, weights)
+    prepare(data)
+    matrix = matrix * 3
+    np.save(t_path, matrix)
+    prepare(data)
+    prepare(data, clobber=True)
+    assert len(loads) == len(noise_loads) == 5
+    assert len(builds) == 4
+
+
+@pytest.mark.parametrize("bad_data", [[1.], [np.nan] * 7])
+def test_shared_products_validate_before_writing(tmp_path, inputs, bad_data):
+    output = tmp_path / "T_Ninv_T.npy"
+    np.save(output, [[42.]])
+    with pytest.raises(ValueError, match="data must"):
+        save_likelihood_products(tmp_path / "T.npy", tmp_path / "Ninv.npy", bad_data,
+                                 output_directory=tmp_path)
+    np.testing.assert_array_equal(np.load(output), [[42.]])
+    assert not (tmp_path / "dbar.npy").exists()
+
+
+@pytest.mark.parametrize("input_name", ["T_Ninv_T.npy", "dbar.npy", "d_ninv_d.npy"])
+def test_shared_outputs_cannot_overwrite_operator(tmp_path, inputs, input_name):
+    matrix, _, data = inputs
+    t_path = tmp_path / input_name
+    np.save(t_path, matrix)
+    with pytest.raises(ValueError, match="overwrite"):
+        save_likelihood_products(t_path, tmp_path / "Ninv.npy", data, output_directory=tmp_path)
+    np.testing.assert_array_equal(np.load(t_path), matrix)
 
 
 @pytest.mark.parametrize("bad_noise", [[1.], [0.] * 7, [np.nan] * 7, [1j] * 7])

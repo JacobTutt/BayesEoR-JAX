@@ -307,7 +307,7 @@ rebuilds a missing component:
 from bayeseor_jax.model.instrument.noise import build_noise_variance
 from bayeseor_jax.model.construction.storage import save_array
 from bayeseor_jax.model.construction.likelihood_products import (
-    save_gram_matrix, save_data_projection, save_data_power,
+    save_likelihood_products,
 )
 
 # Use path_fg for the original representation, or a separately saved reduced one.
@@ -316,16 +316,17 @@ path_joint = assemble_joint_operator(path_21, selected_fg, output_path="arrays/T
 variance = build_noise_variance(n_time, n_frequency, n_baseline,
                                 sigma=noise_rms, redundancy=redundancy)
 path_ninv = save_array("arrays/Ninv.npy", 1.0 / variance)
-save_gram_matrix(path_joint, path_ninv, output_path="arrays/T_Ninv_T.npy")
-save_data_projection(path_joint, path_ninv, data, output_path="arrays/dbar.npy")
-save_data_power(path_ninv, data, output_path="arrays/d_ninv_d.npy")
+save_likelihood_products(path_joint, path_ninv, data, output_directory="arrays")
 ```
 
 These are collective calls when distributed JAX is active. Component writers
 run on CPU; the likelihood-product writers use the default device mesh, normally
-GPUs. `save_gram_matrix` keeps each process's visibility stripe on its devices
-and writes the output in coefficient blocks. It does not stream the input from
-disk during each contraction.
+GPUs. `save_likelihood_products` loads T and inverse noise once across all devices,
+keeps each process's visibility stripe resident, and writes the Gram matrix in
+coefficient blocks. It reuses a valid cached Gram matrix but always refreshes
+the data projection and scalar data power. It does not stream the input from
+disk during each contraction. The individual `save_gram_matrix`,
+`save_data_projection` and `save_data_power` functions remain available.
 
 For in-memory use, `build_gram_matrix`, `build_data_projection` and
 `build_data_power` are pure JAX contractions with no storage or placement policy.
@@ -333,8 +334,8 @@ The supplied foreground operator must use the same visibility rows as `T_21`.
 Its coefficient prior must also match the chosen representation: physical prior
 widths for the original basis, or a standard-normal prior when those widths have
 already been absorbed into a reduced operator. The SVD stage above is explicit;
-automatic reduction and reduced-prior selection are not part of `run_setup`,
-which still uses the original foreground representation.
+`run_setup(foreground_kl_path=...)` selects a saved reduced operator and its
+standard-normal prior. Without that argument, setup uses the original representation.
 
 ## Cached Matrix Products
 
@@ -359,8 +360,8 @@ files without first deleting an existing output.
 
 Physical-component reuse still requires identical observation and model settings;
 it does not hash the configuration. Use a separate directory or `clobber=True`
-when those settings change. Standalone save functions always write their requested
-output; cache reuse is an explicit orchestration decision. Keeping both components
+when those settings change. The individual product writers always write their
+requested output; `save_likelihood_products` handles Gram-cache reuse. Keeping both components
 and the assembled joint matrix increases disk usage but permits independent reuse.
 
 ## Setup Flow

@@ -20,7 +20,7 @@ from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
 from .model.instrument.noise import build_noise_variance
 from .model.construction.operator_construction import assemble_joint_operator
-from .model.construction.likelihood_products import save_gram_matrix, save_data_projection, save_data_power
+from .model.construction.likelihood_products import save_likelihood_products
 from .model.construction.storage import ensure_cached, save_array
 from .model.cosmology.transforms import Cosmology
 from .model.cosmology.power_spectrum import (
@@ -557,15 +557,10 @@ def run_setup(
     ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=clobber or noise_changed)
 
     # Only now prepare the likelihood products from the selected joint matrix.
-    gram_path = array_save_directory / "T_Ninv_T.npy"
-    ensure_cached(
-        gram_path, lambda: save_gram_matrix(t_path, ninv_path, output_path=gram_path),
-        dependencies=(t_path, ninv_path), clobber=clobber,
-    )
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    # Always refresh data-dependent terms, even when the physical model is reused.
-    save_data_projection(t_path, ninv_path, vis_noisy, output_path=array_save_directory / "dbar.npy")
-    save_data_power(ninv_path, vis_noisy, output_path=array_save_directory / "d_ninv_d.npy")
+    save_likelihood_products(
+        t_path, ninv_path, vis_noisy, output_directory=array_save_directory, clobber=clobber,
+    )
     n_params = int(np.load(t_path, mmap_mode="r").shape[1])
     setup_args_dict["n_pix_fg_final"] = int(bm.image_geometry.n_pix_fg)
 

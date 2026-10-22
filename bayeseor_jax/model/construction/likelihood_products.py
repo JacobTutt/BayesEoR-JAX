@@ -7,6 +7,7 @@ publication. No operator is implicitly built, concatenated or reduced here.
 """
 
 from functools import partial
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +16,7 @@ from jax.experimental import multihost_utils
 from jax.sharding import Mesh, PartitionSpec as P
 
 from .parallel_layout import padded_visibility_partition
-from .storage import _check_output_path, _prepare_memmap_output, _slice_bounds, publish_output, save_array
+from .storage import _check_output_path, _prepare_memmap_output, _slice_bounds, ensure_cached, publish_output, save_array
 
 
 def build_gram_matrix(operator, inverse_noise):
@@ -168,7 +169,13 @@ def save_gram_matrix(t_path, ninv_path, *, output_path, block_cols=16384, right_
     if block_cols < 1 or right_block_batch < 1:
         raise ValueError("Gram block sizes must be positive")
     path, temporary = _check_output_path(output_path, t_path, ninv_path)
-    mesh, operator, inverse_noise, n_parameter, *_ = _load_sharded_operator(t_path, ninv_path)
+    loaded = _load_sharded_operator(t_path, ninv_path)
+    return _save_gram_matrix(loaded, path, temporary, block_cols, right_block_batch)
+
+
+def _save_gram_matrix(loaded, path, temporary, block_cols, right_block_batch):
+    """Write coefficient blocks using an already resident distributed operator."""
+    mesh, operator, inverse_noise, n_parameter, *_ = loaded
     # Every left block, including the final padded block, must divide the mesh.
     width = ((int(block_cols) + mesh.size - 1) // mesh.size) * mesh.size
     output = _prepare_memmap_output(temporary, shape=(n_parameter, n_parameter),
@@ -199,6 +206,31 @@ def save_gram_matrix(t_path, ninv_path, *, output_path, block_cols=16384, right_
     return path
 
 
+def _shard_data(data, t_path, loaded):
+    """Validate observations and give them the operator's padded row partition."""
+    data = np.asarray(data, dtype=np.complex128)
+    shape = np.load(t_path, mmap_mode="r").shape
+    if len(shape) != 2 or data.shape != (shape[0],) or not np.all(np.isfinite(data)):
+        raise ValueError("data must be a finite vector matching the visibility rows")
+    mesh, _, _, _, row0, row1, n_rows = loaded
+    local_data = data[row0:row1]
+    local_data = np.pad(local_data, (0, n_rows - local_data.size))
+    with jax.set_mesh(mesh):
+        return multihost_utils.host_local_array_to_global_array(local_data, mesh, P(("host", "dev")))
+
+
+_project_data = jax.jit(
+    build_data_projection,
+    in_shardings=(P(("host", "dev"), None), P(("host", "dev")), P(("host", "dev"))),
+    out_shardings=P(None),
+)
+_data_power = jax.jit(
+    build_data_power,
+    in_shardings=(P(("host", "dev")), P(("host", "dev"))),
+    out_shardings=P(),
+)
+
+
 def save_data_projection(t_path, ninv_path, data, *, output_path):
     r"""Save dbar = T^H N^-1 d using the same device mesh for one or many devices.
 
@@ -217,20 +249,64 @@ def save_data_projection(t_path, ninv_path, data, *, output_path):
         Completed coefficient-space data projection. Recomputed on every call.
     """
     path, _ = _check_output_path(output_path, t_path, ninv_path)
-    data = np.asarray(data, dtype=np.complex128)
-    shape = np.load(t_path, mmap_mode="r").shape
-    if len(shape) != 2 or data.shape != (shape[0],) or not np.all(np.isfinite(data)):
-        raise ValueError("data must be a finite vector matching the visibility rows")
-    mesh, operator, inverse_noise, n_parameter, row0, row1, n_rows = _load_sharded_operator(t_path, ninv_path)
-    local_data = data[row0:row1]
-    local_data = np.pad(local_data, (0, n_rows - local_data.size))
-    evaluate = jax.jit(build_data_projection,
-                       in_shardings=(P(("host", "dev"), None), P(("host", "dev")), P(("host", "dev"))),
-                       out_shardings=P(None))
+    loaded = _load_sharded_operator(t_path, ninv_path)
+    mesh, operator, inverse_noise, n_parameter, *_ = loaded
+    observations = _shard_data(data, t_path, loaded)
     with jax.set_mesh(mesh):
-        observations = multihost_utils.host_local_array_to_global_array(local_data, mesh, P(("host", "dev")))
-        projection = evaluate(operator, inverse_noise, observations)[:n_parameter]
+        projection = _project_data(operator, inverse_noise, observations)[:n_parameter]
     return save_array(path, projection)
+
+
+def save_likelihood_products(t_path, ninv_path, data, *, output_directory,
+                             clobber=False, block_cols=16384, right_block_batch=4):
+    r"""Prepare G, dbar and data power with one distributed load of T and N^-1.
+
+    Parameters
+    ----------
+    t_path, ninv_path : pathlib.Path or str
+        Saved complex128 joint response and positive inverse-noise vector.
+    data : array-like
+        Finite complex observations in the operator's visibility-row order.
+    output_directory : pathlib.Path or str
+        Shared destination for T_Ninv_T.npy, dbar.npy and d_ninv_d.npy.
+    clobber : bool, optional
+        Recompute G even when its cached input-file signatures match.
+    block_cols : int, optional
+        Target Gram-block width, rounded up to a device-count multiple.
+    right_block_batch : int, optional
+        Number of adjacent right-hand Gram blocks contracted together.
+
+    Returns
+    -------
+    tuple of pathlib.Path
+        Gram matrix, data projection and scalar data-power paths, respectively.
+
+    Notes
+    -----
+    All processes call together, using every device in the initialised JAX job.
+    G is reused when T and N^-1 are unchanged; data-dependent terms are always
+    refreshed. Resident input stripes are shared across all three contractions.
+    """
+    if block_cols < 1 or right_block_batch < 1:
+        raise ValueError("Gram block sizes must be positive")
+    directory = Path(output_directory)
+    gram_path, temporary = _check_output_path(directory / "T_Ninv_T.npy", t_path, ninv_path)
+    projection_path, _ = _check_output_path(directory / "dbar.npy", t_path, ninv_path)
+    power_path, _ = _check_output_path(directory / "d_ninv_d.npy", t_path, ninv_path)
+    loaded = _load_sharded_operator(t_path, ninv_path)
+    mesh, operator, inverse_noise, n_parameter, *_ = loaded
+    observations = _shard_data(data, t_path, loaded)
+    ensure_cached(
+        gram_path,
+        lambda: _save_gram_matrix(loaded, gram_path, temporary, block_cols, right_block_batch),
+        dependencies=(t_path, ninv_path), clobber=clobber,
+    )
+    with jax.set_mesh(mesh):
+        projection = _project_data(operator, inverse_noise, observations)[:n_parameter]
+        power = _data_power(inverse_noise, observations)
+    save_array(projection_path, projection)
+    save_array(power_path, power)
+    return gram_path, projection_path, power_path
 
 
 def save_data_power(ninv_path, data, *, output_path):

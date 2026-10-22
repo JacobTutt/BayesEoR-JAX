@@ -67,12 +67,14 @@ components are therefore constructed in CPU time-frequency blocks and written
 directly to disk rather than materialised on a GPU. Joint assembly copies the
 selected component files without rebuilding them.
 
-Likelihood preparation is separate: `save_gram_matrix` distributes visibility
+Likelihood preparation is separate: `save_likelihood_products` distributes visibility
 rows over the existing device mesh and contracts coefficient blocks on the
 default backend, normally GPUs. The local input stripe must fit on those devices;
 blocking bounds the output workspace but does not stream the input from disk.
 Block widths are aligned with the device count, with zero padding removed before
-the completed matrix is published.
+the completed matrix is published. The operator and inverse noise are loaded once
+for the Gram matrix, data projection and scalar data power. A valid cached Gram
+matrix is reused when only the observations change; one device uses the same path.
 
 ## JAXMg
 
