@@ -209,9 +209,37 @@ Alongside the operator it saves `<stem>.singular_values.npy` and
 `<stem>.svd.json`, recording the original/padded dimensions, process grid,
 retained rank, achieved discarded RMS and timings. Solver failures are checked
 before replacing any completed operator. Each call recomputes the SVD; there is
-no implicit reuse that could ignore a changed `f`. Joint assembly and subsequent
-likelihood preparation remain explicit stages, and `run_setup` has not yet been
-changed to select the reduced operator/prior automatically.
+no implicit reuse that could ignore a changed `f`.
+
+To use the completed reduction in inference, supply its path to `run_setup`
+or set the equivalent configuration key:
+
+```yaml
+foreground_kl_path: arrays/T_fg_reduced.npy
+```
+
+Setup skips construction of the original foreground matrix, concatenates the
+saved reduced operator with `T_21`, and prepares the same likelihood products.
+It assigns one unit prior width to each retained foreground column, including
+an empty foreground block if no modes were retained. The original
+`foreground_prior_std_mk` setting is ignored in this case: those physical
+widths were already absorbed during weighted construction. Setup does not run
+the SVD or overwrite the supplied reduced operator.
+
+The caller must supply an **unwhitened** reduced operator for the intended
+observation, visibility ordering and physical foreground prior, not `A_fg.npy`.
+Shapes alone cannot verify this provenance. Changes to the construction noise
+or truncation threshold require reconsidering the retained basis; setup does
+not certify its truncation accuracy for a different noise model. Switching
+operator paths invalidates the cached joint matrix and its Gram product.
+
+Without `foreground_kl_path`, setup uses the original physical foreground
+matrix and repeats each component's physical prior width across its pixels.
+Both representations feed the same `PhiInverse` interface:
+`foreground_prior_std` is an explicit vector with one width per foreground
+column. Direct callers should use this vector instead of the former
+`foreground_prior_std_mk` and `n_fg_spatial_modes` constructor arguments.
+The cosmological power-spectrum prior and likelihood algebra are unchanged.
 
 This needs a JAXMG build exposing `gesvd` with `compute_vh=False` and
 `return_status=True`. There is no implicit CPU or approximate-SVD fallback.

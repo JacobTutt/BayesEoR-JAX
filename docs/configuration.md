@@ -134,6 +134,7 @@ For raw pyuvdata inputs, selection options may define the actual subset used.
 | `priors` | Power-spectrum prior ranges, one `[min, max]` pair per k bin. |
 | `uniform_priors` | Mask for linear-uniform physical priors. |
 | `foreground_prior_std_mk` | Physical prior width for each foreground spectral coefficient field. |
+| `foreground_kl_path` | Optional saved, unwhitened KL foreground operator; selects unit coefficient widths instead of the original physical prior. |
 | `use_intrinsic_noise_fitting` | Include a global intrinsic noise amplitude. |
 | `sampler` | Nested-sampling backend. Defaults to `multinest`. |
 | `n_live_scale_factor` | Live points as a multiple of parameter dimension. |

@@ -31,6 +31,13 @@ for KL construction. `T_fg_svd_build_save` decomposes that saved weighted matrix
 on GPUs and writes its noise-thresholded reduced operator as a separate stage;
 see [the construction workflow](forward-model.md#distributed-foreground-svd-and-truncation).
 
+To analyse with a preconstructed KL operator, set
+`foreground_kl_path: arrays/T_fg_reduced.npy`. Setup uses its retained columns
+with a standard-normal prior; `foreground_prior_std_mk` is not applied again.
+Omitting this path retains the original physical representation and prior.
+The supplied operator must describe the intended observation and physical
+uncertainty model; setup does not construct or revalidate the KL reduction.
+
 Large operators are divided into contiguous ranges of time-frequency blocks
 using the active JAX process topology, constructed on CPU, and written into a
 shared NumPy memmap. This avoids materialising the full matrix on a GPU.
