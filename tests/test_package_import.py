@@ -83,3 +83,12 @@ def test_parser_accepts_preconstructed_kl_operator():
         '--foreground-kl-path', 'arrays/T_fg_reduced.npy',
     ])
     assert args.foreground_kl_path == 'arrays/T_fg_reduced.npy'
+
+
+def test_parser_selects_model_components():
+    from bayeseor_jax.params import BayesEoRParser
+
+    parser = BayesEoRParser()
+    assert parser.parse_args(["--config", "test_examples/eor/config.yaml"]).model == "eor"
+    assert parser.parse_args(["--config", "test_examples/eor_fgs/config.yaml"]).model == "eor+fg"
+    assert parser.parse_args(["--config", "test_examples/eor/config.yaml", "--model", "fg"]).model == "fg"

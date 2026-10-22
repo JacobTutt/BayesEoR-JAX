@@ -8,8 +8,13 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import jax
+import jax.numpy as jnp
+from jax.sharding import Mesh
 
 from bayeseor_jax import DataContainer
+from bayeseor_jax.inference.phi import PhiInverse
+from bayeseor_jax.inference.prior import Prior
 
 
 def test_multinest_runner_needs_no_removed_dependencies(tmp_path, monkeypatch):
@@ -34,6 +39,7 @@ def test_multinest_runner_needs_no_removed_dependencies(tmp_path, monkeypatch):
     spec.loader.exec_module(runner)
     assert runner.run_nestedsampling is runner.run_multinest
     setup = SimpleNamespace(
+        model="eor+fg",
         prior_class=SimpleNamespace(
             bounds_log=np.array([[-2., 2.], [-2., 2.]]),
             lower=np.array([-2., -2.]), upper=np.array([2., 2.]),
@@ -53,6 +59,52 @@ def test_multinest_runner_needs_no_removed_dependencies(tmp_path, monkeypatch):
     assert summary["loglikelihood_calls"] == 1
     assert summary["logZ"] == -3.
     assert json.loads((tmp_path / "summary.json").read_text()) == summary
+
+
+def test_fg_only_runner_saves_analytic_evidence_and_map_without_multinest(tmp_path, monkeypatch):
+    calls = []
+
+    def potrs(matrix, rhs, **kwargs):
+        calls.append(1)
+        return jnp.linalg.solve(matrix, rhs), jnp.linalg.slogdet(matrix)[1]
+
+    monkeypatch.setitem(sys.modules, "jaxmg", SimpleNamespace(potrs=potrs))
+    monkeypatch.setitem(sys.modules, "pymultinest", None)
+    monkeypatch.setitem(sys.modules, "pymultinest.solve", None)
+    root = Path(__file__).parents[1] / "bayeseor_jax/inference"
+    modules = {}
+    for name in ("maxaposteriori", "run_ns"):
+        spec = importlib.util.spec_from_file_location(f"bayeseor_jax.inference._test_{name}", root / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules[name] = module
+    monkeypatch.setitem(sys.modules, "bayeseor_jax.inference.maxaposteriori", modules["maxaposteriori"])
+    gram = jnp.array([[2., .3], [.3, 1.]], dtype=jnp.complex128)
+    dbar = jnp.array([1., 2.], dtype=jnp.complex128)
+    phi = PhiInverse(
+        bin_id_per_k_mode=jnp.empty(0, dtype=int), valid_mask=jnp.empty(0, dtype=bool),
+        k_vals=jnp.empty(0), ps_box_size_ra_mpc=1., ps_box_size_dec_mpc=1.,
+        ps_box_size_para_mpc=1., inst_to_cosmo_vol=1., n_par=2, foreground_prior_std=[1., 2.],
+    )
+    setup = SimpleNamespace(
+        model="fg", prior_class=Prior(jnp.empty((0, 2))), phi_inverse_class=phi,
+        likelihood_class=SimpleNamespace(
+            intrinsic_noise_fitting=False, t_ninv_t=gram, dbar=dbar, d_ninv_d=4., n_data=4,
+            mesh=Mesh(np.asarray(jax.devices()[:1]), ('x',)), jaxmg_tile_size=256,
+        ),
+    )
+    summary = modules["run_ns"].run_nestedsampling(setup, tmp_path)
+    sigma = np.asarray(gram) + np.diag([1., .25])
+    expected_map = np.linalg.solve(sigma, np.asarray(dbar))
+    expected_logz = .5 * (np.vdot(dbar, expected_map).real - np.linalg.slogdet(sigma)[1] - np.log(4.))
+    np.testing.assert_allclose(summary["logZ"], expected_logz)
+    np.testing.assert_allclose(np.load(tmp_path / "map_coefficients.npy"), expected_map)
+    assert summary["sampler"] == "analytic"
+    assert summary["n_dim"] == 0
+    assert len(calls) == 1
+    assert json.loads((tmp_path / "summary.json").read_text()) == summary
+    with pytest.raises(ValueError, match="no sampler checkpoint"):
+        modules["run_ns"].run_nestedsampling(setup, tmp_path, resume=True)
 
 
 @pytest.mark.parametrize("file_root", ["data-", "short-"])

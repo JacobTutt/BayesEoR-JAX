@@ -1,4 +1,4 @@
-"""MultiNest sampling of the marginalised BayesEoR posterior."""
+"""Sample power spectra with MultiNest or evaluate parameter-free models exactly."""
 
 from __future__ import annotations
 
@@ -6,12 +6,11 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
-from pymultinest.solve import solve
-
-from ..setup import SetupResult
+if TYPE_CHECKING:
+    from ..setup import SetupResult
 from ..utils import (
     MultiNestPathManager,
     _cleanup_multinest_path,
@@ -53,7 +52,13 @@ def run_multinest(
     print_rate: int = 100,
 ) -> dict[str, Any]:
     """
-    Run posterior inference with the Python MultiNest wrapper.
+    Run MultiNest, or evaluate a parameter-free model analytically.
+
+    A model with no sampled hyperparameters needs no nested sampling. Its
+    conditional MAP coefficients and marginalised log-evidence target are
+    evaluated in one solve and saved as ``map_coefficients.npy`` and
+    ``summary.json``. The same fixed data/noise normalisation is omitted as
+    in the sampled likelihood, so same-dataset model comparisons are unchanged.
 
     This implementation is intentionally single-process at the sampler level.
     The expensive operation is still the likelihood evaluation itself, which
@@ -78,6 +83,36 @@ def run_multinest(
         )
 
     n_dim = int(prior_class.bounds_log.shape[0])
+    if n_dim == 0:
+        if resume:
+            raise ValueError("An analytic foreground-only evaluation has no sampler checkpoint to resume")
+        from .maxaposteriori import MaximumAPosteriori
+
+        # Use the same compressed terms and prior as the marginalised likelihood.
+        reconstruction = MaximumAPosteriori(
+            t_ninv_t=likelihood_class.t_ninv_t, dbar=likelihood_class.dbar,
+            d_ninv_d=likelihood_class.d_ninv_d, n_data=likelihood_class.n_data,
+            phi_inv_class=setup_result.phi_inverse_class,
+            mesh=likelihood_class.mesh, jaxmg_tile_size=likelihood_class.jaxmg_tile_size,
+        )
+        coefficients, log_evidence = reconstruction.map_estimate(np.empty(0))
+        if not np.isfinite(log_evidence) or not np.all(np.isfinite(coefficients)):
+            raise ValueError("Non-finite analytic evidence or MAP coefficients")
+        coefficients_path = out_dir / "map_coefficients.npy"
+        np.save(coefficients_path, coefficients)
+        summary = {
+            "sampler": "analytic", "n_dim": 0,
+            "model": setup_result.model,
+            "logZ": log_evidence, "logZerr": 0.0,
+            "evidence_normalisation": "fixed data/noise constants omitted",
+            "map_coefficients_path": str(coefficients_path),
+        }
+        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+        return summary
+
+    # Foreground-only evaluation does not require a native MultiNest installation.
+    from pymultinest.solve import solve
+
     n_live_points = (
         int(n_live_points)
         if n_live_points is not None
@@ -167,6 +202,7 @@ def run_multinest(
 
     summary = {
         "sampler": "multinest",
+        "model": setup_result.model,
         "n_dim": n_dim,
         "n_live_points": n_live_points,
         "outputfiles_basename": outputfiles_basename,

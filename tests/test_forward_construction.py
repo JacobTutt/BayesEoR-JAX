@@ -89,6 +89,24 @@ def test_empty_cosmological_coefficient_axis_can_be_saved(tmp_path, inputs):
     assert np.load(path).shape == (12, 0)
 
 
+@pytest.mark.parametrize("component", ["eor", "fg"])
+def test_single_component_assembly_preserves_input(tmp_path, component):
+    source = tmp_path / "component.npy"
+    matrix = np.arange(12).reshape(4, 3).astype(np.complex128)
+    np.save(source, matrix)
+    paths = (source, None) if component == "eor" else (None, source)
+    output = assemble_joint_operator(*paths, output_path=tmp_path / "T.npy", block_rows=3)
+    np.testing.assert_array_equal(np.load(output), matrix)
+    np.testing.assert_array_equal(np.load(source), matrix)
+    with pytest.raises(ValueError, match="overwrite"):
+        assemble_joint_operator(*paths, output_path=source)
+
+
+def test_assembly_rejects_missing_components(tmp_path):
+    with pytest.raises(ValueError, match="At least one"):
+        assemble_joint_operator(None, None, output_path=tmp_path / "T.npy")
+
+
 @pytest.mark.parametrize('uniform', [False, True])
 def test_weighted_writer_matches_full_operator_without_unweighted_file(tmp_path, inputs, uniform):
     lmn, uvw, beam, area, _, _, foreground = inputs

@@ -249,12 +249,13 @@ def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=102
 
     Parameters
     ----------
-    T_21_path, T_fg_path : str or pathlib.Path
+    T_21_path, T_fg_path : str or pathlib.Path or None
         Saved two-dimensional complex128 operators with identical visibility-row
         ordering. The foreground input may be the original physical operator or a
         retained operator with its prior already absorbed; the caller supplies
         the corresponding coefficient prior during inference. Both files must
-        describe the same observation.
+        describe the same observation. Pass None to omit either component;
+        at least one operator is required.
     output_path : str or pathlib.Path
         Shared destination, distinct from either input file; conventionally T.npy.
     block_rows : int, optional
@@ -271,19 +272,23 @@ def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=102
     No numerical operator is rebuilt and neither input file is modified.
     """
     path = Path(output_path)
-    inputs = (Path(T_21_path), Path(T_fg_path))
+    inputs = tuple(Path(source) for source in (T_21_path, T_fg_path) if source is not None)
+    if not inputs:
+        raise ValueError("At least one component operator is required")
     if any(path.resolve() == source.resolve() for source in inputs):
         raise ValueError("Joint output must not overwrite a component input")
     if block_rows < 1:
         raise ValueError("block_rows must be positive")
     # Map each input read-only and check the interface before allocating an output.
-    left, right = (np.load(source, mmap_mode="r") for source in inputs)
-    if left.ndim != 2 or right.ndim != 2 or left.shape[0] != right.shape[0]:
+    components = [np.load(source, mmap_mode="r") for source in inputs]
+    if any(component.ndim != 2 for component in components):
         raise ValueError("Component operators must be matrices with the same row count")
-    if left.dtype != np.complex128 or right.dtype != np.complex128:
+    n_rows = components[0].shape[0]
+    if any(component.shape[0] != n_rows for component in components):
+        raise ValueError("Component operators must be matrices with the same row count")
+    if any(component.dtype != np.complex128 for component in components):
         raise ValueError("Component operators must use complex128 precision")
     resources = discover_cpu_resources()
-    n_rows, n_left = left.shape
     start, stop = partition_blocks((n_rows + block_rows - 1) // block_rows,
                                    resources.process_count, resources.process_index)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -291,14 +296,17 @@ def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=102
     if any(partial_path.resolve() == source.resolve() for source in inputs):
         raise ValueError("Joint temporary output must not overwrite a component input")
     output = _prepare_memmap_output(
-        partial_path, shape=(n_rows, n_left + right.shape[1]), dtype=np.dtype(np.complex128),
+        partial_path, shape=(n_rows, sum(component.shape[1] for component in components)), dtype=np.dtype(np.complex128),
         sync_name=f"{path.name}-allocated",
     )
     # Copy into column slices directly rather than allocating a concatenated block.
     for index in range(start, stop):
         rows = slice(index * block_rows, min((index + 1) * block_rows, n_rows))
-        output[rows, :n_left] = left[rows]
-        output[rows, n_left:] = right[rows]
+        column = 0
+        for component in components:
+            stop_column = column + component.shape[1]
+            output[rows, column:stop_column] = component[rows]
+            column = stop_column
     output.flush()
     del output
     publish_output(partial_path, path)

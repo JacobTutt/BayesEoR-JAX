@@ -189,6 +189,10 @@ class BayesEoRParser(ArgumentParser):
             help="Directory for matrix storage.",
         )
         self.add_argument("--output-dir", type=str, default="./BayesEoROutputs/", help="Directory for sampler outputs.")
+        self.add_argument(
+            "--model", choices=("eor", "fg", "eor+fg"), default="eor+fg",
+            help="Components included in inference; independent of the contents of the data.",
+        )
         self.add_argument("--priors", type=list[list[float]], help="Power-spectrum prior ranges [[min, max], ...].")
         self.add_argument(
             "--uniform-priors",
@@ -251,7 +255,7 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--d-t", type=float, help="Integration time in seconds.")
         self.add_argument("--jd-center", type=float, default=None, help="Central Julian date for centered time-window selection (raw mode) or centered time-axis anchor (.npy mode).")
         self.add_argument("--nside", type=int, required=True, help="HEALPix nside.")
-        self.add_argument("--fov-eor", type=float, required=True, help="Circular EoR FoV in degrees.")
+        self.add_argument("--fov-eor", type=float, default=10.0, help="Circular EoR FoV in degrees; unused for FG-only inference.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")
         self.add_argument("--telescope-latlonalt", type=list[float], required=True, help="Telescope location [lat_deg, lon_deg, alt_m].")
 

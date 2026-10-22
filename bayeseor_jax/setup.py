@@ -33,6 +33,7 @@ from .utils import (
     _resolve_uv_grid_from_extents,
     load_numpy_dict,
     write_analysis_metadata,
+    write_log_files,
 )
 from .vis import get_vis_data
 
@@ -55,6 +56,7 @@ class SetupResult:
         ps_box_size_ra_mpc: float,
         ps_box_size_dec_mpc: float,
         ps_box_size_para_mpc: float,
+        model: str = "eor+fg",
     ) -> None:
         self.likelihood_class = likelihood_class
         self.prior_class = prior_class
@@ -67,10 +69,12 @@ class SetupResult:
         self.ps_box_size_ra_mpc = ps_box_size_ra_mpc
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
+        self.model = model
 def run_setup(
     *,
     # IO
     data_path: Path | str,
+    model: str = "eor+fg",
     inst_model: Path | str | None = None,
     noise_data_path: Path | str | None = None,
     array_save_directory: Path | str = "./matrices/",
@@ -150,6 +154,10 @@ def run_setup(
     data_path : pathlib.Path or str
         Input visibility path. Supports raw pyuvdata files (``.uvh5``,
         ``.uvfits``, ``.ms``) or preprocessed vectors (``.npy``).
+    model : {"eor", "fg", "eor+fg"}, optional
+        Components included in the inference model, independently of the data
+        contents. Defaults to the joint model. FG-only inference has no sampled
+        power-spectrum parameters and does not require power-spectrum priors.
     inst_model : pathlib.Path or str, optional
         Instrument model directory for ``.npy`` input mode.
     noise_data_path : pathlib.Path or str, optional
@@ -229,20 +237,28 @@ def run_setup(
     # data product. The uv-grid shapes themselves are resolved later from the
     # time-union FoV extents and instrument uv coverage once vis metadata are
     # available.
+    if model not in ("eor", "fg", "eor+fg"):
+        raise ValueError("model must be 'eor', 'fg' or 'eor+fg'")
+    include_eor, include_fg = model != "fg", model != "eor"
+    if not include_fg and foreground_kl_path is not None:
+        raise ValueError("foreground_kl_path cannot be used with model='eor'")
+    if not include_eor and use_intrinsic_noise_fitting:
+        raise ValueError("Foreground-only inference currently requires a fixed noise model")
     if fov_fg is None:
         fov_fg = fov_eor
+    # Single-component models need only their own sky support for beam evaluation.
+    if not include_fg:
+        fov_fg = fov_eor
+    if not include_eor:
+        fov_eor = fov_fg
     if len(telescope_latlonalt) != 3:
         raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
     fov_eor = float(fov_eor)
     fov_fg = float(fov_fg)
 
-    if n_eta is None:
-        if n_freq is None:
-            raise ValueError("n_eta is None and n_freq is None; one must be provided")
-        n_eta = n_freq
-    if not beta_fg:
+    if include_fg and not beta_fg:
         raise ValueError("beta_fg must contain at least one spectral index")
-    if foreground_kl_path is None and len(foreground_prior_std_mk) != 1 + len(beta_fg):
+    if include_fg and foreground_kl_path is None and len(foreground_prior_std_mk) != 1 + len(beta_fg):
         raise ValueError(
             "foreground_prior_std_mk must contain one width for the constant "
             "field and one for each beta_fg power law"
@@ -259,6 +275,8 @@ def run_setup(
         reduced = np.load(foreground_kl_path, mmap_mode="r")
         if reduced.ndim != 2 or reduced.dtype != np.complex128:
             raise ValueError("The KL foreground operator must be a complex128 matrix")
+        if not include_eor and reduced.shape[1] == 0:
+            raise ValueError("Foreground-only inference requires at least one retained foreground mode")
     save_dir = Path(save_dir).expanduser().resolve()
 
     vis_dict = get_vis_data(
@@ -322,44 +340,38 @@ def run_setup(
         n_t=int(n_t),
         d_t=float(d_t),
     )
-    resolved_grid = _resolve_uv_grid_from_extents(
-        extent_u_eor=float(image_geometry.fov_l_angle_eor),
-        extent_v_eor=float(image_geometry.fov_m_angle_eor),
-        freqs_hz=np.asarray(freqs_hz, dtype=float),
-        uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
-        beam_type=beam_type,
-        fwhm_deg=None if fwhm_deg is None else float(fwhm_deg),
-        diam=None if diam is None else float(diam),
-        n_u_eor=n_u_eor,
-        n_v_eor=n_v_eor,
-        du_eor=du_eor,
-        dv_eor=dv_eor,
-    )
-    n_u_eor = int(resolved_grid["n_u_eor"])
-    n_v_eor = int(resolved_grid["n_v_eor"])
-    du_eor = float(resolved_grid["du_eor"])
-    dv_eor = float(resolved_grid["dv_eor"])
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     d_eta = 1.0 / bandwidth_hz
-    fourier_geometry = build_fourier_geometry(
-        n_u=n_u_eor,
-        n_v=n_v_eor,
-        n_eta=int(n_eta),
-        du=du_eor,
-        dv=dv_eor,
-        d_eta=d_eta,
-    )
+    resolved_grid = {}
+    fourier_geometry = None
+    if include_eor:
+        resolved_grid = _resolve_uv_grid_from_extents(
+            extent_u_eor=float(image_geometry.fov_l_angle_eor),
+            extent_v_eor=float(image_geometry.fov_m_angle_eor),
+            freqs_hz=np.asarray(freqs_hz, dtype=float),
+            uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
+            beam_type=beam_type,
+            fwhm_deg=None if fwhm_deg is None else float(fwhm_deg),
+            diam=None if diam is None else float(diam),
+            n_u_eor=n_u_eor, n_v_eor=n_v_eor, du_eor=du_eor, dv_eor=dv_eor,
+        )
+        n_u_eor = int(resolved_grid["n_u_eor"])
+        n_v_eor = int(resolved_grid["n_v_eor"])
+        du_eor = float(resolved_grid["du_eor"])
+        dv_eor = float(resolved_grid["dv_eor"])
+        fourier_geometry = build_fourier_geometry(
+            n_u=n_u_eor, n_v=n_v_eor, n_eta=int(n_eta),
+            du=du_eor, dv=dv_eor, d_eta=d_eta,
+        )
 
     setup_args_dict = {
+        "model": model,
         "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
         "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
         "noise_data_path": None if noise_data_path is None else str(Path(noise_data_path).expanduser().resolve()),
         "array_save_directory": str(array_save_directory),
         "output_dir": str(output_dir),
-        "n_u_eor": int(n_u_eor),
-        "n_v_eor": int(n_v_eor),
-        "du_eor": float(du_eor),
-        "dv_eor": float(dv_eor),
+        **resolved_grid,
         "beta_fg": None if beta_fg is None else list(beta_fg),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
@@ -376,13 +388,6 @@ def run_setup(
         "fov_m_angle_eor": float(image_geometry.fov_m_angle_eor),
         "fov_l_angle_fg": float(image_geometry.fov_l_angle_fg),
         "fov_m_angle_fg": float(image_geometry.fov_m_angle_fg),
-        "beam_aperture_width_uv": float(resolved_grid["beam_aperture_width_uv"]),
-        "u_max_inst_model": float(resolved_grid["u_max_inst_model"]),
-        "v_max_inst_model": float(resolved_grid["v_max_inst_model"]),
-        "u_extent_with_buffer": float(resolved_grid["u_extent_with_buffer"]),
-        "v_extent_with_buffer": float(resolved_grid["v_extent_with_buffer"]),
-        "n_u_eor_required": int(resolved_grid["n_u_eor_required"]),
-        "n_v_eor_required": int(resolved_grid["n_v_eor_required"]),
         "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
         "beam_type": beam_type,
         "peak_amp": float(peak_amp),
@@ -415,7 +420,7 @@ def run_setup(
         "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
         "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
         "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
-        "foreground_prior_std_mk": list(foreground_prior_std_mk) if foreground_kl_path is None else None,
+        "foreground_prior_std_mk": list(foreground_prior_std_mk) if include_fg and foreground_kl_path is None else None,
         "foreground_kl_path": str(foreground_kl_path) if foreground_kl_path is not None else None,
         "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
     }
@@ -431,38 +436,36 @@ def run_setup(
 
     # Convert the exact retained model modes to cosmological coordinates before
     # assigning spherical bins.
-    mod_k_vo = generate_k_modes_in_physical_coordinates(
-        fourier_geometry.uv,
-        fourier_geometry.eta,
-        transverse_distance_mpc=float(cosmo.dL_dth(z)),
-        line_of_sight_distance_mpc_per_hz=float(cosmo.dL_df(z)),
-    )
-    bid_full, valid_full, _, _, counts = generate_k_cube_model_spherical_binning(
-        mod_k_vo=mod_k_vo,
-        ps_box_size_para_mpc=ps_box_size_para_mpc,
-    )
-    k_vals_full = calc_mean_binned_k_vals(
-        mod_k_vo=mod_k_vo,
-        bin_id_per_k_mode=bid_full,
-        valid_mask=valid_full,
-        num_k_bins=int(counts.size),
-    )
-    k_vals, bid_compact, valid_compact = compress_to_nonempty_k_bins(
-        k_vals_full=k_vals_full,
-        counts=counts,
-        bin_id_per_k_mode=bid_full,
-        valid_mask=valid_full,
-    )
-    if jax.process_index() == 0:
-        write_analysis_metadata(
-            output_dir=output_dir,
-            args=setup_args_dict,
-            k_vals=k_vals,
-            mod_k_vo=mod_k_vo,
-            bin_id_per_k_mode=bid_compact,
-            valid_mask=valid_compact,
-            clobber=clobber,
+    k_vals = jnp.empty(0, dtype=jnp.float64)
+    mod_k_vo = k_vals
+    bid_compact = jnp.empty(0, dtype=jnp.int32)
+    valid_compact = jnp.empty(0, dtype=bool)
+    if include_eor:
+        mod_k_vo = generate_k_modes_in_physical_coordinates(
+            fourier_geometry.uv, fourier_geometry.eta,
+            transverse_distance_mpc=float(cosmo.dL_dth(z)),
+            line_of_sight_distance_mpc_per_hz=float(cosmo.dL_df(z)),
         )
+        bid_full, valid_full, _, _, counts = generate_k_cube_model_spherical_binning(
+            mod_k_vo=mod_k_vo, ps_box_size_para_mpc=ps_box_size_para_mpc,
+        )
+        k_vals_full = calc_mean_binned_k_vals(
+            mod_k_vo=mod_k_vo, bin_id_per_k_mode=bid_full,
+            valid_mask=valid_full, num_k_bins=int(counts.size),
+        )
+        k_vals, bid_compact, valid_compact = compress_to_nonempty_k_bins(
+            k_vals_full=k_vals_full, counts=counts,
+            bin_id_per_k_mode=bid_full, valid_mask=valid_full,
+        )
+    if jax.process_index() == 0:
+        if include_eor:
+            write_analysis_metadata(
+                output_dir=output_dir, args=setup_args_dict, k_vals=k_vals,
+                mod_k_vo=mod_k_vo, bin_id_per_k_mode=bid_compact,
+                valid_mask=valid_compact, clobber=clobber,
+            )
+        else:
+            write_log_files(parser=None, args=setup_args_dict, out_dir=output_dir)
     if jax.process_count() > 1:
         multihost_utils.sync_global_devices("k-vals-metadata-saved")
 
@@ -484,10 +487,10 @@ def run_setup(
 
     # Prepare only physical-model inputs; likelihood preparation is a later stage.
     bm = BuildMatrices(
-        n_u_eor=int(n_u_eor),
-        du_eor=float(du_eor),
-        n_v_eor=int(n_v_eor),
-        dv_eor=float(dv_eor),
+        n_u_eor=n_u_eor,
+        du_eor=du_eor,
+        n_v_eor=n_v_eor,
+        dv_eor=dv_eor,
         beta_fg=beta_fg,
         n_freq=int(n_freq),
         f0_mhz=float(f0_mhz),
@@ -514,18 +517,23 @@ def run_setup(
         freq_interp_kind=freq_interp_kind,
         uvw_array_m=vis_dict["uvws"],
         array_save_directory=str(array_save_directory),
+        model=model,
     )
 
     # Select the foreground response and its matching prior together. Everything
     # downstream uses the same joint operator and likelihood-product functions.
-    t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=clobber)
-    if foreground_kl_path is None:
+    t21_path = None
+    if include_eor:
+        t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=clobber)
+    foreground_path = None
+    foreground_std = np.empty(0)
+    if include_fg and foreground_kl_path is None:
         foreground_std = np.repeat(foreground_prior_std_mk, bm.n_fg_spatial_modes)
         if (not np.isrealobj(foreground_std) or not np.all(np.isfinite(foreground_std))
                 or np.any(foreground_std <= 0)):
             raise ValueError("foreground prior widths must be finite, real and positive")
         foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=clobber)
-    else:
+    elif include_fg:
         foreground_path = foreground_kl_path
         if reduced.shape[0] != np.asarray(vis_dict["vis_noisy"]).size:
             raise ValueError("The KL foreground operator must match the visibility rows")
@@ -534,7 +542,8 @@ def run_setup(
     ensure_cached(
         t_path,
         lambda: assemble_joint_operator(t21_path, foreground_path, output_path=t_path),
-        dependencies=(t21_path, foreground_path), clobber=clobber,
+        dependencies=tuple(path for path in (t21_path, foreground_path) if path is not None),
+        clobber=clobber,
     )
 
     # Noise belongs to the observation, not to either coefficient representation.
@@ -558,10 +567,10 @@ def run_setup(
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.
     # `PhiInverse` maps linearized power amplitudes to latent precision diag.
-    if priors is None:
+    if include_eor and priors is None:
         raise ValueError("priors must be provided")
 
-    bounds_log = jnp.asarray(priors, dtype=jnp.float64)
+    bounds_log = jnp.asarray(priors, dtype=jnp.float64) if include_eor else jnp.empty((0, 2))
     if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
         raise ValueError("priors must have shape (n_power_params, 2)")
     n_power_params = int(k_vals.shape[0])
@@ -570,7 +579,7 @@ def run_setup(
             f"priors has {bounds_log.shape[0]} bins, but k binning produced {n_power_params} non-empty bins"
         )
 
-    if uniform_priors is None:
+    if uniform_priors is None or not include_eor:
         uniform_priors_mask = jnp.zeros((n_power_params,), dtype=bool)
     else:
         uniform_priors_mask = jnp.asarray(uniform_priors, dtype=bool)
@@ -623,4 +632,5 @@ def run_setup(
         ps_box_size_ra_mpc=ps_box_size_ra_mpc,
         ps_box_size_dec_mpc=ps_box_size_dec_mpc,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
+        model=model,
     )

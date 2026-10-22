@@ -157,3 +157,66 @@ def test_kl_input_cannot_be_overwritten_by_setup(tmp_path, setup_case):
     with pytest.raises(ValueError, match='setup output'):
         setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path, clobber=True)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("model,n_columns", [("eor", 16), ("fg", 6), ("eor+fg", 22)])
+def test_setup_constructs_only_selected_components(tmp_path, setup_case, monkeypatch, model, n_columns):
+    setup, arguments, _ = setup_case
+    if model == "fg":
+        arguments["priors"] = None
+        monkeypatch.setattr(setup, "_resolve_uv_grid_from_extents", lambda **kw: pytest.fail("Unexpected Fourier grid"))
+        monkeypatch.setattr(setup, "generate_k_cube_model_spherical_binning", lambda **kw: pytest.fail("Unexpected k bins"))
+        monkeypatch.setattr(setup.BuildMatrices, "T_21_build_save", lambda **kw: pytest.fail("Unexpected T_21"))
+    if model == "eor":
+        arguments.update(beta_fg=[], foreground_prior_std_mk=None)
+        monkeypatch.setattr(setup.BuildMatrices, "T_fg_build_save", lambda **kw: pytest.fail("Unexpected T_fg"))
+    result = setup.run_setup(**arguments, model=model, sigma=.5)
+    assert result.model == model
+    assert np.load(tmp_path / "T.npy").shape == (6, n_columns)
+    assert (tmp_path / "T_21.npy").exists() == (model != "fg")
+    assert (tmp_path / "T_fg.npy").exists() == (model != "eor")
+    assert result.prior_class.bounds_log.shape == ((0, 2) if model == "fg" else (1, 2))
+    assert result.phi_inverse_class.foreground_precision.size == (0 if model == "eor" else 6)
+    assert (result.bm.fourier_geometry is None) == (model == "fg")
+
+
+def test_fg_only_setup_accepts_kl_basis_without_cosmological_priors(tmp_path, setup_case, monkeypatch):
+    setup, arguments, _ = setup_case
+    path = tmp_path / "reduced.npy"
+    reduced = np.ones((6, 2), dtype=np.complex128)
+    np.save(path, reduced)
+    arguments["priors"] = None
+    monkeypatch.setattr(setup.BuildMatrices, "T_fg_build_save", lambda **kw: pytest.fail("Unexpected T_fg"))
+    result = setup.run_setup(**arguments, model="fg", foreground_kl_path=path, sigma=.5)
+    np.testing.assert_array_equal(np.load(tmp_path / "T.npy"), reduced)
+    np.testing.assert_array_equal(result.phi_inverse_class.evaluate(jnp.empty(0)), np.ones(2))
+    assert not (tmp_path / "T_21.npy").exists()
+    assert not (tmp_path / "T_fg.npy").exists()
+
+
+def test_switching_models_invalidates_joint_and_gram_caches(tmp_path, setup_case):
+    setup, arguments, _ = setup_case
+    for model, n_columns in (("eor+fg", 22), ("eor", 16), ("fg", 6), ("eor+fg", 22)):
+        setup.run_setup(**arguments, model=model, sigma=.5)
+        operator = np.load(tmp_path / "T.npy")
+        inverse_noise = np.load(tmp_path / "Ninv.npy")
+        assert operator.shape == (6, n_columns)
+        np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"),
+                                   operator.conj().T @ (inverse_noise[:, None] * operator))
+
+
+def test_fg_only_rejects_empty_kl_basis(tmp_path, setup_case):
+    setup, arguments, _ = setup_case
+    path = tmp_path / "empty.npy"
+    np.save(path, np.empty((6, 0), dtype=np.complex128))
+    with pytest.raises(ValueError, match="at least one retained foreground mode"):
+        setup.run_setup(**arguments, model="fg", foreground_kl_path=path)
+
+
+@pytest.mark.parametrize("options", [dict(model="unknown"),
+                                    dict(model="eor", foreground_kl_path="unused.npy"),
+                                    dict(model="fg", use_intrinsic_noise_fitting=True)])
+def test_model_selection_rejects_incompatible_options(setup_case, options):
+    setup, arguments, _ = setup_case
+    with pytest.raises(ValueError):
+        setup.run_setup(**arguments, **options)

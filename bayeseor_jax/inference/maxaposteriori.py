@@ -210,12 +210,8 @@ class MaximumAPosteriori:
             theta_power = theta[
                 self.power_param_start : self.power_param_start + self.n_power_params
             ]
-            alpha = jax.lax.cond(
-                self.intrinsic_noise_fitting,
-                lambda t: t[0],
-                lambda t: jnp.array(1.0, dtype=t.dtype),
-                theta,
-            )
+            # Static selection avoids indexing an empty foreground-only parameter vector.
+            alpha = theta[0] if self.intrinsic_noise_fitting else jnp.array(1.0, dtype=theta.dtype)
             alpha2 = alpha * alpha
             inv_alpha2 = 1.0 / alpha2
 

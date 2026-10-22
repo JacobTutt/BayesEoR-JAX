@@ -11,6 +11,7 @@ from bayeseor_jax.model.operators import T_fg
 
 def _minimal_builder(tmp_path):
     builder = BuildMatrices.__new__(BuildMatrices)
+    builder.model = "eor+fg"
     builder.n_t = 2
     builder.n_freq = 2
     builder.nbls = 1

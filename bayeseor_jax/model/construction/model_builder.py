@@ -99,6 +99,10 @@ class BuildMatrices:
         integration supplies the fixed instrument-frame baselines.
     array_save_directory : str or pathlib.Path
         Directory holding the separate physical component matrices.
+    model : {"eor", "fg", "eor+fg"}, optional
+        Active components, defaulting to both. Fourier-grid arguments are
+        unused for a foreground-only model; foreground spectra are not built
+        for an EoR-only model.
 
     Notes
     -----
@@ -117,10 +121,10 @@ class BuildMatrices:
 
     def __init__(
         self,
-        n_u_eor: int,
-        du_eor: float,
-        n_v_eor: int,
-        dv_eor: float,
+        n_u_eor: Optional[int] = None,
+        du_eor: Optional[float] = None,
+        n_v_eor: Optional[int] = None,
+        dv_eor: Optional[float] = None,
         beta_fg: Optional[Union[float, Sequence[float], jnp.ndarray]] = (2.63, 2.82),
         n_freq: int = 0,
         f0_mhz: Optional[float] = None,
@@ -147,6 +151,7 @@ class BuildMatrices:
         freq_interp_kind: str = 'cubic',
         uvw_array_m: Optional[jnp.ndarray] = None,
         array_save_directory: str = "./matrices/",
+        model: str = "eor+fg",
     ) -> None:
         """Prepare the physical inputs documented on BuildMatrices.
 
@@ -154,6 +159,14 @@ class BuildMatrices:
         component writers. Noise, priors, assembly and likelihood preparation
         are deliberately separate from this physical-model configuration.
         """
+        if model not in ("eor", "fg", "eor+fg"):
+            raise ValueError("model must be 'eor', 'fg' or 'eor+fg'")
+        self.model = model
+        if model == "eor":
+            fov_fg = fov_eor
+        elif model == "fg":
+            fov_eor = fov_fg if fov_fg is not None else fov_eor
+            fov_fg = fov_eor
         # Store foreground spectral-model settings.
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
@@ -214,38 +227,31 @@ class BuildMatrices:
             n_t=self.n_t,
             d_t=self.d_t,
         )
-        self.fourier_geometry = fourier_geometry or build_fourier_geometry(
-            n_u=n_u_eor,
-            n_v=n_v_eor,
-            n_eta=n_eta,
-            du=du_eor,
-            dv=dv_eor,
-            d_eta=d_eta,
-        )
-        # F' uses the reference-time tangent chart within the cosmological field.
-        lm_21 = self.image_geometry.lmn_fg[
-            self.image_geometry.time_ind_center,
-            :2,
-        ]
-        lm_21 = lm_21[:, self.image_geometry.eor_fg_shared_axis]
-        self.transverse_fourier_operator = build_transverse_fourier_operator(
-            self.fourier_geometry.uv,
-            lm_21,
-            uv_cell_area=self.fourier_geometry.du * self.fourier_geometry.dv,
-        )
-        # F_z uses offsets from the central channel to define line-of-sight phases.
-        frequency_offsets_hz = self.freq_hz - self.freq_hz[n_freq // 2]
-        self.spectral_fourier_operator = build_spectral_fourier_operator(
-            self.fourier_geometry.eta,
-            frequency_offsets_hz,
-            d_eta=self.fourier_geometry.d_eta,
-        )
+        self.fourier_geometry = None
+        if model != "fg":
+            self.fourier_geometry = fourier_geometry or build_fourier_geometry(
+                n_u=n_u_eor, n_v=n_v_eor, n_eta=n_eta,
+                du=du_eor, dv=dv_eor, d_eta=d_eta,
+            )
+            # F' uses the reference-time tangent chart within the cosmological field.
+            lm_21 = self.image_geometry.lmn_fg[self.image_geometry.time_ind_center, :2]
+            lm_21 = lm_21[:, self.image_geometry.eor_fg_shared_axis]
+            self.transverse_fourier_operator = build_transverse_fourier_operator(
+                self.fourier_geometry.uv, lm_21,
+                uv_cell_area=self.fourier_geometry.du * self.fourier_geometry.dv,
+            )
+            # F_z maps the retained eta modes onto the observed frequency channels.
+            frequency_offsets_hz = self.freq_hz - self.freq_hz[n_freq // 2]
+            self.spectral_fourier_operator = build_spectral_fourier_operator(
+                self.fourier_geometry.eta, frequency_offsets_hz,
+                d_eta=self.fourier_geometry.d_eta,
+            )
         # Q_z's compact spectral factors use MHz and signed power-law exponents.
-        self.foreground_spectral_operator = build_foreground_spectral_operator(
-            self.freq_hz / 1e6,
-            self.f0_mhz,
-            spectral_indices=tuple(-beta for beta in self.beta_fg),
-        )
+        if model != "eor":
+            self.foreground_spectral_operator = build_foreground_spectral_operator(
+                self.freq_hz / 1e6, self.f0_mhz,
+                spectral_indices=tuple(-beta for beta in self.beta_fg),
+            )
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
             self.beam_type, 
@@ -284,6 +290,8 @@ class BuildMatrices:
         standalone T_21_build_save function. No prior weighting or KL is applied.
         """
         # The cosmological image support is a subset of the foreground selection.
+        if self.model == "fg":
+            raise ValueError("The foreground-only model has no cosmological operator")
         mask = np.asarray(self.image_geometry.eor_fg_shared_axis)
         lmn = np.asarray(self.image_geometry.lmn_fg)[:, :, mask]
         beam = np.asarray(self.beam_response).transpose(1, 0, 2)[:, :, mask]
@@ -313,6 +321,8 @@ class BuildMatrices:
         compression and foreground-prior transformations are separate stages.
         """
         # Align beam axes with the numerical operator's time/frequency/pixel order.
+        if self.model == "eor":
+            raise ValueError("The EoR-only model has no foreground operator")
         beam = np.asarray(self.beam_response).transpose(1, 0, 2)
         return T_fg_build_save(
             self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
@@ -348,6 +358,8 @@ class BuildMatrices:
         The shared CPU writer applies them within each time-frequency block;
         decomposition and truncation are not performed here.
         """
+        if self.model == "eor":
+            raise ValueError("The EoR-only model has no foreground operator")
         beam = np.asarray(self.beam_response).transpose(1, 0, 2)
         return T_fg_weighted_build_save(
             self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
