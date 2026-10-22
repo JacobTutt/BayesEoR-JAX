@@ -127,7 +127,7 @@ def run_example(
     write_log_files(parser, args, out_dir=out_dir)
 
     ns_out_dir = out_dir / nested_sampling_dirname
-    summary = run_multinest(
+    summary = run_nestedsampling(
         setup_result=setup_result,
         out_dir=ns_out_dir,
         random_key=args.random_key,
@@ -137,6 +137,10 @@ def run_example(
 
     print("Run summary:")
     print(json.dumps(summary, indent=2))
+
+    if summary["sampler"] == "analytic":
+        # There is no power-spectrum posterior to plot for a foreground-only model.
+        return setup_result, summary, None
 
     analysis_summary = run_output_analysis(
         sampler_dir=ns_out_dir,

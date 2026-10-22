@@ -1,6 +1,7 @@
 # data_path can point to either a pyuvdata-compatible file (recommended) or
 # a preprocessed numpy-compatible file generated via `bayeseor.setup.run_setup`
 data_path: test_examples/eor/eor.uvh5
+model: eor
 
 # EoR model params
 # Number of pixels along the u-axis of the EoR model uv-plane

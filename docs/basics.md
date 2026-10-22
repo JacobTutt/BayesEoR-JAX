@@ -30,6 +30,8 @@ A typical run has five stages:
 
 The central setup function is `bayeseor_jax.run_setup`. It returns a `SetupResult` containing the matrix builder, prior, precision model, likelihood object, visibility metadata, and k-bin metadata used by the samplers.
 
+Choose `model: eor`, `fg`, or `eor+fg` in the configuration to fit either component independently or jointly. The default is joint inference. With fixed foreground priors and noise, foreground-only inference instead evaluates the evidence and MAP coefficients analytically, without posterior sampling. See [model selection](inference.md#selecting-the-fitted-components).
+
 ## Example Data
 
 The repository includes two small test datasets:

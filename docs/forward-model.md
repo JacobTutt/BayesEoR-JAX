@@ -373,13 +373,13 @@ and the assembled joint matrix increases disk usage but permits independent reus
 `run_setup` performs the high-level orchestration:
 
 1. Load raw or preprocessed visibility data.
-2. Resolve model-grid defaults from the configuration.
-3. Build k-bin metadata and power-spectrum normalisation terms.
-4. Construct or reuse `T_21` and `T_fg` independently, then assemble `T`.
+2. Select the components using `model: eor`, `fg`, or `eor+fg` (the default).
+3. Resolve the selected model geometry, building k-bin metadata and power-spectrum normalisation terms only when the cosmological component is included.
+4. Construct or reuse the selected `T_21` and/or `T_fg` operators, then assemble `T`.
 5. Construct the inverse-noise diagonal independently of the coefficient basis.
 6. Prepare the Gram matrix and the data projection/scalar from those saved inputs.
 7. Construct the prior, precision model, and marginalised likelihood.
-8. Return a `SetupResult` used by downstream samplers.
+8. Return a `SetupResult` for posterior sampling or, for the fixed-prior foreground-only model, analytic evidence and MAP evaluation.
 
 This separation matters because setup can be used as a fast configuration check before launching an expensive sampler.
 

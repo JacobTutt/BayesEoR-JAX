@@ -10,6 +10,45 @@ available from `bayeseor_jax.inference`; the existing top-level imports from
 `bayeseor_jax` remain supported. Direct imports from the former root-level modules
 must use these new paths.
 
+## Selecting the fitted components
+
+Set `model` in YAML, pass `--model` on the command line, or supply it to
+`run_setup`. The default remains `eor+fg`.
+
+| `model` | Forward operator | Sampled parameters | Evaluation |
+|---|---|---|---|
+| `eor` | `T_21` | Power-spectrum amplitudes | MultiNest |
+| `fg` | Original or reduced `T_fg` | None, with fixed foreground/noise priors | Analytic evidence and MAP |
+| `eor+fg` | `[T_21, T_fg]` | Power-spectrum amplitudes | MultiNest |
+
+This selects the **inference model**, not the contents of the input data. For
+example, `model: fg` can be applied to either foreground-only or signal-injected
+data. Setup constructs only the selected component operators and their priors;
+`T.npy` and the noise-weighted likelihood products keep the same names in all
+three cases. Changing the selected components invalidates the combined-matrix
+and Gram-matrix caches. Use separate output directories for the three analyses
+to retain their metadata and results; changing physical model or observation
+settings still requires a new matrix directory or `clobber`.
+
+```yaml
+model: fg
+fov_fg: 180.0
+# Optional: use a preconstructed KL basis instead of the original foreground model.
+# foreground_kl_path: /path/to/T_fg_reduced.npy
+```
+
+FG-only setup does not require `priors` or `fov_eor`; cosmological prior settings
+in a reused configuration are ignored. It currently requires fixed noise.
+For `eor`, foreground settings are unused and supplying `foreground_kl_path` is
+rejected. The EoR-only example explicitly selects `model: eor`.
+
+`run_nestedsampling(setup, out_dir=...)` dispatches to MultiNest when power-spectrum
+parameters remain. For a parameter-free FG model it instead saves
+`map_coefficients.npy` and `summary.json` with `sampler: analytic`, `logZ` and
+`logZerr: 0`. There are no posterior samples or power-spectrum plots in this
+case. `logZ` uses the same omitted-constant convention as sampled runs, described
+below; it is not an absolutely normalised evidence without restoring those terms.
+
 ## Marginalised Likelihood
 
 The latent EoR and foreground coefficients are analytically marginalised. The sampler explores power-spectrum parameters, `theta`, which define the EoR prior covariance.
@@ -134,7 +173,10 @@ Add `--sample` to run nested sampling:
 python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
 ```
 
-The example calls `run_multinest`. After sampling, it runs the example analysis step and writes posterior summaries and diagnostic plots. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
+The example calls `run_nestedsampling`. After sampling, it writes posterior
+summaries and diagnostic plots; an analytic FG-only run stops after saving its
+evidence and MAP coefficients. For serious runs, create a dedicated configuration
+and output directory rather than using the default example paths.
 
 Record the live-point count, random seed and stopping settings with each scientific result.
 
