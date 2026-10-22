@@ -6,8 +6,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..configuration import DEFAULT_FOREGROUND_PRIOR_STD_MK
-
 jax.config.update("jax_enable_x64", True)
 
 

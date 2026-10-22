@@ -10,11 +10,6 @@ from typing import Any
 from jsonargparse import ActionConfigFile, ArgumentParser
 
 
-DEFAULT_FOREGROUND_PRIOR_STD_MK = (
-    8690.961932554002, 2479547.297490031, 1406322.413511489,
-)
-
-
 @dataclass(frozen=True, kw_only=True)
 class ModelConfig:
     """Requested spectral, beam and storage settings for physical operators.
@@ -129,7 +124,9 @@ class RunConfig(ModelConfig):
     effective_noise_path: Path | str | None = None
     priors: Any = None
     uniform_priors: Any = None
-    foreground_prior_std_mk: tuple[float, ...] = DEFAULT_FOREGROUND_PRIOR_STD_MK
+    foreground_prior_std_mk: tuple[float, ...] = (
+        8690.961932554002, 2479547.297490031, 1406322.413511489,
+    )
     foreground_kl_path: Path | str | None = None
     use_intrinsic_noise_fitting: bool = False
     quiet: bool = False
