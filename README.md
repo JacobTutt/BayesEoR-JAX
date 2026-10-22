@@ -29,6 +29,8 @@ for the strict build check and optional versioned GitHub Pages deployment.
 - [Installation](docs/installation.md): CPU and GPU environments, JAX checks, and MultiNest setup.
 - [CSD3 Getting Started](docs/csd3.md): CSD3 environment setup, MultiNest library setup, and one-GPU Slurm scripts for the test analyses.
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.
+- [Model](docs/model.md): step-by-step cosmological and foreground mappings, with diagrams, equations and implementation links.
+- [KL Foreground Basis](docs/kl-foregrounds.md): prior/noise weighting, mode selection and reduced-operator construction.
 - [Forward Model](docs/forward-model.md): how visibility data are modelled through the linear operator `T`.
 - [EoR Model](docs/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
 - [Foregrounds](docs/foregrounds.md): spherical image-domain foreground modelling and distributed operator construction.

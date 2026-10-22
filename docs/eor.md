@@ -1,77 +1,154 @@
-# EoR Model
+# EoR model
 
-The EoR model represents the cosmological 21-cm signal in a 3D model space that is connected to observed visibilities through the forward model.
+The cosmological 21-cm field is parameterised on a rectilinear
+$(u,v,\eta)$ Fourier grid. This links the model coefficients naturally to
+the power spectrum while resolving the line-of-sight structure that helps
+distinguish the signal from spectrally smooth foreground emission.
 
-## Model Space
+[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png)](assets/diagrams/eor-workflow.png)
 
-BayesEoR-JAX builds a rectilinear model grid over transverse Fourier coordinates and line-of-sight modes:
+*The component-only schematic ends at modelled visibilities; inference is a
+separate stage. The thumbnails illustrate the spaces, not a numerical evaluation
+of one shared realisation.*
 
-- `u` and `v` describe angular Fourier modes on the sky.
-- `eta` describes Fourier modes along the frequency axis.
-- Cosmological conversions map these to physical k coordinates.
+The complete mapping is
 
-The key EoR grid parameters are:
+$$
+\boldsymbol m_{21}
+=\underbrace{\mathbf F^{-1}\mathbf P\mathbf F'\mathbf F_z}_{\mathbf T_{21}}
+\boldsymbol a.
+$$
 
-- `n_u_eor`: number of EoR model pixels along the `u` axis.
-- `n_v_eor`: number of cosmological Fourier modes along the `v` axis. When omitted, each transverse axis size is inferred independently from the selected baselines, field extent and beam-aperture buffer; undersized explicit values produce warnings.
-- `du_eor` and `dv_eor`: explicit UV spacings. If omitted, they are derived from `fov_eor`.
-- `n_eta`: number of line-of-sight Fourier modes. If omitted, it defaults to `n_freq`.
-- `fov_eor`: circular EoR field of view in degrees.
+## 1. Define the Fourier coefficients
 
-The EoR model excludes the `eta = 0` mode. Foreground models handle the spectrally smooth component.
-The retained `(u, v, eta)` coordinates are constructed once by
-`build_fourier_geometry`. Both the forward operators and cosmological k-bin
-assignments use this geometry, ensuring that they share one coefficient
-ordering.
+The coefficients $a_{he}$ are indexed by transverse pair
+$(u_h,v_h)$ and line-of-sight mode $\eta_e$, the Fourier dual of frequency.
+[build_fourier_geometry](api/geometry.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry)
+constructs these coordinates and their integration weights.
 
-## k Bins
+The default transverse spacings are set by the model's angular dimensions,
+while $\Delta\eta=B^{-1}$ for bandwidth $B$. The transverse monopole
+$(u,v)=(0,0)$ and the $\eta=0$ plane are excluded, leaving
 
-The EoR coefficients are grouped into spherical k bins. The sampler does not infer every EoR coefficient directly in the marginalised likelihood. Instead, it samples power-spectrum amplitudes that determine the prior variance of EoR modes in each k bin.
+$$
+N_{21,\mathrm{param}}=(N_uN_v-1)(N_\eta-1).
+$$
 
-The default reported quantity is:
+The angular grid describes the intrinsic field in a local tangent plane.
+Its image pixels are subsequently propagated through the full three-dimensional
+instrument response.
 
-```text
-Delta^2(k) = k^3 P(k) / (2 pi^2)
-```
+## 2. Map line-of-sight modes to frequency: $\mathbf F_z$
 
-where `P(k)` is the dimensional power spectrum. The output metadata records the representative k value, bin edges, and number of model modes contributing to each bin.
+At each transverse coordinate, reconstruct the spectral dependence:
 
-## Priors
+$$
+S_h(\nu_f)=\sum_e(F_z)_{fe}a_{he},
+\qquad
+(F_z)_{fe}
+=\Delta\eta\,
+\exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
+$$
 
-Power-spectrum priors are supplied as a list of `[min, max]` ranges in log-space:
+[build_spectral_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_spectral_fourier_operator)
+evaluates these factors. The configured builder uses the middle observing
+channel as $\nu_{\rm ref}$.
 
-```yaml
-priors:
-  - [-2.0, 2.0]
-  - [-1.2, 2.8]
-  - [-0.7, 3.3]
-```
+## 3. Map transverse modes to image pixels: $\mathbf F'$
 
-The number of prior ranges should match the number of non-empty k bins produced by the chosen model grid and mask.
+The transverse transform reconstructs the brightness at each cosmological image pixel:
 
-Use `uniform_priors` to mark bins that should use the old BayesEoR-style linear-uniform physical prior. The sampler coordinates remain log-space; the correction is applied through the likelihood.
+$$
+I_{21,p}(\nu_f)
+=\sum_h F'_{ph}S_h(\nu_f),
+\qquad
+F'_{ph}
+=\Delta u\,\Delta v\,
+\exp[-2\pi i(u_hl_p+v_hm_p)].
+$$
 
-## Configuration Example
+[build_transverse_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator)
+uses pixel direction cosines at the reference integration. The image geometry
+then follows those fixed celestial pixels through the drift scan.
 
-```yaml
-n_u_eor: 15
-fov_eor: 12.9080728652
-nside: 128
+## 4. Apply the beam and fringe response: $\mathbf F^{-1}\mathbf P$
 
-n_freq: 38
-f0_mhz: 158.304048743
-df_mhz: 0.23761898685801028
+Weight the reconstructed field by the primary beam and sum its contributions to
+each measured visibility:
 
-priors:
-  - [-2.0, 2.0]
-  - [-1.2, 2.8]
-  - [-0.7, 3.3]
-```
+$$
+m_{21,tfb}
+=\sum_p
+\underbrace{(F^{-1})_{tfbp}P_{tfp}}_{R_{tfbp}}
+I_{21,p}(\nu_f).
+$$
 
-The shipped example configs in `test_examples/eor/` and `test_examples/eor_fgs/` show complete working parameter sets.
+The [shared response](model.md#shared-sky-to-visibility-response) includes
+the pixel solid angle, chromatic beam and full three-dimensional fringe phase.
+[build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator)
+constructs $\mathbf R$ on the cosmological image support.
 
-## Choosing Grid Size
+## 5. Assemble the cosmological operator: $\mathbf T_{21}$
 
-Increasing `n_u_eor`, `n_v_eor`, `n_eta`, or `fov_eor` increases the number of latent EoR modes and the size of the cached matrix products. This can rapidly dominate memory use because the marginalised likelihood works with dense parameter-space matrices.
+Combining the preceding steps gives the visibility contribution of one coefficient:
 
-Use small grids for installation checks and method development. Production runs should document the intended FoV, k-bin coverage, and memory budget before submission.
+$$
+(T_{21})_{(tfb),(he)}
+=\left[\sum_p R_{tfbp}F'_{ph}\right](F_z)_{fe},
+\qquad
+\boldsymbol m_{21}=\mathbf T_{21}\boldsymbol a.
+$$
+
+[build_T_21_core](api/operators.md#bayeseor_jax.model.operators.build_T_21_core)
+performs this contraction; [T_21](api/operators.md#bayeseor_jax.model.operators.T_21)
+also constructs $\mathbf R$ from supplied geometry and beam arrays.
+Columns are ordered by transverse mode, then $\eta$ varying fastest.
+
+For disk-backed construction,
+[T_21_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_21_build_save)
+builds CPU time-frequency blocks and writes **T_21.npy**.
+This changes how the calculation is executed, not the operator being evaluated.
+
+## Power-spectrum parameterisation
+
+The Fourier coordinates map to comoving wavenumbers at a reference redshift:
+
+$$
+k_x=\frac{2\pi u}{D_M},\qquad
+k_y=\frac{2\pi v}{D_M},\qquad
+k_z=\frac{2\pi\eta}{|d\chi/d\nu|}.
+$$
+
+Modes are grouped into spherical bins in $k=(k_x^2+k_y^2+k_z^2)^{1/2}$.
+The quantity inferred in each bin is
+
+$$
+\varphi_s=\Delta^2_{21}(k_s)=\frac{k_s^3}{2\pi^2}P_{21}(k_s).
+$$
+
+These amplitudes determine the Gaussian coefficient prior rather than the
+individual coefficient values. The implementation includes the Fourier-volume
+normalisation in
+[PhiInverse](api/inference.md#bayeseor_jax.inference.phi.PhiInverse);
+$\varphi_s$ should not be inserted as the raw coefficient variance without
+that conversion. The linear coefficients are analytically marginalised in the
+[inference stage](inference.md).
+
+## Configuration
+
+| Setting | Role |
+| --- | --- |
+| `fov_eor` | Cosmological model's full angular field of view, in degrees. |
+| `n_u_eor`, `n_v_eor` | Transverse grid sizes, independently inferred if omitted; undersized supplied values produce warnings. |
+| `du_eor`, `dv_eor` | Optional transverse spacings; otherwise derived from the model field. |
+| `n_eta` | Line-of-sight grid size; defaults to `n_freq`. |
+| `nside` | Shared HEALPix resolution for the image quadrature; inferred if omitted. |
+| `priors` | One `[min, max]` range per populated power-spectrum bin, in $\log_{10}(\varphi_s/\mathrm{mK}^2)$. |
+
+The `uniform_priors` setting selects bins with a linear-uniform physical power
+prior while retaining logarithmic sampler coordinates. See the
+[configuration reference](configuration.md) for the full settings and
+the example configurations in `test_examples/eor/` and `test_examples/eor_fgs/`.
+
+Increasing the Fourier grid or model extent increases the number of marginalised
+coefficients and the memory needed for dense likelihood products.

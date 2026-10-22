@@ -30,6 +30,12 @@ the documentation does not require a GPU or the native MultiNest library.
 - Add API entries to the appropriate page under `docs/api/`.
 - Use Markdown mathematics for equations; MathJax renders them in the browser.
 
+The Home and Model pages use committed workflow images in `docs/assets/diagrams/`.
+Editable component-diagram sources and regeneration commands are in
+[tools/docs_diagrams](https://github.com/JacobTutt/BayesEoR-JAX/tree/main/tools/docs_diagrams).
+Their generation is separate from the documentation build and does not require
+changes to the original manuscript figures.
+
 The **Documentation** GitHub Actions workflow runs a strict build for relevant
 pushes and pull requests. Documentation dependencies are installed separately from
 the normal CPU and HPC environments.

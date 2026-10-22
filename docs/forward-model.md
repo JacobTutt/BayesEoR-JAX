@@ -1,4 +1,9 @@
-# Forward Model
+# Construction and execution
+
+For a step-by-step derivation, start with the [model overview](model.md),
+[EoR model](eor.md), [foreground model](foregrounds.md) and
+[KL foreground basis](kl-foregrounds.md). This guide describes how those
+operators are constructed, stored and assembled into inference inputs.
 
 BayesEoR-JAX models visibility data through a linear forward operator:
 
@@ -407,4 +412,6 @@ The marginalised likelihood samples power-spectrum parameters, not every latent 
 Sigma(theta) = T^H N^{-1} T + Phi^{-1}(theta)
 ```
 
-The likelihood then evaluates dense linear algebra involving `Sigma(theta)`, including solves and log determinants. This is where the JAXMg downstream branch is currently used.
+The likelihood evaluates dense linear algebra involving `Sigma(theta)`, including
+solves and log determinants. Native JAX handles single-device calculations;
+the optional JAXMG backend supports distributed GPU calculations.
