@@ -25,11 +25,12 @@ then by image-domain spatial mode.
 
 `fov_fg` may be substantially larger than the cosmological field because
 foreground emission enters through beam sidelobes and the chromatic horizon
-response. The foreground field uses a single HEALPix resolution; subsequent
-dimensionality reduction is performed in visibility space using the KL basis.
+response. The foreground field uses a single HEALPix resolution. The saved
+physical operator can subsequently be weighted by its prior and noise factors
+for KL construction; decomposition and truncation remain a separate stage.
 
-Large operators are divided into contiguous time ranges using the active JAX
-process topology, built in frequency-sized CPU blocks, and written into a
+Large operators are divided into contiguous ranges of time-frequency blocks
+using the active JAX process topology, constructed on CPU, and written into a
 shared NumPy memmap. This avoids materialising the full matrix on a GPU.
 
 ---

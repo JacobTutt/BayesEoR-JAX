@@ -62,7 +62,17 @@ The dimension grows with:
 - field of view;
 - HEALPix resolution.
 
-Wide-field image-domain foreground operators can become very large. They are therefore constructed in CPU row blocks and written directly to disk rather than materialised on a GPU. Optional mixed-resolution foreground grids can further reduce the number of image-domain coefficients.
+Wide-field image-domain foreground operators can become very large. Both physical
+components are therefore constructed in CPU time-frequency blocks and written
+directly to disk rather than materialised on a GPU. Joint assembly copies the
+selected component files without rebuilding them.
+
+Likelihood preparation is separate: `save_gram_matrix` distributes visibility
+rows over the existing device mesh and contracts coefficient blocks on the
+default backend, normally GPUs. The local input stripe must fit on those devices;
+blocking bounds the output workspace but does not stream the input from disk.
+Block widths are aligned with the device count, with zero padding removed before
+the completed matrix is published.
 
 ## JAXMg
 
@@ -104,7 +114,8 @@ For multi-node JAX jobs, scripts may need distributed initialisation and NCCL en
 - Keep matrix caches on fast project storage.
 - Use distinct matrix directories for distinct model configurations.
 - Record GPU model, driver, CUDA, JAX, JAXMg, and commit hash in run notes.
-- Treat CPU fallback as a bug for production-sized analyses.
+- Check that likelihood preparation and sampling use the intended GPU backend;
+  physical-component construction deliberately runs on CPU.
 
 ---
 

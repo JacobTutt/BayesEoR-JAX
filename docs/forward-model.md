@@ -143,7 +143,7 @@ model/
 ├── instrument/
 │   ├── beam.py                 # Analytic and interpolated primary-beam responses
 │   ├── baselines.py            # Sampled baselines, redundancy and antenna pairs
-│   └── noise.py                # Instrumental thermal-noise generation
+│   └── noise.py                # Thermal-noise variances and realisations
 ├── observation/
 │   └── image_geometry.py       # HEALPix selection and time-dependent directions
 ├── cosmology/
@@ -152,9 +152,10 @@ model/
 │   └── power_spectrum.py       # Physical k coordinates and binning
 ├── operators.py                # Numerical mappings between model spaces
 └── construction/
-    ├── builder.py              # BuildMatrices orchestration
+    ├── builder.py              # Physical input preparation and component writers
     ├── forward.py              # CPU construction and saved-component assembly
-    ├── storage.py              # Saved arrays and shared memory-mapped files
+    ├── likelihood.py           # Noise-weighted Gram matrix and data contractions
+    ├── storage.py              # Cache checks, saved arrays and publication
     └── distribution.py         # Device meshes and visibility-row partitions
 ```
 
@@ -171,8 +172,50 @@ should use the paths above. The old `model.instrument`, `model.noise`,
 and `model.cosmology.power_spectrum`, respectively.
 The former saving methods `BuildMatrices.build_T_21` and `build_T_fg` are now
 named `T_21_build_save` and `T_fg_build_save` to distinguish them from pure
-operator evaluation. `BuildMatrices.build_T` assembles the separate files,
-building missing components first.
+operator evaluation. `BuildMatrices` now prepares physical inputs and exposes
+only those two component writers. The former `build_T`, noise-building,
+likelihood-product and stack-building methods have been removed. Their stages
+are explicit functions rather than methods that silently construct dependencies.
+Noise settings, `clobber` and Gram-block tuning no longer belong to its constructor.
+
+## Assembly and Likelihood Preparation
+
+Once the components exist, select the foreground representation and assemble it
+with the cosmological operator. Neither assembly nor likelihood preparation
+rebuilds a missing component:
+
+```python
+from bayeseor_jax.model.instrument.noise import build_noise_variance
+from bayeseor_jax.model.construction.storage import save_array
+from bayeseor_jax.model.construction.likelihood import (
+    save_gram_matrix, save_data_projection, save_data_power,
+)
+
+# Use path_fg for the original representation, or a separately saved reduced one.
+selected_fg = path_fg
+path_joint = assemble_joint_operator(path_21, selected_fg, output_path="arrays/T.npy")
+variance = build_noise_variance(n_time, n_frequency, n_baseline,
+                                sigma=noise_rms, redundancy=redundancy)
+path_ninv = save_array("arrays/Ninv.npy", 1.0 / variance)
+save_gram_matrix(path_joint, path_ninv, output_path="arrays/T_Ninv_T.npy")
+save_data_projection(path_joint, path_ninv, data, output_path="arrays/dbar.npy")
+save_data_power(path_ninv, data, output_path="arrays/d_ninv_d.npy")
+```
+
+These are collective calls when distributed JAX is active. Component writers
+run on CPU; the likelihood-product writers use the default device mesh, normally
+GPUs. `save_gram_matrix` keeps each process's visibility stripe on its devices
+and writes the output in coefficient blocks. It does not stream the input from
+disk during each contraction.
+
+For in-memory use, `build_gram_matrix`, `build_data_projection` and
+`build_data_power` are pure JAX contractions with no storage or placement policy.
+The supplied foreground operator must use the same visibility rows as `T_21`.
+Its coefficient prior must also match the chosen representation: physical prior
+widths for the original basis, or a standard-normal prior when those widths have
+already been absorbed into a reduced operator. Automatic KL construction and
+reduced-prior selection are not part of `run_setup`; that entry point still uses
+the original foreground representation.
 
 ## Cached Matrix Products
 
@@ -186,13 +229,20 @@ The marginalised likelihood does not rebuild the full model at every sampler ste
 - `dbar.npy`: `T^H N^{-1} d`.
 - `d_ninv_d.npy`: `d^H N^{-1} d`.
 
-These files are written under `array_save_directory`. If they already exist and `clobber` is false, the setup path can reuse them.
-Reuse assumes identical observation and model settings; a filename alone does
-not validate that configuration. Replacing a component through `BuildMatrices`
-invalidates its joint matrix, Gram matrix and data projection. The standalone
-save functions do not manage caches belonging to other analyses. Keeping the
-two component files as well as the assembled joint matrix increases disk usage
-but allows independent construction and reuse.
+These files are written under `array_save_directory`. `ensure_cached` centralises
+reuse: the physical components are reused when present unless `clobber` is true,
+while derived products have sidecar metadata recording their input paths, file
+sizes and modification times. Changing the selected component or rewriting an
+input causes its dependent products to be rebuilt on the next cache check.
+Noise is compared with the requested variance vector, and the two data-dependent
+terms are refreshed on every setup call. Writers publish completed temporary
+files without first deleting an existing output.
+
+Physical-component reuse still requires identical observation and model settings;
+it does not hash the configuration. Use a separate directory or `clobber=True`
+when those settings change. Standalone save functions always write their requested
+output; cache reuse is an explicit orchestration decision. Keeping both components
+and the assembled joint matrix increases disk usage but permits independent reuse.
 
 ## Setup Flow
 
@@ -201,9 +251,11 @@ but allows independent construction and reuse.
 1. Load raw or preprocessed visibility data.
 2. Resolve model-grid defaults from the configuration.
 3. Build k-bin metadata and power-spectrum normalisation terms.
-4. Build or load cached matrix products.
-5. Construct the prior, precision model, and marginalised likelihood.
-6. Return a `SetupResult` used by downstream samplers.
+4. Construct or reuse `T_21` and `T_fg` independently, then assemble `T`.
+5. Construct the inverse-noise diagonal independently of the coefficient basis.
+6. Prepare the Gram matrix and the data projection/scalar from those saved inputs.
+7. Construct the prior, precision model, and marginalised likelihood.
+8. Return a `SetupResult` used by downstream samplers.
 
 This separation matters because setup can be used as a fast configuration check before launching an expensive sampler.
 
