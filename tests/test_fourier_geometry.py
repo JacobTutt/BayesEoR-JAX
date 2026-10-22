@@ -1,8 +1,34 @@
 import jax.numpy as jnp
 import numpy as np
+import pytest
+import warnings
 
 from bayeseor_jax import FourierGeometry, build_fourier_geometry
 from bayeseor_jax.model.cosmology.power_spectrum import generate_k_modes_in_physical_coordinates
+from bayeseor_jax.model.cosmology.fourier_geometry import _resolve_uv_grid_from_extents
+
+
+@pytest.mark.parametrize("requested", [None, 3, 15])
+def test_fourier_resolution_infers_axes_independently_and_warns_if_small(requested):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        grid = _resolve_uv_grid_from_extents(
+            extent_u_eor=.2, extent_v_eor=.1,
+            freqs_hz=np.array([100e6, 299792458.]),
+            uvws_m=np.array([[[10., 20., 0.]], [[30., 10., 0.]]]),
+            beam_type="uniform", fwhm_deg=None, diam=None,
+            n_u_eor=requested, n_v_eor=requested, du_eor=None, dv_eor=None,
+        )
+    assert grid["n_u_eor_required"] == 13
+    assert grid["n_v_eor_required"] == 5
+    assert grid["n_u_eor"] == (13 if requested is None else requested)
+    assert grid["n_v_eor"] == (5 if requested is None else requested)
+    messages = [str(w.message) for w in caught]
+    if requested == 3:
+        assert any("n_u_eor=3 is smaller" in msg for msg in messages)
+        assert any("n_v_eor=3 is smaller" in msg for msg in messages)
+    else:
+        assert messages == []
 
 
 def test_fourier_geometry_defines_retained_uv_eta_grid():

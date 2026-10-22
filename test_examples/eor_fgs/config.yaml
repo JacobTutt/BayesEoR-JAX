@@ -5,11 +5,11 @@ data_path: test_examples/eor_fgs/eor_and_fgs.uvh5
 # EoR model params
 # Number of pixels along the u-axis of the EoR model uv-plane
 n_u_eor: 15
-# n_v_eor can be set independently, but if omitted it defaults to n_u_eor
+# Omitted n_u_eor and n_v_eor are inferred independently from the observation.
 # n_v_eor: 15
 # Circular FoV (degrees) for the EoR model image domain
 fov_eor: 12.9080728652
-# HEALPix nside parameter for the image-space model
+# Shared image-grid resolution; omit to infer it from the selected baselines/frequencies.
 nside: 128
 
 # Frequency-axis params (required by the new parser)

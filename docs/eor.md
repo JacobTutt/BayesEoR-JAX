@@ -15,7 +15,7 @@ BayesEoR-JAX builds a rectilinear model grid over transverse Fourier coordinates
 The key EoR grid parameters are:
 
 - `n_u_eor`: number of EoR model pixels along the `u` axis.
-- `n_v_eor`: number of EoR model pixels along the `v` axis. If omitted, it defaults to `n_u_eor`.
+- `n_v_eor`: number of cosmological Fourier modes along the `v` axis. When omitted, each transverse axis size is inferred independently from the selected baselines, field extent and beam-aperture buffer; undersized explicit values produce warnings.
 - `du_eor` and `dv_eor`: explicit UV spacings. If omitted, they are derived from `fov_eor`.
 - `n_eta`: number of line-of-sight Fourier modes. If omitted, it defaults to `n_freq`.
 - `fov_eor`: circular EoR field of view in degrees.

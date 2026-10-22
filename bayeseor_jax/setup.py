@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import warnings
 
 import jax
 import jax.numpy as jnp
@@ -31,6 +32,7 @@ from .model.cosmology.power_spectrum import (
     generate_k_cube_model_spherical_binning,
 )
 from .model.cosmology.fourier_geometry import _resolve_uv_grid_from_extents
+from .model.observation.image_geometry import required_healpix_nside
 from .io import (
     load_numpy_dict,
     write_analysis_metadata,
@@ -95,6 +97,9 @@ def run_setup(config: RunConfig) -> SetupResult:
     This coordinates loading, geometry, component construction, joint assembly
     and likelihood products; it does not run nested sampling. A supplied KL
     operator is loaded with a standard-normal prior, not recomputed.
+    Omitted image and transverse Fourier resolutions are inferred from the
+    selected observation. Explicit values below the estimates trigger warnings
+    but are retained; these checks do not replace convergence studies.
     """
     if not isinstance(config, RunConfig):
         raise TypeError("run_setup requires a RunConfig")
@@ -208,13 +213,30 @@ def run_setup(config: RunConfig) -> SetupResult:
     if n_eta is None:
         n_eta = n_freq
 
+    # Sample the shortest fringe across all selected baselines and channels.
+    nside_required = required_healpix_nside(
+        longest_baseline_m=float(np.linalg.norm(np.asarray(vis_dict["uvws"]), axis=-1).max()),
+        highest_frequency_hz=float(np.max(np.asarray(freqs_hz))),
+    )
+    nside = nside_required if config.nside is None else int(config.nside)
+    if nside < 1 or (config.nside is not None and nside != config.nside):
+        raise ValueError("nside must be a positive integer")
+    if nside < nside_required:
+        warnings.warn(
+            f"nside={nside} is below the baseline-driven Nyquist estimate "
+            f"{nside_required} for the selected observation; the explicit value "
+            "will be used for both foreground and cosmological image grids.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     # Build the configured HEALPix FoV model once before the expensive matrix
     # construction so the spherical-aware local angular widths can define the
     # uv sampling and automatic n_u/n_v sizing.
     image_geometry = build_image_geometry(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
-        nside=int(config.nside),
+        nside=nside,
         telescope_latlonalt=tuple(float(x) for x in config.telescope_latlonalt),
         jd_center=float(jd_center),
         n_t=int(n_t),
@@ -261,7 +283,8 @@ def run_setup(config: RunConfig) -> SetupResult:
         "d_t": None if d_t is None else float(d_t),
         "jd_min": None if config.jd_min is None else float(config.jd_min),
         "jd_center": None if jd_center is None else float(jd_center),
-        "nside": int(config.nside),
+        "nside": nside,
+        "nside_required": nside_required,
         "fov_eor": float(fov_eor),
         "fov_fg": float(fov_fg),
         "fov_l_angle_eor": float(image_geometry.fov_l_angle_eor),

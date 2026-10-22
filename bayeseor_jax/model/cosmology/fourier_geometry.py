@@ -274,7 +274,7 @@ def _resolve_model_grid_size(
     required: int,
     label: str,
 ) -> int:
-    """Resolve one uv-axis model size, warning when explicit overrides differ."""
+    """Infer one uv-axis size or retain an override, warning if undersized."""
     if required < 1:
         required = 1
 
@@ -288,13 +288,6 @@ def _resolve_model_grid_size(
         warnings.warn(
             f"{label}={resolved} is smaller than the auto-resolved requirement "
             f"{required} for the selected data, FoV, and beam model.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    elif resolved > required:
-        warnings.warn(
-            f"{label}={resolved} is larger than the auto-resolved requirement "
-            f"{required}; the run will use the explicit larger value.",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -321,7 +314,8 @@ def _resolve_uv_grid_from_extents(
     The fixed central-time angular chart widths set the uv sampling through
     ``du = 1 / extent_u`` and ``dv = 1 / extent_v``. The grid extents are then
     chosen to cover the instrument support plus half the beam-aperture width on
-    each side, following the old elongated-FoV validation logic.
+    each side. Omitted axis sizes use these estimates independently; smaller
+    explicit sizes are retained with a warning.
     """
     du_eor_val, dv_eor_val = _resolve_uv_spacing_from_image_extents(
         extent_u=extent_u_eor,

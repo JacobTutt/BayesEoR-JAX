@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 from dataclasses import asdict, FrozenInstanceError
+import warnings
 
 import jax.numpy as jnp
 import numpy as np
@@ -57,7 +58,7 @@ def setup_case(tmp_path, monkeypatch):
     )
     arguments = dict(data_path=tmp_path / "data.npy", n_freq=3, n_eta=3,
                      array_save_directory=tmp_path, output_dir=tmp_path,
-                     priors=[[-1., 1.]], nside=1)
+                     priors=[[-1., 1.]], nside=4)
     return setup, arguments, vis
 
 
@@ -76,6 +77,46 @@ def test_setup_preserves_requested_settings_and_resolves_observation(setup_case)
     np.testing.assert_array_equal(result.bm.freq_hz, vis["freqs_hz"])
     with pytest.raises(FrozenInstanceError):
         config.n_freq = 3
+
+
+@pytest.mark.parametrize("model", ["eor", "fg", "eor+fg"])
+@pytest.mark.parametrize("requested,expected", [(None, 64), (32, 32), (128, 128)])
+def test_setup_resolves_shared_nside_from_selected_observation(
+    setup_case, monkeypatch, model, requested, expected,
+):
+    setup, arguments, vis = setup_case
+    # The w component and highest channel must contribute to the estimate.
+    vis["uvws"] = np.array([[[0., 0., 40.], [0., 2., 0.]]])
+    vis["freqs_hz"] = np.array([50e6, 100e6, 150e6])
+    vis["df_hz"] = 50e6
+    geometry = setup.build_image_geometry()
+    received, metadata = {}, {}
+
+    def capture_geometry(**kwargs):
+        received.update(kwargs)
+        return geometry
+
+    monkeypatch.setattr(setup, "build_image_geometry", capture_geometry)
+    monkeypatch.setattr(setup, "write_analysis_metadata", lambda **kw: metadata.update(kw["args"]))
+    monkeypatch.setattr(setup, "write_log_files", lambda **kw: metadata.update(kw["args"]))
+    arguments.update(nside=requested, model=model, f0_mhz=1., df_mhz=.01)
+    config = RunConfig(**arguments, sigma=.5)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        setup.run_setup(config)
+    resolution_warnings = [str(w.message) for w in caught if "nside=" in str(w.message)]
+    assert len(resolution_warnings) == (requested == 32)
+    assert received["nside"] == metadata["nside"] == expected
+    assert metadata["nside_required"] == 64
+    assert config.nside == requested
+
+
+@pytest.mark.parametrize("nside", [0, -1, 2.5])
+def test_setup_rejects_invalid_nside(setup_case, nside):
+    setup, arguments, _ = setup_case
+    arguments["nside"] = nside
+    with pytest.raises(ValueError, match="nside must be a positive integer"):
+        setup.run_setup(RunConfig(**arguments, sigma=.5))
 
 
 def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, setup_case):

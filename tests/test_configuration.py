@@ -41,6 +41,17 @@ def test_typo_cannot_be_silently_ignored_by_config():
         RunConfig(nsied=64)
 
 
+def test_parser_allows_automatic_image_and_fourier_resolution():
+    config = BayesEoRParser().parse_args([
+        "--n-freq", "3", "--f0-mhz", "150", "--df-mhz", "1",
+        "--telescope-latlonalt", "[0, 0, 0]",
+    ])
+    assert config.nside is None
+    assert config.n_u_eor is None
+    assert config.n_v_eor is None
+    assert RunConfig().nside is None
+
+
 def test_config_metadata_serializes_without_parser_namespace(tmp_path):
     parser = BayesEoRParser()
     config = parser.parse_args(["--config", "test_examples/eor/config.yaml"])

@@ -76,14 +76,16 @@ settings. Low-level operator functions continue to take explicit arrays.
 Migration: replace `run_setup(**settings)` with `run_setup(RunConfig(**settings))`;
 replace long `BuildMatrices(...)` keyword lists with model settings and prepared
 geometry as above. Unknown configuration keys now raise an error instead of
-being silently discarded by setup. YAML/CLI flags and their required fields are
-unchanged. The historical CLI output-directory default is `./BayesEoROutputs/`,
+being silently discarded by setup. The CLI output-directory default is `./BayesEoROutputs/`,
 while direct Python configuration retains the setup default `./`.
 
 ## Choosing a HEALPix resolution
 
-Use the longest selected three-dimensional baseline and the highest selected
-observing frequency to estimate a baseline-driven resolution:
+When `nside` is omitted, setup uses the longest selected three-dimensional
+baseline and highest selected observing frequency to estimate a shared
+foreground and cosmological image resolution. An explicit `nside` is retained,
+with a warning if it is below the estimate. The same calculation is available
+directly:
 
 ```python
 from bayeseor_jax import required_healpix_nside
@@ -99,8 +101,9 @@ larger than `lambda_min / (2 * b_max)`, then rounds up to a power of two.
 Set `samples_per_fringe` above two to request finer sampling. This is an
 estimate based on the [nominal HEALPix pixel size](https://healpy.readthedocs.io/en/latest/generated/healpy.pixelfunc.nside2resol.html),
 not a guarantee of visibility convergence for arbitrary sky structure, beams
-or horizon masks. It does not override the configured `nside`; changes to
-resolution also require reconsidering the pixel-domain prior.
+or horizon masks. Changes to resolution also require reconsidering the
+pixel-domain prior. Setup records the selected `nside` and `nside_required`
+estimate in `args.json`, without modifying the input configuration.
 
 ## Minimal Structure
 
@@ -150,13 +153,17 @@ Use separate `array_save_directory` values for model configurations that should 
 
 | Key | Purpose |
 | --- | --- |
-| `n_u_eor`, `n_v_eor` | EoR UV grid shape. `n_v_eor` defaults to `n_u_eor`. |
+| `n_u_eor`, `n_v_eor` | Cosmological Fourier-grid dimensions, each inferred independently when omitted. Smaller explicit values produce warnings. |
 | `du_eor`, `dv_eor` | Optional explicit UV spacing. Defaults derive from `fov_eor`. |
 | `fov_eor` | Circular EoR field of view in degrees. |
 | `n_eta` | Number of line-of-sight Fourier modes. Defaults to `n_freq`. |
-| `nside` | HEALPix resolution used for image-domain sky coordinates. |
+| `nside` | Shared HEALPix resolution; inferred from the selected baselines and frequencies when omitted. |
 
 These parameters control k-bin coverage and dense matrix size.
+The transverse estimates cover the selected baseline coordinates at the highest
+frequency plus the beam-aperture buffer, using spacings set by the angular
+extent of the cosmological field. Larger explicit grids are accepted without a
+warning. Fourier-grid checks are not needed for foreground-only inference.
 
 ## Foregrounds
 
