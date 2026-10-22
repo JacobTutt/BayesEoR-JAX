@@ -1,0 +1,41 @@
+/* Follow the site's selected palette, including a manually toggled theme. */
+.md-logo img.brand-light,
+.bayeseor-wordmark img.brand-light {
+  display: block;
+}
+
+.md-logo img.brand-dark,
+.bayeseor-wordmark img.brand-dark {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] .md-logo img.brand-light,
+[data-md-color-scheme="slate"] .bayeseor-wordmark img.brand-light {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] .md-logo img.brand-dark,
+[data-md-color-scheme="slate"] .bayeseor-wordmark img.brand-dark {
+  display: block;
+}
+
+.md-header__button.md-logo {
+  display: block;
+  margin: 0.1rem 0.4rem;
+  padding: 0;
+}
+
+.md-header__button.md-logo img {
+  width: 2.25rem;
+  height: 2.2rem;
+  object-fit: contain;
+}
+
+.md-typeset .bayeseor-wordmark {
+  margin-bottom: 1.25rem;
+}
+
+.bayeseor-wordmark img {
+  width: min(100%, 26rem);
+  height: auto;
+}

@@ -36,6 +36,14 @@ Editable component-diagram sources and regeneration commands are in
 Their generation is separate from the documentation build and does not require
 changes to the original manuscript figures.
 
+The header icon and Home wordmark use transparent light/dark SVG pairs in
+`docs/assets/branding/`, taken from the supplied logo source artwork. The `-light`
+files use dark lettering and outlines; the `-dark` files use white lettering and
+outlines, retaining the original colours. `branding.css` follows Material's
+active `data-md-color-scheme` so the correct artwork also appears when the user
+changes the theme manually. The small `partials/logo.html` override applies the
+same pairing to the header and mobile navigation.
+
 The **Documentation** GitHub Actions workflow runs a strict build for relevant
 pushes and pull requests. Documentation dependencies are installed separately from
 the normal CPU and HPC environments.

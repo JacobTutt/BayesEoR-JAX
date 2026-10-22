@@ -5,9 +5,13 @@ repo_url: https://github.com/JacobTutt/BayesEoR-JAX
 repo_name: JacobTutt/BayesEoR-JAX
 edit_uri: edit/main/docs/
 strict: true
+exclude_docs: |
+  overrides/
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  logo: assets/branding/diagram-light.svg
   features:
     - navigation.tabs
     - navigation.sections
@@ -69,6 +73,9 @@ markdown_extensions:
       generic: true
   - toc:
       permalink: true
+
+extra_css:
+  - assets/branding/branding.css
 
 extra_javascript:
   - assets/mathjax.js

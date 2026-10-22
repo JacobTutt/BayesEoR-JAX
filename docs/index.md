@@ -1,4 +1,11 @@
-# BayesEoR-JAX
+---
+title: BayesEoR-JAX
+---
+
+<h1 class="bayeseor-wordmark" id="bayeseor-jax" aria-label="BayesEoR-JAX">
+  <img class="brand-light" src="assets/branding/wordmark-light.svg" alt="" width="950" height="230">
+  <img class="brand-dark" src="assets/branding/wordmark-dark.svg" alt="" width="950" height="230">
+</h1>
 
 [![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow.png)](assets/diagrams/workflow.png)
 
