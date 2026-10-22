@@ -1,24 +1,33 @@
-% Component-only versions of the shared forward-model schematic.
-% Define \ForegroundWorkflow for foregrounds; otherwise draw the 21-cm model.
+% Forward-model schematics, ending at modelled data rather than inference.
+% Define \ForegroundWorkflow or \JointWorkflow; otherwise draw only the 21-cm model.
 \input{style.tex}
+\newcommand{\foregroundparameters}[1]{%
+  \begin{scope}[xshift=#1cm]
+    \node[panel=fgc, fill=fgc!12, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
+    \node[ttl] at (3.66,-0.28) {Image-Domain Foreground Model};
+    \node[lbl] at (3.66,-0.62) {$\bm{q}(l,m,n)$};
+    \foreach \f/\lab/\k in {fg_q0/q_0/0, fg_q1/q_1/1, fg_q2/q_2/2}{
+      \pgfmathsetmacro{\yc}{-1.23-0.36*\k}
+      \fill[black, opacity=0.22] (3.68,\yc-0.05) ellipse (1.30 and 0.39);
+      \node[thumb] at (3.66,\yc) {\includegraphics[width=2.6cm,height=0.78cm]{\f.png}};
+      \node[small, text=black!80, anchor=west] at (5.08,\yc) {$\lab$};
+    }
+  \end{scope}}
 \begin{document}
 \begin{tikzpicture}[x=1cm,y=1cm]
 \tikzset{grouplabel/.style={fill=white, draw=instc,
   font=\footnotesize\bfseries, inner xsep=3pt, inner ysep=2pt, rotate=90}}
 
-\draw[instc, dashed, line width=0.7pt] (0.2,0.08) rectangle (6.95,-2.53);
+\ifdefined\JointWorkflow
+  \def\parametersend{13.97}
+\else
+  \def\parametersend{6.95}
+\fi
+\draw[instc, dashed, line width=0.7pt] (0.2,0.08) rectangle (\parametersend,-2.53);
 \node[grouplabel] at (0.2,-1.225) {Model Parameters};
 
 \ifdefined\ForegroundWorkflow
-  \node[panel=fgc, fill=fgc!12, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
-  \node[ttl] at (3.66,-0.28) {Image-Domain Foreground Model};
-  \node[lbl] at (3.66,-0.62) {$\bm{q}(l,m,n)$};
-  \foreach \f/\lab/\k in {fg_q0/q_0/0, fg_q1/q_1/1, fg_q2/q_2/2}{
-    \pgfmathsetmacro{\yc}{-1.23-0.36*\k}
-    \fill[black, opacity=0.22] (3.68,\yc-0.05) ellipse (1.30 and 0.39);
-    \node[thumb] at (3.66,\yc) {\includegraphics[width=2.6cm,height=0.78cm]{\f.png}};
-    \node[small, text=black!80, anchor=west] at (5.08,\yc) {$\lab$};
-  }
+  \foregroundparameters{0}
   \def\imagex{0.45}\def\beamx{3.96}\def\visx{7.47}\def\outx{10.98}
   \def\outlineend{10.46}\def\equationx{7.17}
 \else
@@ -39,6 +48,9 @@
   \node[thumb] at ($(fourier.north)+(0,-1.55)$) {\includegraphics[width=1.6cm]{sky_fourier.png}};
 \fi
 
+\ifdefined\JointWorkflow
+  \foregroundparameters{7.02}
+\fi
 \draw[instc, dashed, line width=0.7pt] (0.2,-3.44) rectangle (\outlineend,-6.05);
 \node[grouplabel] at (0.2,-4.745) {Forward Model};
 \node[stage] (sky) at (\imagex,-3.52) {};
@@ -60,6 +72,10 @@
   \draw[flow=eorc] (1.905,-2.45) -- node[right, op=eorc] {$\mathbf{F}_z$} (fourier.north);
   \draw[flow=eorc] (fourier.east) -- node[above, op=eorc] {$\mathbf{F}'$} (sky.west);
 \fi
+\ifdefined\JointWorkflow
+  \draw[flow=fgc] (8.1,-2.45) -- (8.1,-2.97) -- (5.415,-2.97) -- (sky.north);
+  \node[op=fgc, anchor=west, inner sep=1pt] at (5.465,-3.20) {$\mathbf{Q}_z$};
+\fi
 
 % Retain a single waterfall in place of the likelihood comparison.
 \node[stage] (model) at (\outx,-3.52) {};
@@ -69,9 +85,16 @@
   \node[font=\small] at (\equationx,-6.43)
     {$\bm{m}_{\rm FG}=\mathbf{T}_{\rm FG}\bm{q}=\mathbf{F}^{-1}\mathbf{P}\mathbf{Q}_z\bm{q}$};
 \else
-  \node[lbl] at ($(model.north)+(0,-0.60)$) {$\bm{m}_{21}$};
-  \node[font=\small] at (\equationx,-6.43)
-    {$\bm{m}_{21}=\mathbf{T}_{21}\bm{a}=\mathbf{F}^{-1}\mathbf{P}\mathbf{F}'\mathbf{F}_z\bm{a}$};
+  \ifdefined\JointWorkflow
+    \node[lbl] at ($(model.north)+(0,-0.60)$) {$\bm{m}_{21}+\bm{m}_{\rm FG}$};
+    \node[font=\small] at (\equationx,-6.43)
+      {$\bm{m}=\mathbf{F}^{-1}\mathbf{P}\big(\textcolor{eorc}{\mathbf{F}'\mathbf{F}_z\bm{a}}
+      +\textcolor{fgc}{\mathbf{Q}_z\bm{q}}\big)$};
+  \else
+    \node[lbl] at ($(model.north)+(0,-0.60)$) {$\bm{m}_{21}$};
+    \node[font=\small] at (\equationx,-6.43)
+      {$\bm{m}_{21}=\mathbf{T}_{21}\bm{a}=\mathbf{F}^{-1}\mathbf{P}\mathbf{F}'\mathbf{F}_z\bm{a}$};
+  \fi
 \fi
 \node[thumb] at ($(model.north)+(0,-1.58)$)
   {\includegraphics[trim=0 0 1.219cm 0,clip,width=1.65cm]{icon_likelihood.pdf}};
