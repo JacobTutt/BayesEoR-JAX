@@ -27,7 +27,9 @@ then by image-domain spatial mode.
 foreground emission enters through beam sidelobes and the chromatic horizon
 response. The foreground field uses a single HEALPix resolution. The saved
 physical operator can subsequently be weighted by its prior and noise factors
-for KL construction; decomposition and truncation remain a separate stage.
+for KL construction. `T_fg_svd_build_save` decomposes that saved weighted matrix
+on GPUs and writes its noise-thresholded reduced operator as a separate stage;
+see [the construction workflow](forward-model.md#distributed-foreground-svd-and-truncation).
 
 Large operators are divided into contiguous ranges of time-frequency blocks
 using the active JAX process topology, constructed on CPU, and written into a

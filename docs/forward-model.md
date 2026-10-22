@@ -134,6 +134,63 @@ is propagated separately as a mean visibility contribution, not included in `A`.
 Neither function saves an array or selects a device; the existing physical
 operator caches and inference setup are unchanged.
 
+## Distributed Foreground SVD and Truncation
+
+`T_fg_svd_build_save` takes the **already prior- and noise-weighted** matrix
+`A = N^(-1/2) T_fg Sigma_q^(1/2)` saved as a complex128 `.npy` file. It loads
+the matrix directly into distributed GPU shards, runs JAXMG GESVD, chooses the
+retained rank and saves the reduced operator in one call:
+
+```python
+from bayeseor_jax import T_fg_svd_build_save, assemble_joint_operator
+
+reduced_path = T_fg_svd_build_save(
+    "arrays/A_fg.npy", "arrays/Ninv.npy",
+    output_path="arrays/T_fg_reduced.npy", f=0.1, tile_size=128,
+)
+joint_path = assemble_joint_operator(
+    "arrays/T_21.npy", reduced_path, output_path="arrays/T.npy",
+)
+```
+
+`Ninv.npy` must contain the same positive diagonal inverse noise used to
+construct `A`. It is used to undo whitening, **not** to apply it again.
+The prior is already absorbed in `A` and is not supplied a second time.
+For `A = U diag(s) Vh`, the routine selects the smallest `r` satisfying
+
+```text
+sqrt(sum(s[r:]**2) / N_d) <= f
+```
+
+and writes `T_fg_reduced = N^(1/2) U[:, :r] diag(s[:r])`. The output coefficients
+therefore require a **standard-normal foreground prior**, not the original
+physical prior widths. The bound is on average prior-predictive RMS in whitened
+visibility space, not on every visibility or realised sky. A zero-column operator
+is permitted if the whole contribution lies below the threshold; `f=0` retains
+all modes with nonzero computed singular values.
+
+The launcher must initialise distributed JAX with **one Python process per GPU**,
+and every process calls the function. A near-square mesh and tile-aligned zero
+padding make both rectangular inputs and thin left-vector outputs shardable.
+Padding is removed from saved arrays and excluded from `N_d` and rank selection.
+Only retained local pieces of `U` are copied back to shared storage; `Vh` is not
+computed. The input, full thin `U` and solver workspace must still fit the GPUs.
+This routine currently assumes diagonal noise even though the pure weighting
+function also permits dense noise factors.
+
+Alongside the operator it saves `<stem>.singular_values.npy` and
+`<stem>.svd.json`, recording the original/padded dimensions, process grid,
+retained rank, achieved discarded RMS and timings. Solver failures are checked
+before replacing any completed operator. Each call recomputes the SVD; there is
+no implicit reuse that could ignore a changed `f`. Joint assembly and subsequent
+likelihood preparation remain explicit stages, and `run_setup` has not yet been
+changed to select the reduced operator/prior automatically.
+
+This needs a JAXMG build exposing `gesvd` with `compute_vh=False` and
+`return_status=True`. There is no implicit CPU or approximate-SVD fallback.
+`tests/gpu/run_foreground_svd.py` provides a small native multi-GPU check using
+synthetic tall and wide complex matrices, nonuniform noise and several thresholds.
+
 ## Code Organisation
 
 The physical model and its construction live together under `bayeseor_jax/model/`:
@@ -154,6 +211,7 @@ model/
 └── construction/
     ├── builder.py              # Physical input preparation and component writers
     ├── forward.py              # CPU construction and saved-component assembly
+    ├── foreground_svd.py       # Distributed KL reduction of a weighted operator
     ├── likelihood.py           # Noise-weighted Gram matrix and data contractions
     ├── storage.py              # Cache checks, saved arrays and publication
     └── distribution.py         # Device meshes and visibility-row partitions
@@ -213,9 +271,9 @@ For in-memory use, `build_gram_matrix`, `build_data_projection` and
 The supplied foreground operator must use the same visibility rows as `T_21`.
 Its coefficient prior must also match the chosen representation: physical prior
 widths for the original basis, or a standard-normal prior when those widths have
-already been absorbed into a reduced operator. Automatic KL construction and
-reduced-prior selection are not part of `run_setup`; that entry point still uses
-the original foreground representation.
+already been absorbed into a reduced operator. The SVD stage above is explicit;
+automatic reduction and reduced-prior selection are not part of `run_setup`,
+which still uses the original foreground representation.
 
 ## Cached Matrix Products
 
