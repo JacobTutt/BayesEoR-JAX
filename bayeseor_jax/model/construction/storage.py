@@ -11,6 +11,30 @@ import numpy as np
 from jax.experimental import multihost_utils
 
 
+def _check_output_path(output_path, *inputs):
+    """Prepare an output path without allowing either write to overwrite an input.
+
+    Parameters
+    ----------
+    output_path : pathlib.Path or str
+        Requested final output file.
+    *inputs : pathlib.Path or str
+        Files that must not be replaced, including other products of this call.
+
+    Returns
+    -------
+    path, temporary : tuple of pathlib.Path
+        Final and temporary paths, with the parent directory created.
+    """
+    path = Path(output_path)
+    temporary = path.with_name(f"{path.stem}.partial{path.suffix}")
+    resolved = {Path(item).resolve() for item in inputs}
+    if path.resolve() in resolved or temporary.resolve() in resolved:
+        raise ValueError("Construction output must not overwrite an input")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path, temporary
+
+
 def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
     r"""Wait for another process's file to become visible on shared storage.
 

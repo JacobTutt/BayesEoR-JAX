@@ -7,7 +7,6 @@ publication. No operator is implicitly built, concatenated or reduced here.
 """
 
 from functools import partial
-from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -16,7 +15,7 @@ from jax.experimental import multihost_utils
 from jax.sharding import Mesh, PartitionSpec as P
 
 from .distribution import padded_visibility_partition
-from .storage import _prepare_memmap_output, _slice_bounds, publish_output, save_array
+from .storage import _check_output_path, _prepare_memmap_output, _slice_bounds, publish_output, save_array
 
 
 def build_gram_matrix(operator, inverse_noise):
@@ -78,17 +77,6 @@ def build_data_power(inverse_noise, data):
         Real scalar noise-weighted squared magnitude of the data.
     """
     return jnp.real(jnp.vdot(data, inverse_noise * data))
-
-
-def _check_output_path(output_path, *inputs):
-    """Reject outputs whose final or temporary file would overwrite an input."""
-    path = Path(output_path)
-    temporary = path.with_name(f"{path.stem}.partial{path.suffix}")
-    resolved = {Path(item).resolve() for item in inputs}
-    if path.resolve() in resolved or temporary.resolve() in resolved:
-        raise ValueError("Likelihood output must not overwrite an input")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path, temporary
 
 
 def _load_inverse_noise(path, n_visibility=None):
