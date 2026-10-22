@@ -8,12 +8,14 @@ from .build_matricies import (
     FourierGeometry,
     ImageGeometry,
     build_fourier_geometry,
-    build_foreground_spectral_basis,
+    build_foreground_spectral_operator,
     build_image_geometry,
     build_nudft_matrix,
-    build_sky_to_visibility_core,
-    build_T_eor_core,
+    build_sky_to_visibility_operator,
+    build_spectral_fourier_operator,
+    build_T_21_core,
     build_T_fg_core,
+    build_transverse_fourier_operator,
 )
 from .analyze import DataContainer
 from .model import (
@@ -93,10 +95,12 @@ __all__ = [
     "ImageGeometry",
     "MaximumAPosteriori",
     "build_fourier_geometry",
-    "build_foreground_spectral_basis",
+    "build_foreground_spectral_operator",
     "build_image_geometry",
     "build_nudft_matrix",
-    "build_sky_to_visibility_core",
-    "build_T_eor_core",
+    "build_sky_to_visibility_operator",
+    "build_spectral_fourier_operator",
+    "build_T_21_core",
     "build_T_fg_core",
+    "build_transverse_fourier_operator",
 ]

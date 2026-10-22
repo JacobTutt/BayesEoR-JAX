@@ -33,9 +33,12 @@ def _minimal_builder(tmp_path):
     builder.fourier_geometry = SimpleNamespace(
         uv=jnp.asarray([[0.5], [0.0]]),
         eta=jnp.asarray([-0.5]),
-        transverse_basis=jnp.asarray([[1.0], [-1.0]]),
-        spectral_basis=jnp.asarray([[-1.0], [1.0]]),
+        du=1.0,
+        dv=1.0,
+        d_eta=1.0,
     )
+    builder.transverse_fourier_operator = jnp.asarray([[1.0], [-1.0]])
+    builder.spectral_fourier_operator = jnp.asarray([[-1.0], [1.0]])
     builder.image_geometry = SimpleNamespace(
         lmn_fg=jnp.asarray(
             [
@@ -53,7 +56,7 @@ def _minimal_builder(tmp_path):
 def test_component_builders_match_concatenated_operator(tmp_path):
     builder = _minimal_builder(tmp_path)
 
-    eor_path = builder.build_T_eor()
+    eor_path = builder.build_T_21()
     foreground_path = builder.build_T_fg()
     joint_path = builder.build_T()
 
@@ -96,13 +99,17 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
 def test_builder_reuses_precomputed_geometries(tmp_path):
     image_geometry = SimpleNamespace(
         az_za_fg=jnp.zeros((1, 2, 1)),
+        lmn_fg=jnp.asarray([[[0.0], [0.0], [1.0]]]),
+        time_ind_center=0,
+        eor_fg_shared_axis=jnp.asarray([True]),
         n_pix_fg=1,
     )
     fourier_geometry = SimpleNamespace(
         uv=jnp.zeros((2, 0)),
         eta=jnp.zeros((0,)),
-        transverse_basis=jnp.zeros((1, 0)),
-        spectral_basis=jnp.zeros((1, 0)),
+        du=1.0,
+        dv=1.0,
+        d_eta=1.0,
     )
 
     builder = BuildMatrices(
@@ -114,6 +121,7 @@ def test_builder_reuses_precomputed_geometries(tmp_path):
         f0_mhz=100.0,
         df_mhz=1.0,
         n_eta=1,
+        d_eta=1.0,
         n_t=1,
         d_t=10.0,
         image_geometry=image_geometry,

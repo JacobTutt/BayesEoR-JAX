@@ -21,9 +21,9 @@ The key EoR grid parameters are:
 - `fov_eor`: circular EoR field of view in degrees.
 
 The EoR model excludes the `eta = 0` mode. Foreground models handle the spectrally smooth component.
-The retained `(u, v, eta)` coordinates and their transverse and spectral
-transform matrices are constructed together by `build_fourier_geometry`, so
-the forward-operator columns and cosmological k-bin assignments share one
+The retained `(u, v, eta)` coordinates are constructed once by
+`build_fourier_geometry`. Both the forward operators and cosmological k-bin
+assignments use this geometry, ensuring that they share one coefficient
 ordering.
 
 ## k Bins

@@ -329,14 +329,12 @@ def run_setup(
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     d_eta = 1.0 / bandwidth_hz
     fourier_geometry = build_fourier_geometry(
-        image_geometry=image_geometry,
         n_u=n_u_eor,
         n_v=n_v_eor,
         n_eta=int(n_eta),
         du=du_eor,
         dv=dv_eor,
         d_eta=d_eta,
-        n_frequency=n_freq,
     )
 
     setup_args_dict = {

@@ -3,10 +3,12 @@ import numpy as np
 
 from bayeseor_jax import (
     Beam_Model,
-    build_T_eor_core,
+    build_T_21_core,
     build_T_fg_core,
-    build_foreground_spectral_basis,
-    build_sky_to_visibility_core,
+    build_foreground_spectral_operator,
+    build_sky_to_visibility_operator,
+    build_spectral_fourier_operator,
+    build_transverse_fourier_operator,
 )
 
 
@@ -15,7 +17,7 @@ def test_sky_to_visibility_matches_explicit_measurement_equation():
     uvw = jnp.asarray([[[1.0], [0.0], [0.0]]])
     beam = jnp.asarray([[[1.0, 0.25]]])
 
-    response = build_sky_to_visibility_core(lmn, uvw, beam, 0.1)
+    response = build_sky_to_visibility_operator(lmn, uvw, beam, 0.1)
 
     expected = 0.1 * np.asarray(
         [[[[1.0, 0.25 * np.exp(2j * np.pi * 0.5)]]]]
@@ -36,7 +38,7 @@ def test_beam_has_zero_gain_at_and_below_horizon():
     np.testing.assert_array_equal(beam, np.asarray([[[1.0, 0.0, 0.0]]]))
 
 
-def test_T_eor_core_is_R_Fprime_Fz():
+def test_T_21_core_is_R_Fprime_Fz():
     response = jnp.asarray(
         [
             [
@@ -45,18 +47,18 @@ def test_T_eor_core_is_R_Fprime_Fz():
             ]
         ]
     )
-    transverse_basis = jnp.asarray([[1.0, 2.0], [3.0, -1.0]])
-    spectral_basis = jnp.asarray([[1.0, 2.0j], [0.5, -1.0j]])
+    transverse_operator = jnp.asarray([[1.0, 2.0], [3.0, -1.0]])
+    spectral_operator = jnp.asarray([[1.0, 2.0j], [0.5, -1.0j]])
 
-    result = build_T_eor_core(response, transverse_basis, spectral_basis)
+    result = build_T_21_core(response, transverse_operator, spectral_operator)
 
     expected_rows = []
     for frequency in range(2):
         spatial = np.asarray(response[0, frequency, 0]) @ np.asarray(
-            transverse_basis
+            transverse_operator
         )
         expected_rows.append(
-            (spatial[:, None] * np.asarray(spectral_basis[frequency])[None, :])
+            (spatial[:, None] * np.asarray(spectral_operator[frequency])[None, :])
             .reshape(-1)
         )
     np.testing.assert_allclose(result, np.asarray(expected_rows))
@@ -64,9 +66,9 @@ def test_T_eor_core_is_R_Fprime_Fz():
 
 def test_T_fg_core_uses_component_major_column_order():
     response = jnp.asarray([[[[2.0, 3.0]]]])
-    spectral_basis = jnp.asarray([[1.0, 10.0, 100.0]])
+    spectral_operator = jnp.asarray([[1.0, 10.0, 100.0]])
 
-    result = build_T_fg_core(response, spectral_basis)
+    result = build_T_fg_core(response, spectral_operator)
 
     np.testing.assert_array_equal(
         result,
@@ -82,10 +84,10 @@ def test_forward_operator_rows_are_time_frequency_baseline_ordered():
     np.testing.assert_array_equal(result[:, 0], np.arange(8))
 
 
-def test_foreground_spectral_basis_matches_physical_model():
+def test_foreground_spectral_operator_matches_physical_model():
     frequencies = jnp.asarray([100.0, 200.0])
 
-    result = build_foreground_spectral_basis(
+    result = build_foreground_spectral_operator(
         frequencies,
         reference_frequency_mhz=100.0,
         spectral_indices=(-2.0, -3.0),
@@ -95,3 +97,33 @@ def test_foreground_spectral_basis_matches_physical_model():
         result,
         np.asarray([[1.0, 1.0, 1.0], [1.0, 0.25, 0.125]]),
     )
+
+
+def test_transverse_fourier_operator_maps_uv_modes_to_image_pixels():
+    uv = jnp.asarray([[0.0, 0.5], [0.0, 0.0]])
+    lm = jnp.asarray([[0.0, 0.5], [0.0, 0.0]])
+
+    result = build_transverse_fourier_operator(uv, lm, uv_cell_area=0.25)
+
+    expected = 0.25 * np.exp(
+        -2j * np.pi * np.asarray([[0.0, 0.0], [0.0, 0.25]])
+    )
+    np.testing.assert_allclose(result, expected)
+
+
+def test_spectral_fourier_operator_preserves_delay_transform_convention():
+    frequency_indices = np.asarray([-1.0, 0.0, 1.0])
+    eta_indices = np.asarray([-1.0, 1.0])
+    d_eta = 0.1
+
+    result = build_spectral_fourier_operator(
+        eta=jnp.asarray(eta_indices * d_eta),
+        frequency_offsets_hz=jnp.asarray(frequency_indices / (3.0 * d_eta)),
+        d_eta=d_eta,
+    )
+
+    expected = (
+        np.exp(-2j * np.pi * np.outer(frequency_indices, eta_indices) / 3.0)
+        * d_eta
+    )
+    np.testing.assert_allclose(result, expected)

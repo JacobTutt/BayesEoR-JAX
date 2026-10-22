@@ -7,20 +7,18 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
-from .dft_funcs import build_nudft_matrix
-from .image_geometry import ImageGeometry
-
 jax.config.update("jax_enable_x64", True)
 
 
 @dataclass(frozen=True)
 class FourierGeometry:
-    """Retained ``(u,v,eta)`` modes and their image/frequency bases."""
+    """Retained coordinates of the cosmological Fourier model."""
 
     uv: jax.Array
     eta: jax.Array
-    transverse_basis: jax.Array
-    spectral_basis: jax.Array
+    du: float
+    dv: float
+    d_eta: float
 
 
 def _build_uv_modes(
@@ -50,47 +48,23 @@ def _build_eta_modes(n_eta: int, d_eta: float) -> jax.Array:
 
 def build_fourier_geometry(
     *,
-    image_geometry: ImageGeometry,
     n_u: int,
     n_v: int,
     n_eta: int,
     du: float,
     dv: float,
     d_eta: float,
-    n_frequency: int,
 ) -> FourierGeometry:
-    """Construct the retained 21-cm modes and separable Fourier bases."""
-    if min(n_u, n_v, n_eta, n_frequency) < 1:
+    """Construct the retained ``(u, v, eta)`` coordinates."""
+    if min(n_u, n_v, n_eta) < 1:
         raise ValueError("Fourier-grid dimensions must all be positive")
     if min(du, dv, d_eta) <= 0:
         raise ValueError("Fourier-grid spacings must all be positive")
 
-    uv = _build_uv_modes(n_u, n_v, du, dv)
-    eta = _build_eta_modes(n_eta, d_eta)
-
-    lm_eor = image_geometry.lmn_fg[
-        image_geometry.time_ind_center,
-        :2,
-    ]
-    lm_eor = lm_eor[:, image_geometry.eor_fg_shared_axis]
-    transverse_basis = build_nudft_matrix(
-        uv,
-        lm_eor,
-        sign=-1,
-    ) * (du * dv)
-
-    frequency_indices = (
-        jnp.arange(n_frequency, dtype=jnp.float64) - n_frequency // 2
-    )
-    frequency_offsets_hz = frequency_indices / (n_frequency * d_eta)
-    spectral_basis = (
-        jnp.exp(-2j * jnp.pi * frequency_offsets_hz[:, None] * eta[None, :])
-        * d_eta
-    ).astype(jnp.complex128)
-
     return FourierGeometry(
-        uv=uv,
-        eta=eta,
-        transverse_basis=transverse_basis,
-        spectral_basis=spectral_basis,
+        uv=_build_uv_modes(n_u, n_v, du, dv),
+        eta=_build_eta_modes(n_eta, d_eta),
+        du=float(du),
+        dv=float(dv),
+        d_eta=float(d_eta),
     )

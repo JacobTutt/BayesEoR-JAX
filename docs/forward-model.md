@@ -28,9 +28,13 @@ T_fg = F^-1 P Q_z
 T    = [T_21  T_fg].
 ```
 
-`build_sky_to_visibility_core` forms the shared beam-weighted fringe response
-`F^-1 P`. `build_T_eor_core` and `build_T_fg_core` then apply the component
-bases. The public `BuildMatrices.build_T_eor`, `build_T_fg`, and `build_T`
+All transformations between Fourier, image, frequency, and visibility spaces
+are defined in `forward_operators.py`; the geometry modules contain only their
+coordinate definitions.
+
+`build_sky_to_visibility_operator` forms the shared beam-weighted fringe
+response `F^-1 P`. `build_T_21_core` and `build_T_fg_core` then apply the
+component operators. The public `BuildMatrices.build_T_21`, `build_T_fg`, and `build_T`
 methods distribute time ranges across JAX processes, construct frequency-row
 blocks on CPU, and write the result directly to a shared NumPy memmap. This
 keeps the exact equation-level model while avoiding a full operator allocation

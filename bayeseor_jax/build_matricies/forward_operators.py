@@ -1,4 +1,4 @@
-"""Equation-level kernels for the interferometric forward model."""
+"""Linear operators connecting the model, image, and visibility spaces."""
 
 from __future__ import annotations
 
@@ -10,7 +10,97 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 
-def build_sky_to_visibility_core(
+def build_nudft_matrix(
+    coords_in: jnp.ndarray,
+    coords_out: jnp.ndarray,
+    sign: int = -1,
+) -> jnp.ndarray:
+    """
+    Construct a NUDFT Operator for Forward or Inverse transforms.
+
+    This function generates a kernel matrix that represents a Non-Uniform
+    Discrete Fourier Transform. It is designed to be bi-directional:
+
+    1. Forward Transform (Sky -> Visibilities):
+       Set sign=-1. Maps spatial coordinates (l, m, n) to baselines (u, v, w).
+
+    2. Inverse Transform (Visibilities -> Sky):
+       Set sign=+1. Maps baselines (u, v, w) to spatial coordinates (l, m, n).
+       Note: For a mathematically exact Inverse DFT, the result may require
+       normalization by (1 / N).
+
+    Parameters
+    ----------
+    coords_in : jnp.ndarray
+        Source coordinates. Shape (N_axes, N_in).
+        e.g., Sky positions (l, m, n) for a forward transform.
+    coords_out : jnp.ndarray
+        Target coordinates. Shape (N_axes, N_out).
+        e.g., Baselines (u, v, w) for a forward transform.
+    sign : int, optional
+        Direction of the Fourier phase wrap. Default is -1.
+        - -1 : Forward (e^-2πiθ)
+        - +1 : Inverse/Reverse (e^+2πiθ)
+
+    Returns
+    -------
+    nudft_matrix : jnp.ndarray
+        A Complex128 matrix of shape (N_out, N_in).
+    """
+    # Shape Normalization
+    # Ensures inputs are (N_axes, N_points).
+    c_in = jnp.atleast_2d(jnp.array(coords_in, dtype=jnp.float64))
+    c_out = jnp.atleast_2d(jnp.array(coords_out, dtype=jnp.float64))
+
+    # Equivalent to the dot product of coordinate vectors for every pair.
+    # (N_out, N_axes) @ (N_axes, N_in) -> (N_out, N_in)
+    phase = jnp.matmul(c_out.T, c_in)
+
+    # Complex Exponentiation
+    # The 'sign' determines the direction of the phase wrap.
+    # 2j * pi * phase converts the geometric distance into a phase angle.
+    return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
+
+
+def build_transverse_fourier_operator(
+    uv: jax.Array,
+    lm: jax.Array,
+    uv_cell_area: float,
+) -> jax.Array:
+    r"""Build :math:`F'`, mapping transverse Fourier modes to image pixels."""
+    if uv_cell_area <= 0:
+        raise ValueError("uv_cell_area must be positive")
+    return build_nudft_matrix(uv, lm, sign=-1) * uv_cell_area
+
+
+def build_spectral_fourier_operator(
+    eta: jax.Array,
+    frequency_offsets_hz: jax.Array,
+    d_eta: float,
+) -> jax.Array:
+    r"""Build :math:`F_z`, mapping line-of-sight modes to frequency."""
+    if d_eta <= 0:
+        raise ValueError("d_eta must be positive")
+    eta = jnp.asarray(eta, dtype=jnp.float64)
+    frequency_offsets_hz = jnp.asarray(
+        frequency_offsets_hz,
+        dtype=jnp.float64,
+    )
+    if eta.ndim != 1:
+        raise ValueError("eta must be one-dimensional")
+    if frequency_offsets_hz.ndim != 1:
+        raise ValueError("frequency_offsets_hz must be one-dimensional")
+    return (
+        build_nudft_matrix(
+            eta[jnp.newaxis, :],
+            frequency_offsets_hz[jnp.newaxis, :],
+            sign=-1,
+        )
+        * d_eta
+    ).astype(jnp.complex128)
+
+
+def build_sky_to_visibility_operator(
     lmn: jax.Array,
     uvw_lambda: jax.Array,
     beam: jax.Array,
@@ -66,15 +156,15 @@ def build_sky_to_visibility_core(
     )
 
 
-def build_T_eor_core(
+def build_T_21_core(
     sky_to_visibility: jax.Array,
-    transverse_basis: jax.Array,
-    spectral_basis: jax.Array,
+    transverse_operator: jax.Array,
+    spectral_operator: jax.Array,
 ) -> jax.Array:
-    r"""Build :math:`T_{\rm EoR}=R F' F_z` for one visibility-row block."""
+    r"""Build :math:`T_{21}=R F' F_z` for one visibility-row block."""
     sky_to_visibility = jnp.asarray(sky_to_visibility)
-    transverse_basis = jnp.asarray(transverse_basis)
-    spectral_basis = jnp.asarray(spectral_basis)
+    transverse_operator = jnp.asarray(transverse_operator)
+    spectral_operator = jnp.asarray(spectral_operator)
 
     if sky_to_visibility.ndim != 4:
         raise ValueError(
@@ -82,34 +172,40 @@ def build_T_eor_core(
             "(n_time, n_frequency, n_baseline, n_pixel)"
         )
     n_time, n_frequency, n_baseline, n_pixel = sky_to_visibility.shape
-    if transverse_basis.ndim != 2 or transverse_basis.shape[0] != n_pixel:
+    if (
+        transverse_operator.ndim != 2
+        or transverse_operator.shape[0] != n_pixel
+    ):
         raise ValueError(
-            "transverse_basis must have shape (n_pixel, n_uv_mode)"
+            "transverse_operator must have shape (n_pixel, n_uv_mode)"
         )
-    if spectral_basis.ndim != 2 or spectral_basis.shape[0] != n_frequency:
+    if (
+        spectral_operator.ndim != 2
+        or spectral_operator.shape[0] != n_frequency
+    ):
         raise ValueError(
-            "spectral_basis must have shape (n_frequency, n_eta_mode)"
+            "spectral_operator must have shape (n_frequency, n_eta_mode)"
         )
 
     transverse_response = jnp.einsum(
         "tfbp,pu->tfbu",
         sky_to_visibility,
-        transverse_basis,
+        transverse_operator,
     )
     operator = jnp.einsum(
         "tfbu,fe->tfbue",
         transverse_response,
-        spectral_basis,
+        spectral_operator,
     )
     return operator.reshape(
         n_time * n_frequency * n_baseline,
-        transverse_basis.shape[1] * spectral_basis.shape[1],
+        transverse_operator.shape[1] * spectral_operator.shape[1],
     )
 
 
 def build_T_fg_core(
     sky_to_visibility: jax.Array,
-    spectral_basis: jax.Array,
+    spectral_operator: jax.Array,
 ) -> jax.Array:
     r"""Build :math:`T_{\rm FG}=R Q_z` for one visibility-row block.
 
@@ -117,7 +213,7 @@ def build_T_fg_core(
     matching ``q = (q_0.T, q_1.T, ...).T`` in the physical model.
     """
     sky_to_visibility = jnp.asarray(sky_to_visibility)
-    spectral_basis = jnp.asarray(spectral_basis)
+    spectral_operator = jnp.asarray(spectral_operator)
 
     if sky_to_visibility.ndim != 4:
         raise ValueError(
@@ -125,24 +221,27 @@ def build_T_fg_core(
             "(n_time, n_frequency, n_baseline, n_pixel)"
         )
     n_time, n_frequency, n_baseline, n_pixel = sky_to_visibility.shape
-    if spectral_basis.ndim != 2 or spectral_basis.shape[0] != n_frequency:
+    if (
+        spectral_operator.ndim != 2
+        or spectral_operator.shape[0] != n_frequency
+    ):
         raise ValueError(
-            "spectral_basis must have shape "
+            "spectral_operator must have shape "
             "(n_frequency, n_spectral_component)"
         )
 
     operator = jnp.einsum(
         "tfbp,fs->tfbsp",
         sky_to_visibility,
-        spectral_basis,
+        spectral_operator,
     )
     return operator.reshape(
         n_time * n_frequency * n_baseline,
-        spectral_basis.shape[1] * n_pixel,
+        spectral_operator.shape[1] * n_pixel,
     )
 
 
-def build_foreground_spectral_basis(
+def build_foreground_spectral_operator(
     frequencies_mhz: jax.Array,
     reference_frequency_mhz: float,
     spectral_indices: Sequence[float] = (-2.63, -2.82),

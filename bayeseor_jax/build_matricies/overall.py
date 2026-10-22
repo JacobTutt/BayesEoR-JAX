@@ -23,11 +23,13 @@ from astropy.constants import c
 from .fourier_geometry import FourierGeometry, build_fourier_geometry
 from .image_geometry import ImageGeometry, build_image_geometry
 from .beam_model import Beam_Model
-from .forward_model import (
-    build_T_eor_core,
+from .forward_operators import (
+    build_T_21_core,
     build_T_fg_core,
-    build_foreground_spectral_basis,
-    build_sky_to_visibility_core,
+    build_foreground_spectral_operator,
+    build_sky_to_visibility_operator,
+    build_spectral_fourier_operator,
+    build_transverse_fourier_operator,
 )
 from .build_utils import (
     _dense_matrix_path as _dense_matrix_path_impl,
@@ -165,14 +167,28 @@ class BuildMatrices:
             d_t=self.d_t,
         )
         self.fourier_geometry = fourier_geometry or build_fourier_geometry(
-            image_geometry=self.image_geometry,
             n_u=n_u_eor,
             n_v=n_v_eor,
             n_eta=n_eta,
             du=du_eor,
             dv=dv_eor,
             d_eta=d_eta,
-            n_frequency=n_freq,
+        )
+        lm_21 = self.image_geometry.lmn_fg[
+            self.image_geometry.time_ind_center,
+            :2,
+        ]
+        lm_21 = lm_21[:, self.image_geometry.eor_fg_shared_axis]
+        self.transverse_fourier_operator = build_transverse_fourier_operator(
+            self.fourier_geometry.uv,
+            lm_21,
+            uv_cell_area=self.fourier_geometry.du * self.fourier_geometry.dv,
+        )
+        frequency_offsets_hz = self.freq_hz - self.freq_hz[n_freq // 2]
+        self.spectral_fourier_operator = build_spectral_fourier_operator(
+            self.fourier_geometry.eta,
+            frequency_offsets_hz,
+            d_eta=self.fourier_geometry.d_eta,
         )
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
@@ -192,9 +208,9 @@ class BuildMatrices:
 
         self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
 
-    def _foreground_spectral_basis(self) -> jnp.ndarray:
-        """Return the image-domain foreground basis ``Q_z``."""
-        return build_foreground_spectral_basis(
+    def _foreground_spectral_operator(self) -> jnp.ndarray:
+        """Return the image-domain foreground operator ``Q_z``."""
+        return build_foreground_spectral_operator(
             self.freq_hz / 1e6,
             self.f0_mhz,
             spectral_indices=tuple(-beta for beta in self.beta_fg),
@@ -205,9 +221,9 @@ class BuildMatrices:
         i_t: int,
         i_f: int,
         component: str,
-        eor_transverse_basis: jnp.ndarray,
-        eor_spectral_basis: jnp.ndarray,
-        foreground_spectral_basis: jnp.ndarray,
+        transverse_fourier_operator: jnp.ndarray,
+        spectral_fourier_operator: jnp.ndarray,
+        foreground_spectral_operator: jnp.ndarray,
     ) -> jnp.ndarray:
         """Build one ``(time, frequency)`` row block on the active device."""
         if component not in {"all", "eor", "foreground"}:
@@ -215,7 +231,7 @@ class BuildMatrices:
                 "component must be one of {'all', 'eor', 'foreground'}"
             )
 
-        response = build_sky_to_visibility_core(
+        response = build_sky_to_visibility_operator(
             np.asarray(self.image_geometry.lmn_fg[i_t : i_t + 1]),
             np.asarray(self.inst_uvw_irad[i_f : i_f + 1]),
             np.asarray(
@@ -230,10 +246,10 @@ class BuildMatrices:
                 ..., self.image_geometry.eor_fg_shared_axis
             ]
             components.append(
-                build_T_eor_core(
+                build_T_21_core(
                     eor_response,
-                    eor_transverse_basis,
-                    eor_spectral_basis[i_f : i_f + 1],
+                    transverse_fourier_operator,
+                    spectral_fourier_operator[i_f : i_f + 1],
                 )
             )
 
@@ -241,7 +257,7 @@ class BuildMatrices:
             components.append(
                 build_T_fg_core(
                     response,
-                    foreground_spectral_basis[i_f : i_f + 1],
+                    foreground_spectral_operator[i_f : i_f + 1],
                 )
             )
 
@@ -298,20 +314,24 @@ class BuildMatrices:
         cpu_device = cpu_devices[0]
         with jax.default_device(cpu_device):
             if component in {"all", "eor"}:
-                eor_transverse_basis = jax.device_put(
-                    np.asarray(self.fourier_geometry.transverse_basis),
+                transverse_fourier_operator = jax.device_put(
+                    np.asarray(self.transverse_fourier_operator),
                     cpu_device,
                 )
-                eor_spectral_basis = jax.device_put(
-                    np.asarray(self.fourier_geometry.spectral_basis),
+                spectral_fourier_operator = jax.device_put(
+                    np.asarray(self.spectral_fourier_operator),
                     cpu_device,
                 )
             else:
-                eor_transverse_basis = jnp.zeros((0, 0), dtype=jnp.complex128)
-                eor_spectral_basis = jnp.zeros((0, 0), dtype=jnp.complex128)
-            foreground_spectral_basis = (
+                transverse_fourier_operator = jnp.zeros(
+                    (0, 0), dtype=jnp.complex128
+                )
+                spectral_fourier_operator = jnp.zeros(
+                    (0, 0), dtype=jnp.complex128
+                )
+            foreground_spectral_operator = (
                 jax.device_put(
-                    np.asarray(self._foreground_spectral_basis()),
+                    np.asarray(self._foreground_spectral_operator()),
                     cpu_device,
                 )
                 if component in {"all", "foreground"}
@@ -339,9 +359,9 @@ class BuildMatrices:
                         i_t,
                         i_f,
                         component,
-                        eor_transverse_basis,
-                        eor_spectral_basis,
-                        foreground_spectral_basis,
+                        transverse_fourier_operator,
+                        spectral_fourier_operator,
+                        foreground_spectral_operator,
                     ).block_until_ready()
                     row_start = (i_t * self.n_freq + i_f) * self.nbls
                     output[row_start : row_start + self.nbls] = np.asarray(
@@ -369,7 +389,7 @@ class BuildMatrices:
             )
         return path
 
-    def build_T_eor(self, *, matrix_name: str = "T_eor") -> Path:
+    def build_T_21(self, *, matrix_name: str = "T_21") -> Path:
         """Build and save :math:`T_{21}=F^{-1}P F'F_z`."""
         return self._build_forward_operator(
             component="eor",
