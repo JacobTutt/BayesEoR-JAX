@@ -7,19 +7,22 @@ from jax.sharding import Mesh
 
 
 def build_solver_mesh() -> Mesh:
-    """
-    Place all visible JAX devices on a single solver mesh axis.
+    r"""Place all visible JAX devices on a single solver mesh axis.
+
+    Returns
+    -------
+    jax.sharding.Mesh
+        Device mesh with axis name ``("x",)``.
+
+    Notes
+    -----
+    Uses the currently available JAX devices; no input arguments.
 
     The returned axis ``x`` is used to distribute rows of the dense
     coefficient-space system across devices for solvers such as ``jaxmg``.
     This defines the device layout only; the caller applies array sharding
     and performs factorisation or solves. Distributed JAX must already be
     initialised to include devices on other hosts.
-
-    Returns
-    -------
-    jax.sharding.Mesh
-        Device mesh with axis name ``("x",)``.
     """
     devices = np.asarray(jax.devices(), dtype=object)
     return Mesh(devices, ("x",))

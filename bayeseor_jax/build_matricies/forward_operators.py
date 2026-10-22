@@ -39,18 +39,6 @@ def build_nudft_matrix(
 ) -> jnp.ndarray:
     r"""Map amplitudes between supplied coordinate sets with a Fourier kernel.
 
-    For input coordinates ``x_i`` and output coordinates ``y_j``, return
-
-    .. math::
-
-        K_{ji} = \exp\!\left(\mathrm{sign}\,2\pi i\,y_j\cdot x_i\right).
-
-    Multiplication by ``K`` maps input amplitudes to the output samples.
-    The coordinate pairs determine the spaces being connected; ``sign``
-    selects the Fourier phase convention. Reversing the sign alone does not
-    construct a matrix inverse for arbitrary non-uniform sampling. The
-    physical operator builders supply their own integration weights.
-
     Parameters
     ----------
     coords_in : jnp.ndarray
@@ -68,6 +56,20 @@ def build_nudft_matrix(
     -------
     nudft_matrix : jnp.ndarray
         A Complex128 matrix of shape (N_out, N_in).
+
+    Notes
+    -----
+    For input coordinates ``x_i`` and output coordinates ``y_j``, return
+
+    .. math::
+
+        K_{ji} = \exp\!\left(\mathrm{sign}\,2\pi i\,y_j\cdot x_i\right).
+
+    Multiplication by ``K`` maps input amplitudes to the output samples.
+    The coordinate pairs determine the spaces being connected; ``sign``
+    selects the Fourier phase convention. Reversing the sign alone does not
+    construct a matrix inverse for arbitrary non-uniform sampling. The
+    physical operator builders supply their own integration weights.
     """
     # Treat one-dimensional coordinates as a single coordinate axis.
     c_in = jnp.atleast_2d(jnp.array(coords_in, dtype=jnp.float64))
@@ -88,13 +90,6 @@ def build_transverse_fourier_operator(
 ) -> jax.Array:
     r"""Map cosmological (u, v) coefficients to brightness at HEALPix pixel centres.
 
-    This transverse Fourier operator is denoted :math:`F'`.
-
-    .. math::
-
-        F'_{pu} = \Delta u\,\Delta v\,
-        \exp[-2\pi i(u_u l_p + v_u m_p)].
-
     Parameters
     ----------
     uv : jax.Array
@@ -113,6 +108,15 @@ def build_transverse_fourier_operator(
         Complex matrix of shape ``(n_pixel, n_uv_mode)``. Applied alongside
         ``F_z`` in ``build_T_21_core``; drift-scan time dependence enters the
         separate sky-to-visibility operator.
+
+    Notes
+    -----
+    This transverse Fourier operator is denoted :math:`F'`.
+
+    .. math::
+
+        F'_{pu} = \Delta u\,\Delta v\,
+        \exp[-2\pi i(u_u l_p + v_u m_p)].
     """
     if uv_cell_area <= 0:
         raise ValueError("uv_cell_area must be positive")
@@ -125,13 +129,6 @@ def build_spectral_fourier_operator(
     d_eta: float,
 ) -> jax.Array:
     r"""Map cosmological eta coefficients to brightness at observing frequencies.
-
-    This line-of-sight Fourier operator is denoted :math:`F_z`.
-
-    .. math::
-
-        (F_z)_{fe} = \Delta\eta\,
-        \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
 
     Parameters
     ----------
@@ -149,6 +146,15 @@ def build_spectral_fourier_operator(
     jax.Array
         Complex matrix of shape ``(n_frequency, n_eta_mode)``. The same
         spectral mapping applies to every transverse cosmological mode.
+
+    Notes
+    -----
+    This line-of-sight Fourier operator is denoted :math:`F_z`.
+
+    .. math::
+
+        (F_z)_{fe} = \Delta\eta\,
+        \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
     """
     if d_eta <= 0:
         raise ValueError("d_eta must be positive")
@@ -179,6 +185,35 @@ def build_sky_to_visibility_operator(
 ) -> jax.Array:
     r"""Map individual HEALPix pixel brightnesses to measured visibilities.
 
+    Parameters
+    ----------
+    lmn : jax.Array
+        Topocentric sky coordinates with shape ``(n_time, 3, n_pixel)``.
+        Pixel identities remain fixed on the celestial sky while their
+        topocentric direction cosines change with observing time.
+    uvw_lambda : jax.Array
+        Baselines in observing wavelengths with shape
+        ``(n_frequency, 3, n_baseline)``. BayesEoR follows the PyUVData
+        ``ant2 - ant1`` baseline convention, hence the positive phase used
+        below is equivalent to a negative phase with the opposite
+        ``ant1 - ant2`` baseline convention.
+        Baselines are fixed in the instrument frame; sky rotation is already
+        represented by ``lmn``.
+    beam : jax.Array
+        Horizon-limited primary-beam power response with shape
+        ``(n_time, n_frequency, n_pixel)``. Pixels at or below the horizon
+        must already have zero gain.
+    pixel_area_sr : float
+        Solid angle of one equal-area sky pixel in steradians.
+
+    Returns
+    -------
+    jax.Array
+        Beam-weighted sky-to-visibility response with shape
+        ``(n_time, n_frequency, n_baseline, n_pixel)``.
+
+    Notes
+    -----
     At each observing time, propagate the pixels' topocentric (l, m, n)
     directions through the full three-dimensional discrete Fourier response,
     including primary-beam weighting and pixel solid angle. The combined
@@ -193,33 +228,6 @@ def build_sky_to_visibility_operator(
     visibility. Both sky components use this response, restricted to their
     respective pixel selections. ``F^{-1}`` denotes the sky-to-visibility
     Fourier operator; it does not imply a numerical matrix inversion here.
-
-    Parameters
-    ----------
-    lmn
-        Topocentric sky coordinates with shape ``(n_time, 3, n_pixel)``.
-        Pixel identities remain fixed on the celestial sky while their
-        topocentric direction cosines change with observing time.
-    uvw_lambda
-        Baselines in observing wavelengths with shape
-        ``(n_frequency, 3, n_baseline)``. BayesEoR follows the PyUVData
-        ``ant2 - ant1`` baseline convention, hence the positive phase used
-        below is equivalent to a negative phase with the opposite
-        ``ant1 - ant2`` baseline convention.
-        Baselines are fixed in the instrument frame; sky rotation is already
-        represented by ``lmn``.
-    beam
-        Horizon-limited primary-beam power response with shape
-        ``(n_time, n_frequency, n_pixel)``. Pixels at or below the horizon
-        must already have zero gain.
-    pixel_area_sr
-        Solid angle of one equal-area sky pixel in steradians.
-
-    Returns
-    -------
-    jax.Array
-        Beam-weighted sky-to-visibility response with shape
-        ``(n_time, n_frequency, n_baseline, n_pixel)``.
     """
     lmn = jnp.asarray(lmn, dtype=jnp.float64)
     uvw_lambda = jnp.asarray(uvw_lambda, dtype=jnp.float64)
@@ -254,15 +262,6 @@ def build_T_21_core(
 ) -> jax.Array:
     r"""Map cosmological (u, v, eta) amplitudes to a block of visibilities.
 
-    Reconstruct their brightness on the cosmological HEALPix selection and
-    propagate it through the beam-weighted three-dimensional fringe response,
-    implementing :math:`T_{21}=R F' F_z`.
-
-    .. math::
-
-        (T_{21})_{(tfb),(ue)} =
-        \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
-
     Parameters
     ----------
     sky_to_visibility : jax.Array
@@ -285,6 +284,15 @@ def build_T_21_core(
 
     Notes
     -----
+    Reconstruct their brightness on the cosmological HEALPix selection and
+    propagate it through the beam-weighted three-dimensional fringe response,
+    implementing :math:`T_{21}=R F' F_z`.
+
+    .. math::
+
+        (T_{21})_{(tfb),(ue)} =
+        \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
+
     ``core`` denotes the equation-level calculation for supplied arrays.
     ``BuildMatrices.build_T_21`` handles distributed construction and saving.
     All integration weights are already included in the input operators.
@@ -338,18 +346,6 @@ def build_T_fg_core(
 ) -> jax.Array:
     r"""Map spectral foreground amplitudes at each HEALPix pixel to visibilities.
 
-    Evaluate each pixel's brightness at the observing frequencies and apply
-    the beam-weighted three-dimensional fringe response, implementing
-    :math:`T_{\rm FG}=R Q_z`.
-
-    .. math::
-
-        (T_{\rm FG})_{(tfb),(sp)} = R_{tfbp} Q_{fs}.
-
-    Each foreground coefficient belongs to one image pixel and one spectral
-    component. ``Q`` supplies the spectral dependence at every pixel;
-    ``R`` propagates the resulting brightness through the instrument.
-
     Parameters
     ----------
     sky_to_visibility : jax.Array
@@ -370,6 +366,18 @@ def build_T_fg_core(
 
     Notes
     -----
+    Evaluate each pixel's brightness at the observing frequencies and apply
+    the beam-weighted three-dimensional fringe response, implementing
+    :math:`T_{\rm FG}=R Q_z`.
+
+    .. math::
+
+        (T_{\rm FG})_{(tfb),(sp)} = R_{tfbp} Q_{fs}.
+
+    Each foreground coefficient belongs to one image pixel and one spectral
+    component. ``Q`` supplies the spectral dependence at every pixel;
+    ``R`` propagates the resulting brightness through the instrument.
+
     ``BuildMatrices.build_T_fg`` distributes and saves blocks from this core.
     The pixel identity in ``Q_z`` is applied implicitly, so no dense
     Kronecker product or additional pixel-area factor is needed.
@@ -410,14 +418,6 @@ def build_foreground_spectral_operator(
 ) -> jax.Array:
     r"""Map a pixel's foreground amplitudes to its brightness spectrum.
 
-    These constant and power-law factors define the spectral part of
-    :math:`Q_z`, shared by every foreground HEALPix pixel.
-
-    .. math::
-
-        Q_{f0}=1,\qquad Q_{fs}=(\nu_f/\nu_0)^{\beta_s}\ (s>0),
-        \qquad s_p(\nu_f)=\sum_s Q_{fs}q_{s,p}.
-
     Parameters
     ----------
     frequencies_mhz : jax.Array
@@ -438,6 +438,16 @@ def build_foreground_spectral_operator(
         ``(n_frequency, 1 + len(spectral_indices))``. It contains only the
         spectral factors; ``build_T_fg_core`` applies them independently to
         each image pixel to implement the full ``Q_z`` mapping.
+
+    Notes
+    -----
+    These constant and power-law factors define the spectral part of
+    :math:`Q_z`, shared by every foreground HEALPix pixel.
+
+    .. math::
+
+        Q_{f0}=1,\qquad Q_{fs}=(\nu_f/\nu_0)^{\beta_s}\ (s>0),
+        \qquad s_p(\nu_f)=\sum_s Q_{fs}q_{s,p}.
     """
     frequencies_mhz = jnp.asarray(frequencies_mhz, dtype=jnp.float64)
     if frequencies_mhz.ndim != 1:

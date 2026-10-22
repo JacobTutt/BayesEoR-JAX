@@ -23,13 +23,7 @@ from pathlib import Path
 
 
 class Beam_Model:
-    """
-    Supply the beam weights multiplying image-domain sky brightness.
-
-    Analytic profiles or an interpolated UVBeam power model are evaluated at
-    each pixel's topocentric direction and observing frequency. ``get_beam_vals``
-    returns the diagonal entries of the primary-beam operator; it does not
-    allocate a dense diagonal matrix.
+    r"""Supply the beam weights multiplying image-domain sky brightness.
 
     Parameters
     ----------
@@ -59,6 +53,13 @@ class Beam_Model:
     freq_interp_kind : str, optional
         Frequency interpolation kind from scipy.interpolate.interp1d. 
         Defaults to 'cubic'.
+
+    Notes
+    -----
+    Analytic profiles or an interpolated UVBeam power model are evaluated at
+    each pixel's topocentric direction and observing frequency. ``get_beam_vals``
+    returns the diagonal entries of the primary-beam operator; it does not
+    allocate a dense diagonal matrix.
     """
     def __init__(
         self,
@@ -72,8 +73,39 @@ class Beam_Model:
         pol: str = "xx",
         freq_interp_kind: str = "cubic",
     ) -> None:
-        """Configure an analytic profile or load the selected UVBeam polarisation.
+        r"""Configure an analytic profile or load the selected UVBeam polarisation.
 
+        Parameters
+        ----------
+        beam_type : str or None
+            Analytic beam name or beamfits file path. None selects a uniform beam.
+        peak_amp : float
+            Peak power gain for Gaussian-based beam profiles; defaults to 1.
+        fwhm_deg : float or None
+            Configured beam full width at half maximum in degrees, when used instead
+            of an aperture-derived width.
+        diam : float or None
+            Physical or effective aperture diameter in metres for Airy or Gaussian
+            beam profiles.
+        cosfreq : float or None
+            Angular modulation frequency in inverse radians for the gausscosine
+            profile.
+        tanh_freq : float or None
+            Angular taper rate in inverse radians for the tanhairy profile.
+        tanh_sl_red : float or None
+            Fractional far-off-axis power suppression for the tanhairy profile.
+        pol : str
+            Polarisation selected from a file-backed beam, for example xx or pI.
+        freq_interp_kind : str
+            Frequency interpolation method used by UVBeam; defaults to cubic.
+
+        Returns
+        -------
+        None
+            Initialises the instance without returning a value.
+
+        Notes
+        -----
         Pixel gains are evaluated later by ``get_beam_vals``. File-backed
         electric-field beams are converted to the requested power or
         pseudo-Stokes response before interpolation.
@@ -128,13 +160,7 @@ class Beam_Model:
         self.uvb = None
 
     def get_beam_vals(self, coords: jnp.ndarray, freqs: jnp.ndarray) -> jnp.ndarray:
-        """
-        Weight each HEALPix sky direction by the beam at every frequency.
-
-        For each integration, use the pixel's azimuth and zenith angle to
-        evaluate ``P(nu, t, p)``. Set the response to zero where the zenith
-        angle is at least pi/2, including pixels that cross the horizon
-        during the observation.
+        r"""Weight each HEALPix sky direction by the beam at every frequency.
 
         Parameters
         ----------
@@ -149,6 +175,13 @@ class Beam_Model:
             Dimensionless power response, shape ``(n_freq, n_t, n_pix)``.
             The forward-operator builder reorders the first two axes before
             multiplying these gains by the fringe response.
+
+        Notes
+        -----
+        For each integration, use the pixel's azimuth and zenith angle to
+        evaluate ``P(nu, t, p)``. Set the response to zero where the zenith
+        angle is at least pi/2, including pixels that cross the horizon
+        during the observation.
         """
         az = coords[:, 0, :]  # (n_t, n_pix)
         za = coords[:, 1, :]  # (n_t, n_pix)
@@ -208,8 +241,25 @@ class Beam_Model:
         return jnp.where(za[jnp.newaxis, :, :] < jnp.pi / 2, beam_vals, 0.0)
 
     def _get_uvbeam_vals_vectorized(self, az, za, freqs):
-        """Interpolate a loaded beam along the pixel tracks through the sky.
+        r"""Interpolate a loaded beam along the pixel tracks through the sky.
 
+        Parameters
+        ----------
+        az : array-like
+            Azimuths in radians, shape (n_time, n_pixel).
+        za : array-like
+            Zenith angles in radians, shape (n_time, n_pixel).
+        freqs : array-like
+            Observing frequencies in Hz, shape (n_frequency,).
+
+        Returns
+        -------
+        beam : jax.Array
+            Interpolated power response, shape (n_frequency, n_time, n_pixel),
+            before horizon masking.
+
+        Notes
+        -----
         ``az`` and ``za`` have shape ``(n_time, n_pixel)`` in radians;
         ``freqs`` is a one-dimensional Hz array. UVBeam interpolation runs
         once per integration on the host. Return the real selected power
@@ -239,11 +289,7 @@ class Beam_Model:
         return jnp.asarray(out)
 
     def _gaussian_za(self, za, sigma, amp):
-        """
-        Evaluate the Gaussian power response at each pixel's zenith angle.
-
-        The profile is ``amp * exp(-za**2 / (2*sigma**2))``. Broadcasting
-        allows a frequency-dependent width to weight all pixel tracks.
+        r"""Evaluate the Gaussian power response at each pixel's zenith angle.
 
         Parameters
         ----------
@@ -259,16 +305,16 @@ class Beam_Model:
         beam_vals : jax.Array
             Dimensionless power gains at the supplied zenith angles.
 
+        Notes
+        -----
+        The profile is ``amp * exp(-za**2 / (2*sigma**2))``. Broadcasting
+        allows a frequency-dependent width to weight all pixel tracks.
         """
         # za: (n_t, n_pix), sigma: (n_freq, 1, 1) or float
         return amp * jnp.exp(-za ** 2 / (2 * sigma ** 2))
 
     def _gausscosine(self, za, sigma, amp, cosfreq):
-        """
-        Modulate the Gaussian power response with angular cosine-squared structure.
-
-        Multiply the Gaussian by ``cos(pi * za * cosfreq)**2`` to introduce
-        radial structure in the beam weights applied to image pixels.
+        r"""Modulate the Gaussian power response with angular cosine-squared structure.
 
         Parameters
         ----------
@@ -286,33 +332,37 @@ class Beam_Model:
         beam_vals : jax.Array
             Dimensionless modulated power gains at the supplied zenith angles.
 
+        Notes
+        -----
+        Multiply the Gaussian by ``cos(pi * za * cosfreq)**2`` to introduce
+        radial structure in the beam weights applied to image pixels.
         """
         beam_vals = amp * jnp.exp(-za ** 2 / (2 * sigma ** 2))
         beam_vals *= jnp.cos(2 * jnp.pi * za * cosfreq / 2) ** 2
         return beam_vals
 
     def _fwhm_to_stddev(self, fwhm):
-        """
-        Convert a Gaussian beam FWHM to its angular standard deviation.
-
-        Uses ``sigma = fwhm / 2.355``. Input and output have the same angular
-        units; callers using degrees convert the result to radians.
+        r"""Convert a Gaussian beam FWHM to its angular standard deviation.
 
         Parameters
         ----------
         fwhm : float
             Full width half maximum in degrees.
 
+        Returns
+        -------
+        sigma : float or array-like
+            Gaussian angular standard deviation, in the same units as fwhm.
+
+        Notes
+        -----
+        Uses ``sigma = fwhm / 2.355``. Input and output have the same angular
+        units; callers using degrees convert the result to radians.
         """
         return fwhm / 2.355
 
     def _airy_disk(self, za, diam, freq):
-        """
-        Evaluate the Airy power response of a circular aperture along pixel directions.
-
-        With ``x = pi * diam * freq * sin(za) / c``, the response is
-        ``[2 J1(x) / x]**2``, taking its unit limit at zenith. Frequency
-        dependence changes the angular beam width and sidelobe positions.
+        r"""Evaluate the Airy power response of a circular aperture along pixel directions.
 
         Parameters
         ----------
@@ -328,6 +378,11 @@ class Beam_Model:
         beam_vals : jax.Array
             Dimensionless power gains, broadcast over frequency, time, and pixel.
 
+        Notes
+        -----
+        With ``x = pi * diam * freq * sin(za) / c``, the response is
+        ``[2 J1(x) / x]**2``, taking its unit limit at zenith. Frequency
+        dependence changes the angular beam width and sidelobe positions.
         """
         # za: (n_t, n_pix), freq: (n_freq, 1, 1) -> xvals: (n_freq, n_t, n_pix)
         xvals = (diam / 2.0) * jnp.sin(za) * (2.0 * jnp.pi * freq / self.c_ms)
@@ -341,11 +396,7 @@ class Beam_Model:
         return beam_vals ** 2
 
     def _tanh_taper(self, za, tanh_freq, tanh_sl_red):
-        """
-        Suppress the off-axis Airy power response with a smooth angular taper.
-
-        Return ``1 - tanh_sl_red * tanh(tanh_freq * za)``, which approaches
-        ``1 - tanh_sl_red`` far from zenith and equals one at zenith.
+        r"""Suppress the off-axis Airy power response with a smooth angular taper.
 
         Parameters
         ----------
@@ -356,21 +407,22 @@ class Beam_Model:
         tanh_sl_red : float, optional
             Fractional suppression at large zenith angle. For example,
             0.99 leaves a limiting multiplicative power factor of 0.01.
-        
+
         Returns
         -------
         taper_vals : jax.Array
             Array of tanh taper amplitudes for each zenith angle in `za`.
+
+        Notes
+        -----
+        Return ``1 - tanh_sl_red * tanh(tanh_freq * za)``, which approaches
+        ``1 - tanh_sl_red`` far from zenith and equals one at zenith.
         """
 
         return 1 - tanh_sl_red * jnp.tanh(tanh_freq * za)
 
     def _fwhm_to_diam(self, fwhm, freq):
-        """
-        Convert an angular main-lobe width to an effective circular-aperture diameter.
-
-        The resulting diameter supplies the Airy response when a beam width
-        is configured instead of a physical dish diameter.
+        r"""Convert an angular main-lobe width to an effective circular-aperture diameter.
 
         Parameters
         ----------
@@ -388,6 +440,9 @@ class Beam_Model:
 
         Notes
         -----
+        The resulting diameter supplies the Airy response when a beam width
+        is configured instead of a physical dish diameter.
+
         * Modified from `pyuvsim.analyticbeam.diameter_to_sigma`
           (https://github.com/RadioAstronomySoftwareGroup/pyuvsim).
         """
@@ -396,12 +451,7 @@ class Beam_Model:
         return 2.2150894 * wavelength / (jnp.pi * jnp.sin(fwhm_rad / jnp.sqrt(2)))
 
     def _diam_to_stddev(self, diam, freq):
-        """
-        Approximate the Airy main lobe by a Gaussian angular width.
-
-        Convert aperture diameter and wavelength to a Gaussian standard
-        deviation used to evaluate a chromatic Gaussian beam or estimate
-        its transverse Fourier support.
+        r"""Approximate the Airy main lobe by a Gaussian angular width.
 
         Parameters
         ----------
@@ -418,6 +468,10 @@ class Beam_Model:
 
         Notes
         -----
+        Convert aperture diameter and wavelength to a Gaussian standard
+        deviation used to evaluate a chromatic Gaussian beam or estimate
+        its transverse Fourier support.
+
         * Copied from `pyuvsim.analyticbeam.diameter_to_sigma`
           (https://github.com/RadioAstronomySoftwareGroup/pyuvsim).
         """
@@ -430,14 +484,7 @@ class Beam_Model:
         freqs_hz: np.ndarray,
         gaussian_nsigma: float = 5.0,
     ) -> float:
-        """
-        Estimate the transverse Fourier extent added by primary-beam weighting.
-
-        This quantity supplies the buffer around measured baselines when
-        choosing the cosmological uv grid. Airy-like beams contribute an
-        aperture width equal to the effective dish diameter in wavelengths,
-        while Gaussian-like beams contribute ``Nsigma / (2πσ)`` using the
-        broadest angular width at the lowest observing frequency.
+        r"""Estimate the transverse Fourier extent added by primary-beam weighting.
 
         Parameters
         ----------
@@ -453,6 +500,14 @@ class Beam_Model:
             Approximate beam-support width in uv units. Returns ``0.0`` for
             uniform beams and UVBeam file inputs, where no simple analytic
             aperture-width estimate is available.
+
+        Notes
+        -----
+        This quantity supplies the buffer around measured baselines when
+        choosing the cosmological uv grid. Airy-like beams contribute an
+        aperture width equal to the effective dish diameter in wavelengths,
+        while Gaussian-like beams contribute ``Nsigma / (2πσ)`` using the
+        broadest angular width at the lowest observing frequency.
         """
         freqs_hz = np.asarray(freqs_hz, dtype=float).reshape(-1)
         if freqs_hz.size == 0:

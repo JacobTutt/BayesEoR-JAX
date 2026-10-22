@@ -30,8 +30,38 @@ HERA_LOCATION = (
 
 @dataclass(frozen=True)
 class ImageGeometry:
-    """Coordinates of the HEALPix pixels used to represent sky brightness.
+    r"""Coordinates of the HEALPix pixels used to represent sky brightness.
 
+    Parameters
+    ----------
+    time_ind_center : int
+        Index of the reference integration within the observing-time axis.
+    eor_fg_shared_axis : jax.Array
+        Boolean mask of shape (n_pix_fg,) selecting cosmological pixels from the
+        foreground pixel axis.
+    n_pix_fg : int
+        Number of selected foreground HEALPix pixels.
+    pixel_area_sr : float
+        Solid angle of one HEALPix pixel in steradians.
+    lmn_fg : jax.Array
+        East, north, and zenith direction cosines, shape (n_time, 3, n_pix_fg).
+    az_za_fg : jax.Array
+        Azimuth and zenith angle in radians, shape (n_time, 2, n_pix_fg).
+    fov_l_angle_eor : float
+        Pixel-padded cosmological angular extent along the local l chart in
+        radians.
+    fov_m_angle_eor : float
+        Pixel-padded cosmological angular extent along the local m chart in
+        radians.
+    fov_l_angle_fg : float
+        Pixel-padded foreground angular extent along the local l chart in
+        radians.
+    fov_m_angle_fg : float
+        Pixel-padded foreground angular extent along the local m chart in
+        radians.
+
+    Notes
+    -----
     ``lmn_fg`` has shape ``(n_time, 3, n_pix_fg)`` with east, north, and
     zenith direction cosines. ``az_za_fg`` has shape
     ``(n_time, 2, n_pix_fg)`` and contains azimuth and zenith angle in radians.
@@ -61,8 +91,26 @@ def _construct_time_array(
     n_t: int,
     d_t: float,
 ) -> tuple[np.ndarray, int]:
-    """Place integration centres around a reference Julian date in UTC.
+    r"""Place integration centres around a reference Julian date in UTC.
 
+    Parameters
+    ----------
+    jd_center : float
+        Reference integration time as a UTC Julian date.
+    n_t : int
+        Number of observing-time samples.
+    d_t : float
+        Separation of integration centres in seconds.
+
+    Returns
+    -------
+    times_jd : numpy.ndarray
+        UTC Julian dates of the integration centres, shape (n_t,).
+    reference_index : int
+        Index n_t // 2 corresponding to jd_center.
+
+    Notes
+    -----
     Return ``(times_jd, reference_index)`` for ``n_t`` integrations spaced
     by ``d_t`` seconds. The reference date is at index ``n_t // 2``; for an
     even count there is one more integration before it than after it.
@@ -79,8 +127,25 @@ def _observation_field_center(
     jd: float,
     telescope_location: EarthLocation,
 ) -> tuple[float, float]:
-    """Locate the zenith-pointing field on the celestial sky at one time.
+    r"""Locate the zenith-pointing field on the celestial sky at one time.
 
+    Parameters
+    ----------
+    jd : float
+        UTC Julian date at which to locate the zenith field.
+    telescope_location : astropy.coordinates.EarthLocation
+        Geodetic telescope location used for the ICRS-to-topocentric
+        transformation.
+
+    Returns
+    -------
+    ra_deg : float
+        ICRS right ascension of zenith in degrees.
+    dec_deg : float
+        ICRS declination of zenith in degrees.
+
+    Notes
+    -----
     Transform zenith at the supplied EarthLocation and UTC Julian date to
     ICRS, returning ``(right_ascension, declination)`` in degrees. Repeating
     this over the observation defines the path of the drift-scan field.
@@ -102,8 +167,30 @@ def _query_disc_union(
     sky_mask_time_mode: str,
     time_ind_center: int,
 ) -> np.ndarray:
-    """Find HEALPix pixel centres inside the observed spherical field.
+    r"""Find HEALPix pixel centres inside the observed spherical field.
 
+    Parameters
+    ----------
+    field_centers : sequence of tuple of float
+        ICRS (right ascension, declination) pairs in degrees, one per
+        integration.
+    radius_rad : float
+        Angular radius of the spherical selection in radians.
+    nside : int
+        HEALPix resolution of the equal-area celestial pixel grid.
+    sky_mask_time_mode : str
+        Pixel selection: 'union' across integrations or 'center' at the
+        reference time.
+    time_ind_center : int
+        Index of the reference integration within the observing-time axis.
+
+    Returns
+    -------
+    pixel_indices : numpy.ndarray
+        Sorted unique HEALPix RING indices, shape (n_selected_pixel,).
+
+    Notes
+    -----
     ``field_centers`` contains ICRS (RA, Dec) pairs in degrees and
     ``radius_rad`` is the angular field radius. Return sorted, unique RING
     pixel indices at resolution ``nside``. The ``union`` selection includes
@@ -147,8 +234,38 @@ def _select_image_pixels(
     sky_mask_time_mode: str,
     time_ind_center: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Select the sky pixels covered by the two model fields of view.
+    r"""Select the sky pixels covered by the two model fields of view.
 
+    Parameters
+    ----------
+    field_centers : sequence of tuple of float
+        ICRS (right ascension, declination) pairs in degrees, one per
+        integration.
+    fov_eor : float
+        Full angular diameter of the cosmological model field in degrees.
+    fov_fg : float or None
+        Full angular diameter of the foreground model field in degrees; None
+        uses fov_eor.
+    nside : int
+        HEALPix resolution of the equal-area celestial pixel grid.
+    sky_mask_time_mode : str
+        Pixel selection: 'union' across integrations or 'center' at the
+        reference time.
+    time_ind_center : int
+        Index of the reference integration within the observing-time axis.
+
+    Returns
+    -------
+    pixel_indices_21 : jax.Array
+        Cosmological HEALPix RING indices, shape (n_pixel_21,).
+    pixel_indices_fg : jax.Array
+        Foreground HEALPix RING indices, shape (n_pixel_fg,).
+    shared_mask : jax.Array
+        Boolean selection of cosmological pixels within the foreground axis,
+        shape (n_pixel_fg,).
+
+    Notes
+    -----
     Interpret ``fov_eor`` and ``fov_fg`` as full angular diameters in degrees.
     Return the cosmological indices, foreground indices, and a Boolean mask
     locating cosmological pixels within the foreground array. The shared
@@ -190,6 +307,27 @@ def _topocentric_coordinates(
 ) -> tuple[jax.Array, jax.Array]:
     r"""Rotate fixed celestial HEALPix directions into the instrument frame.
 
+    Parameters
+    ----------
+    times_jd : numpy.ndarray
+        UTC Julian dates, shape (n_time,), at which to evaluate sky directions.
+    pix_indices_fg : jax.Array
+        Selected foreground HEALPix RING indices, shape (n_pixel,).
+    nside : int
+        HEALPix resolution of the equal-area celestial pixel grid.
+    telescope_location : astropy.coordinates.EarthLocation
+        Geodetic telescope location used for the ICRS-to-topocentric
+        transformation.
+
+    Returns
+    -------
+    lmn : jax.Array
+        East, north, and zenith direction cosines, shape (n_time, 3, n_pixel).
+    az_za : jax.Array
+        Azimuth and zenith angle in radians, shape (n_time, 2, n_pixel).
+
+    Notes
+    -----
     At each UTC Julian date, transform the selected ICRS pixel centres to
     azimuth and zenith angle at the telescope location, then evaluate
 
@@ -238,8 +376,24 @@ def _angular_lm_extent(
     lmn_coords: jax.Array,
     pixel_area_sr: float,
 ) -> tuple[float, float]:
-    """Measure the angular extent of a pixel selection in a local sky chart.
+    r"""Measure the angular extent of a pixel selection in a local sky chart.
 
+    Parameters
+    ----------
+    lmn_coords : array-like
+        Topocentric direction cosines, shape (3, n_pixel) or its transpose.
+    pixel_area_sr : float
+        Solid angle of one HEALPix pixel in steradians.
+
+    Returns
+    -------
+    l_extent : float
+        Pixel-padded width of atan2(l, n), in radians.
+    m_extent : float
+        Pixel-padded width of atan2(m, n), in radians.
+
+    Notes
+    -----
     Use the ranges of ``atan2(l, n)`` and ``atan2(m, n)``, adding
     ``sqrt(pixel_area_sr)`` to account approximately for pixel width.
     Return two widths in radians. Their reciprocals set the default
@@ -277,12 +431,7 @@ def build_image_geometry(
     n_t: int = 1,
     d_t: float = 60.0,
 ) -> ImageGeometry:
-    """Construct the spherical sky coordinates used by both forward models.
-
-    Select HEALPix pixels within the zenith drift-scan fields, follow their
-    topocentric directions at every integration, and measure their angular
-    extents at the reference time. Return an ``ImageGeometry`` for beam
-    evaluation and the mapping from image brightness to visibilities.
+    r"""Construct the spherical sky coordinates used by both forward models.
 
     Parameters
     ----------
@@ -309,6 +458,13 @@ def build_image_geometry(
     ImageGeometry
         Fixed pixel selections represented by their time-dependent directions,
         shared cosmological-pixel mask, solid angle, and reference-time extents.
+
+    Notes
+    -----
+    Select HEALPix pixels within the zenith drift-scan fields, follow their
+    topocentric directions at every integration, and measure their angular
+    extents at the reference time. Return an ``ImageGeometry`` for beam
+    evaluation and the mapping from image brightness to visibilities.
     """
     fov_fg = fov_eor if fov_fg is None else fov_fg
     sky_mask_time_mode = str(sky_mask_time_mode).lower()

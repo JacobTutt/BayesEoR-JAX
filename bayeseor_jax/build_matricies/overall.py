@@ -46,8 +46,103 @@ from .build_utils import (
 
 
 class BuildMatrices:
-    """Coordinate construction of the cosmological and foreground visibility models.
+    r"""Coordinate construction of the cosmological and foreground visibility models.
 
+    Parameters
+    ----------
+    n_u_eor : int
+        Number of cosmological u modes before monopole exclusion.
+    du_eor : float
+        Cosmological u spacing in inverse radians.
+    n_v_eor : int
+        Number of cosmological v modes before monopole exclusion.
+    dv_eor : float
+        Cosmological v spacing in inverse radians.
+    beta_fg : float or sequence of float
+        Positive foreground spectral-index magnitudes; a constant component is
+        included separately.
+    n_freq : int
+        Number of observing-frequency channels.
+    f0_mhz : float
+        First observing frequency and foreground reference frequency in MHz.
+    df_mhz : float
+        Separation of frequency channels in MHz.
+    n_eta : int
+        Number of line-of-sight Fourier modes before excluding eta=0.
+    d_eta : float
+        Positive eta spacing and integration weight in inverse Hz (seconds).
+    sky_mask_time_mode : str
+        Pixel selection: 'union' across integrations or 'center' at the
+        reference time.
+    telescope_latlonalt : tuple of float
+        Geodetic latitude and longitude in degrees, followed by altitude in
+        metres.
+    jd_center : float
+        Reference integration time as a UTC Julian date.
+    nside : int
+        HEALPix resolution of the equal-area celestial pixel grid.
+    fov_eor : float
+        Full angular diameter of the cosmological model field in degrees.
+    fov_fg : float or None
+        Full angular diameter of the foreground model field in degrees; None
+        uses fov_eor.
+    n_t : int
+        Number of observing-time samples.
+    d_t : float
+        Separation of integration centres in seconds.
+    image_geometry : ImageGeometry or None
+        Precomputed pixel directions and selections to reuse; None constructs
+        them from the field and observing settings.
+    fourier_geometry : FourierGeometry or None
+        Precomputed (u, v, eta) coordinates and spacings to reuse; None
+        constructs them from the grid settings.
+    beam_type : str or None
+        Analytic beam name or beamfits file path. None selects a uniform beam.
+    peak_amp : float
+        Peak power gain for Gaussian-based beam profiles; defaults to 1.
+    fwhm_deg : float or None
+        Configured beam full width at half maximum in degrees, when used instead
+        of an aperture-derived width.
+    diam : float or None
+        Physical or effective aperture diameter in metres for Airy or Gaussian
+        beam profiles.
+    cosfreq : float or None
+        Angular modulation frequency in inverse radians for the gausscosine
+        profile.
+    tanh_freq : float or None
+        Angular taper rate in inverse radians for the tanhairy profile.
+    tanh_sl_red : float or None
+        Fractional far-off-axis power suppression for the tanhairy profile.
+    pol : str
+        Polarisation selected from a file-backed beam, for example xx or pI.
+    freq_interp_kind : str
+        Frequency interpolation method used by UVBeam; defaults to cubic.
+    uvw_array_m : array-like
+        Baseline coordinates in metres, shape (n_t, n_baseline, 3). The first
+        integration supplies the fixed instrument-frame baselines.
+    bl_red_array : array-like or None
+        Redundancy per baseline and integration, shape (n_t, n_baseline) or
+        (n_t, n_baseline, 1); used when effective_noise is absent.
+    sigma : float or None
+        Noise standard deviation before redundancy weighting, in the same units
+        as the visibility data.
+    effective_noise : array-like or None
+        Per-visibility noise amplitudes in flattened T row order. Squared
+        magnitudes override the sigma/redundancy variance model.
+    array_save_directory : str or pathlib.Path
+        Directory holding the cached forward matrix and likelihood products.
+    t_ninv_t_block_cols : int
+        Number of coefficient columns per block in the saved noise-weighted Gram
+        matrix.
+    t_ninv_t_right_block_batch : int
+        Number of right-hand column blocks contracted together for the Gram
+        matrix.
+    clobber : bool
+        Whether stack-building methods invalidate and rebuild existing saved
+        products.
+
+    Notes
+    -----
     The cosmological contribution is represented on a rectilinear
     ``(u, v, eta)`` grid, while smooth foreground brightness is represented in
     the spherical image domain. Both are propagated through the same primary
@@ -101,8 +196,108 @@ class BuildMatrices:
         t_ninv_t_right_block_batch: int = 4,
         clobber: bool = False,
     ) -> None:
-        """Prepare coordinates, Fourier factors, and beam weights for an observation.
+        r"""Prepare coordinates, Fourier factors, and beam weights for an observation.
 
+        Parameters
+        ----------
+        n_u_eor : int
+            Number of cosmological u modes before monopole exclusion.
+        du_eor : float
+            Cosmological u spacing in inverse radians.
+        n_v_eor : int
+            Number of cosmological v modes before monopole exclusion.
+        dv_eor : float
+            Cosmological v spacing in inverse radians.
+        beta_fg : float or sequence of float
+            Positive foreground spectral-index magnitudes; a constant component is
+            included separately.
+        n_freq : int
+            Number of observing-frequency channels.
+        f0_mhz : float
+            First observing frequency and foreground reference frequency in MHz.
+        df_mhz : float
+            Separation of frequency channels in MHz.
+        n_eta : int
+            Number of line-of-sight Fourier modes before excluding eta=0.
+        d_eta : float
+            Positive eta spacing and integration weight in inverse Hz (seconds).
+        sky_mask_time_mode : str
+            Pixel selection: 'union' across integrations or 'center' at the
+            reference time.
+        telescope_latlonalt : tuple of float
+            Geodetic latitude and longitude in degrees, followed by altitude in
+            metres.
+        jd_center : float
+            Reference integration time as a UTC Julian date.
+        nside : int
+            HEALPix resolution of the equal-area celestial pixel grid.
+        fov_eor : float
+            Full angular diameter of the cosmological model field in degrees.
+        fov_fg : float or None
+            Full angular diameter of the foreground model field in degrees; None
+            uses fov_eor.
+        n_t : int
+            Number of observing-time samples.
+        d_t : float
+            Separation of integration centres in seconds.
+        image_geometry : ImageGeometry or None
+            Precomputed pixel directions and selections to reuse; None constructs
+            them from the field and observing settings.
+        fourier_geometry : FourierGeometry or None
+            Precomputed (u, v, eta) coordinates and spacings to reuse; None
+            constructs them from the grid settings.
+        beam_type : str or None
+            Analytic beam name or beamfits file path. None selects a uniform beam.
+        peak_amp : float
+            Peak power gain for Gaussian-based beam profiles; defaults to 1.
+        fwhm_deg : float or None
+            Configured beam full width at half maximum in degrees, when used instead
+            of an aperture-derived width.
+        diam : float or None
+            Physical or effective aperture diameter in metres for Airy or Gaussian
+            beam profiles.
+        cosfreq : float or None
+            Angular modulation frequency in inverse radians for the gausscosine
+            profile.
+        tanh_freq : float or None
+            Angular taper rate in inverse radians for the tanhairy profile.
+        tanh_sl_red : float or None
+            Fractional far-off-axis power suppression for the tanhairy profile.
+        pol : str
+            Polarisation selected from a file-backed beam, for example xx or pI.
+        freq_interp_kind : str
+            Frequency interpolation method used by UVBeam; defaults to cubic.
+        uvw_array_m : array-like
+            Baseline coordinates in metres, shape (n_t, n_baseline, 3). The first
+            integration supplies the fixed instrument-frame baselines.
+        bl_red_array : array-like or None
+            Redundancy per baseline and integration, shape (n_t, n_baseline) or
+            (n_t, n_baseline, 1); used when effective_noise is absent.
+        sigma : float or None
+            Noise standard deviation before redundancy weighting, in the same units
+            as the visibility data.
+        effective_noise : array-like or None
+            Per-visibility noise amplitudes in flattened T row order. Squared
+            magnitudes override the sigma/redundancy variance model.
+        array_save_directory : str or pathlib.Path
+            Directory holding the cached forward matrix and likelihood products.
+        t_ninv_t_block_cols : int
+            Number of coefficient columns per block in the saved noise-weighted Gram
+            matrix.
+        t_ninv_t_right_block_batch : int
+            Number of right-hand column blocks contracted together for the Gram
+            matrix.
+        clobber : bool
+            Whether stack-building methods invalidate and rebuild existing saved
+            products.
+
+        Returns
+        -------
+        None
+            Initialises the instance without returning a value.
+
+        Notes
+        -----
         Grid sizes and spacings define the cosmological (u, v, eta) model;
         ``fov_eor`` and ``fov_fg`` select HEALPix fields with diameters in
         degrees. Supplied geometry objects are reused. Frequencies are
@@ -230,7 +425,17 @@ class BuildMatrices:
         self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
 
     def _foreground_spectral_operator(self) -> jnp.ndarray:
-        """Evaluate the foreground spectral factors at the selected frequencies.
+        r"""Evaluate the foreground spectral factors at the selected frequencies.
+
+        Returns
+        -------
+        Q : jax.Array
+            Constant and power-law spectral factors, shape (n_freq,
+            n_fg_components).
+
+        Notes
+        -----
+        Uses the configured instance state; no explicit input arguments.
 
         Return shape ``(n_freq, n_fg_components)`` with a constant column
         followed by power laws referenced to ``f0_mhz``. The same factors
@@ -252,8 +457,35 @@ class BuildMatrices:
         spectral_fourier_operator: jnp.ndarray,
         foreground_spectral_operator: jnp.ndarray,
     ) -> jnp.ndarray:
-        """Propagate sky coefficients to all baselines at one time and frequency.
+        r"""Propagate sky coefficients to all baselines at one time and frequency.
 
+        Parameters
+        ----------
+        i_t : int
+            Integration index selecting the pixel directions and beam weights.
+        i_f : int
+            Frequency-channel index selecting the fringe and spectral responses.
+        component : str
+            Component to construct: 'eor', 'foreground', or 'all' for the joint
+            operator.
+        transverse_fourier_operator : jax.Array
+            F-prime matrix, shape (n_cosmological_pixel, n_uv_mode), mapping
+            transverse modes to the selected image pixels.
+        spectral_fourier_operator : jax.Array
+            F_z matrix, shape (n_freq, n_eta_mode), mapping eta modes to the
+            observing channels.
+        foreground_spectral_operator : jax.Array
+            Q spectral factors, shape (n_freq, n_fg_components), shared by all
+            foreground pixels.
+
+        Returns
+        -------
+        T_block : jax.Array
+            Selected component response, shape (n_baseline, n_coefficient), at the
+            specified time and frequency.
+
+        Notes
+        -----
         Evaluate the beam-weighted 3D fringe response for the foreground
         HEALPix pixels. For the cosmological component, select its smaller
         pixel set before applying the transverse and spectral Fourier factors.
@@ -301,8 +533,21 @@ class BuildMatrices:
         )
 
     def _forward_operator_width(self, component: str) -> int:
-        """Count the coefficients mapped to visibilities by the requested component.
+        r"""Count the coefficients mapped to visibilities by the requested component.
 
+        Parameters
+        ----------
+        component : str
+            Component to construct: 'eor', 'foreground', or 'all' for the joint
+            operator.
+
+        Returns
+        -------
+        n_coefficient : int
+            Number of columns in the requested component or joint operator.
+
+        Notes
+        -----
         The cosmological count is ``n_uv_mode * n_eta_mode`` and the
         foreground count is ``n_pixel * n_spectral_component``. Their sum
         determines the column dimension of the joint operator on disk.
@@ -328,8 +573,24 @@ class BuildMatrices:
         component: str,
         matrix_name: str,
     ) -> Path:
-        """Build and save a coefficient-to-visibility matrix one row block at a time.
+        r"""Build and save a coefficient-to-visibility matrix one row block at a time.
 
+        Parameters
+        ----------
+        component : str
+            Component to construct: 'eor', 'foreground', or 'all' for the joint
+            operator.
+        matrix_name : str
+            Output array name without the .npy suffix, relative to
+            array_save_directory.
+
+        Returns
+        -------
+        path : pathlib.Path
+            Path to the completed .npy coefficient-to-visibility matrix.
+
+        Notes
+        -----
         JAX processes receive contiguous time ranges according to
         ``jax.process_index()`` and ``jax.process_count()``. Each process builds
         one frequency block at a time on its local CPU and writes only its
@@ -434,6 +695,19 @@ class BuildMatrices:
     def build_T_21(self, *, matrix_name: str = "T_21") -> Path:
         r"""Save the mapping from cosmological Fourier amplitudes to visibilities.
 
+        Parameters
+        ----------
+        matrix_name : str
+            Output array name without the .npy suffix, relative to
+            array_save_directory.
+
+        Returns
+        -------
+        path : pathlib.Path
+            Saved T_21 matrix, shape (n_t*n_freq*n_baseline, n_uv_mode*n_eta_mode).
+
+        Notes
+        -----
         Construct :math:`T_{21}=F^{-1}P F'F_z` in distributed CPU blocks.
         Return the saved ``.npy`` path. Columns follow (uv, eta) order, with
         eta varying fastest, and rows follow time, frequency, baseline order.
@@ -446,6 +720,20 @@ class BuildMatrices:
     def build_T_fg(self, *, matrix_name: str = "T_fg") -> Path:
         r"""Save the mapping from foreground HEALPix amplitudes to visibilities.
 
+        Parameters
+        ----------
+        matrix_name : str
+            Output array name without the .npy suffix, relative to
+            array_save_directory.
+
+        Returns
+        -------
+        path : pathlib.Path
+            Saved T_fg matrix, shape (n_t*n_freq*n_baseline,
+            n_fg_components*n_pix_fg).
+
+        Notes
+        -----
         Construct :math:`T_{\rm FG}=F^{-1}P Q_z` in distributed CPU blocks.
         Return the saved ``.npy`` path. Columns follow spectral component,
         then pixel order; rows follow time, frequency, baseline order.
@@ -456,8 +744,22 @@ class BuildMatrices:
         )
 
     def build_T(self, *, matrix_name: str = "T") -> Path:
-        """Save the joint visibility mapping ``T = [T_21 T_fg]``.
+        r"""Save the joint visibility mapping ``T = [T_21 T_fg]``.
 
+        Parameters
+        ----------
+        matrix_name : str
+            Output array name without the .npy suffix, relative to
+            array_save_directory.
+
+        Returns
+        -------
+        path : pathlib.Path
+            Saved joint matrix with cosmological columns followed by foreground
+            columns.
+
+        Notes
+        -----
         A coefficient vector containing cosmological Fourier amplitudes
         followed by foreground image amplitudes maps to model visibilities
         through ``m = T b``. Return the completed matrix's ``.npy`` path.
@@ -471,8 +773,17 @@ class BuildMatrices:
     # Noise covariance matrices
     # ------------------------
     def _sigma_squared_array(self) -> jnp.ndarray:
-        """
-        Assign a noise variance to each measured complex visibility.
+        r"""Assign a noise variance to each measured complex visibility.
+
+        Returns
+        -------
+        variance : jax.Array
+            Per-visibility variances, shape (n_t*n_freq*n_baseline,), in squared
+            visibility units.
+
+        Notes
+        -----
+        Uses the configured instance state; no explicit input arguments.
 
         With an effective-noise array, return its squared magnitudes.
         Otherwise use ``sigma**2 / redundancy`` for each baseline and time,
@@ -500,18 +811,21 @@ class BuildMatrices:
         return (sigma_redundancy ** 2).astype(jnp.complex128)
 
     def build_Ninv(self) -> jnp.ndarray:
-        """
-        Return the inverse-variance weights applied to visibility rows.
-
-        Each weight is ``1 / variance``. The independent-noise assumption
-        allows these diagonal entries to be stored as a vector and applied
-        by elementwise multiplication, without allocating a dense covariance.
+        r"""Return the inverse-variance weights applied to visibility rows.
 
         Returns
         -------
         Ninv : jnp.ndarray
             1D vector of shape (n_vis,) containing diag(N^{-1}), where
             n_vis = n_freq * n_t * n_bls.
+
+        Notes
+        -----
+        Uses the configured instance state; no explicit input arguments.
+
+        Each weight is ``1 / variance``. The independent-noise assumption
+        allows these diagonal entries to be stored as a vector and applied
+        by elementwise multiplication, without allocating a dense covariance.
         """
         sigma_sq = self._sigma_squared_array()
         return 1.0 / sigma_sq
@@ -535,12 +849,7 @@ class BuildMatrices:
         left_width: int,
         right_width: int,
     ) -> jnp.ndarray:
-        r"""
-        Contract visibility responses into one noise-weighted coefficient block.
-
-        Evaluate ``T_left^H @ (Ninv[:, None] * T_right)``: each entry sums
-        the overlap between two coefficient responses over measured
-        visibilities, weighted by their inverse noise variance.
+        r"""Contract visibility responses into one noise-weighted coefficient block.
 
         Parameters
         ----------
@@ -559,6 +868,11 @@ class BuildMatrices:
             Dense block batch with shape ``(left_width, right_width)`` and row
             sharding over the combined host/device mesh.
 
+        Notes
+        -----
+        Evaluate ``T_left^H @ (Ninv[:, None] * T_right)``: each entry sums
+        the overlap between two coefficient responses over measured
+        visibilities, weighted by their inverse noise variance.
         """
         n_vis = T.shape[0]
         # Slice the cached global `T` into the current left/right parameter
@@ -581,14 +895,7 @@ class BuildMatrices:
         block_cols: Optional[int] = None,
         right_block_batch: Optional[int] = None,
     ) -> None:
-        r"""
-        Save the noise-weighted overlaps between all model-coefficient responses.
-
-        Read saved T and inverse-noise weights, contract their visibility
-        rows in coefficient-column blocks, and write ``T^H N^{-1} T`` to
-        disk. This data-independent matrix supplies the likelihood precision
-        together with the prior precision. The completed output is published
-        only after all blocks have been written.
+        r"""Save the noise-weighted overlaps between all model-coefficient responses.
 
         Parameters
         ----------
@@ -606,6 +913,19 @@ class BuildMatrices:
             Number of right-hand parameter blocks evaluated together per local
             kernel launch. If omitted, the instance default
             ``t_ninv_t_right_block_batch`` is used.
+
+        Returns
+        -------
+        None
+            The noise-weighted coefficient overlap matrix is saved to disk.
+
+        Notes
+        -----
+        Read saved T and inverse-noise weights, contract their visibility
+        rows in coefficient-column blocks, and write ``T^H N^{-1} T`` to
+        disk. This data-independent matrix supplies the likelihood precision
+        together with the prior precision. The completed output is published
+        only after all blocks have been written.
         """
         t_path = _dense_matrix_path_impl(self, t_matrix_name)
         ninv_path = _dense_matrix_path_impl(self, ninv_matrix_name)
@@ -795,12 +1115,7 @@ class BuildMatrices:
         Ninv: jnp.ndarray,
         vis_noisy: jnp.ndarray,
     ) -> jnp.ndarray:
-        r"""
-        Sum the inverse-variance-weighted squared magnitudes of the visibilities.
-
-        Return ``d^H N^{-1} d = sum_i |d_i|**2 / variance_i``, the scalar
-        data term in the Gaussian likelihood. This function computes the
-        scalar only; ``save_d_ninv_d`` handles persistence.
+        r"""Sum the inverse-variance-weighted squared magnitudes of the visibilities.
 
         Parameters
         ----------
@@ -814,6 +1129,12 @@ class BuildMatrices:
         -------
         jnp.ndarray
             Real scalar ``d^H N^{-1} d``.
+
+        Notes
+        -----
+        Return ``d^H N^{-1} d = sum_i |d_i|**2 / variance_i``, the scalar
+        data term in the Gaussian likelihood. This function computes the
+        scalar only; ``save_d_ninv_d`` handles persistence.
         """
         ninv_d = Ninv * vis_noisy
         return jnp.real(jnp.vdot(vis_noisy, ninv_d))
@@ -831,13 +1152,7 @@ class BuildMatrices:
         t_matrix_name: str = "T",
         ninv_matrix_name: str = "Ninv",
     ) -> None:
-        r"""
-        Project the observed visibilities onto the noise-weighted model responses.
-
-        Save ``dbar = T^H N^{-1} d``, with one complex entry per coefficient
-        in T's column order. Together with the coefficient precision, this
-        vector determines the conditional linear fit and the quadratic term
-        in the analytically marginalised likelihood.
+        r"""Project the observed visibilities onto the noise-weighted model responses.
 
         Parameters
         ----------
@@ -851,8 +1166,18 @@ class BuildMatrices:
             Saved inverse-noise vector name to read from disk. Defaults to
             ``"Ninv"``.
 
+        Returns
+        -------
+        None
+            The projected data vector is saved to disk.
+
         Notes
         -----
+        Save ``dbar = T^H N^{-1} d``, with one complex entry per coefficient
+        in T's column order. Together with the coefficient precision, this
+        vector determines the conditional linear fit and the quadratic term
+        in the analytically marginalised likelihood.
+
         This follows the same cached disk-first pattern as the saved
         ``T_Ninv_T`` path, but the contraction is simpler: once the globally
         sharded ``T`` and row-sharded ``N^{-1} d`` are materialized, one dense
@@ -912,7 +1237,21 @@ class BuildMatrices:
             def _build_dbar_cached(
                 T: jnp.ndarray, ninv_d: jnp.ndarray
             ) -> jnp.ndarray:
-                """Sum distributed visibility projections into a replicated coefficient vector."""
+                r"""Sum distributed visibility projections into a replicated coefficient vector.
+
+                Parameters
+                ----------
+                T : jax.Array
+                    Coefficient-to-visibility matrix, shape (n_vis, n_params), with
+                    visibility rows distributed across devices.
+                ninv_d : jax.Array
+                    Inverse-variance-weighted data Ninv * d, shape (n_vis,), in T row order.
+
+                Returns
+                -------
+                dbar : jax.Array
+                    Replicated coefficient projection T^H N^{-1} d, shape (n_params,).
+                """
                 return jnp.conj(T).T @ ninv_d
 
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
@@ -945,12 +1284,7 @@ class BuildMatrices:
         matrix_name: str = "d_ninv_d",
         ninv_matrix_name: str = "Ninv",
     ) -> None:
-        r"""
-        Save the scalar noise-weighted squared magnitude of the observed data.
-
-        Load the inverse-variance vector, evaluate ``d^H N^{-1} d``, and
-        write the scalar on process zero. It is independent of the sky-model
-        coefficients and can be reused throughout likelihood evaluation.
+        r"""Save the scalar noise-weighted squared magnitude of the observed data.
 
         Parameters
         ----------
@@ -962,8 +1296,17 @@ class BuildMatrices:
             Saved inverse-noise vector name to read from disk. Defaults to
             ``"Ninv"``.
 
+        Returns
+        -------
+        None
+            The noise-weighted data scalar is saved to disk.
+
         Notes
         -----
+        Load the inverse-variance vector, evaluate ``d^H N^{-1} d``, and
+        write the scalar on process zero. It is independent of the sky-model
+        coefficients and can be reused throughout likelihood evaluation.
+
         This contraction is only a visibility-space dot product, so unlike
         ``T`` and ``T_Ninv_T`` it does not need a separate blockwise builder.
         """
@@ -983,17 +1326,23 @@ class BuildMatrices:
     # --------------------
 
     def _invalidate_saved_outputs(self, matrix_names: Sequence[str]) -> None:
-        """
-        Remove named cached arrays before rebuilding their dependent products.
-
-        Process zero deletes the files and distributed processes synchronise
-        before proceeding. The caller supplies the dependency list, for example
-        invalidating ``T_Ninv_T`` and ``dbar`` when T changes.
+        r"""Remove named cached arrays before rebuilding their dependent products.
 
         Parameters
         ----------
         matrix_names : sequence of str
             Logical saved-array names, e.g. ``["T", "T_Ninv_T"]``.
+
+        Returns
+        -------
+        None
+            The named cached files are removed if present.
+
+        Notes
+        -----
+        Process zero deletes the files and distributed processes synchronise
+        before proceeding. The caller supplies the dependency list, for example
+        invalidating ``T_Ninv_T`` and ``dbar`` when T changes.
         """
         if not matrix_names:
             return
@@ -1018,12 +1367,7 @@ class BuildMatrices:
         *,
         invalidate_existing: bool | None = None,
     ) -> None:
-        r"""
-        Ensure a requested forward-model or noise product is available on disk.
-
-        Supports ``T``, ``Ninv``, and ``T_Ninv_T`` and builds missing
-        prerequisites recursively. Existing files are reused by name unless
-        invalidation is requested; their physical configuration is not checked.
+        r"""Ensure a requested forward-model or noise product is available on disk.
 
         Parameters
         ----------
@@ -1033,6 +1377,17 @@ class BuildMatrices:
             When ``True``, remove any existing saved products invalidated by
             ``matrix_name`` before checking whether a rebuild is required.
             Defaults to ``self.clobber``.
+
+        Returns
+        -------
+        None
+            The requested array and any missing prerequisites are saved to disk.
+
+        Notes
+        -----
+        Supports ``T``, ``Ninv``, and ``T_Ninv_T`` and builds missing
+        prerequisites recursively. Existing files are reused by name unless
+        invalidation is requested; their physical configuration is not checked.
         """
         if invalidate_existing is None:
             invalidate_existing = self.clobber
@@ -1065,8 +1420,16 @@ class BuildMatrices:
         _log_build(self, f"built and saved {matrix_name} in {elapsed:.3f} s")
 
     def build_minimum_matrix_stack(self) -> None:
-        """
-        Prepare the data-independent arrays used by the marginalised likelihood.
+        r"""Prepare the data-independent arrays used by the marginalised likelihood.
+
+        Returns
+        -------
+        None
+            The data-independent likelihood arrays are saved to disk.
+
+        Notes
+        -----
+        Uses the configured instance state; no explicit input arguments.
 
         Save the coefficient-to-visibility operator T, inverse-variance vector
         Ninv, and coefficient overlap matrix ``T^H N^{-1} T`` in that order.
@@ -1086,17 +1449,7 @@ class BuildMatrices:
         self.build_matrix_if_not_here("T_Ninv_T", invalidate_existing=False)
 
     def build_minimum_likelihood_stack(self, vis_noisy: jnp.ndarray) -> int:
-        """
-        Prepare the saved model and data projections for repeated likelihood evaluation.
-
-        This extends the data-independent matrix stack with the two
-        data-dependent compressed terms:
-
-        - ``dbar = T^H N^{-1} d``
-        - ``d_ninv_d = d^H N^{-1} d``
-
-        Existing files are reused unless ``clobber`` is set. A changed dataset
-        therefore requires invalidating its saved projections or a new directory.
+        r"""Prepare the saved model and data projections for repeated likelihood evaluation.
 
         Parameters
         ----------
@@ -1107,6 +1460,17 @@ class BuildMatrices:
         -------
         int
             Number of model parameters, i.e. the length of ``dbar``.
+
+        Notes
+        -----
+        This extends the data-independent matrix stack with the two
+        data-dependent compressed terms:
+
+        - ``dbar = T^H N^{-1} d``
+        - ``d_ninv_d = d^H N^{-1} d``
+
+        Existing files are reused unless ``clobber`` is set. A changed dataset
+        therefore requires invalidating its saved projections or a new directory.
         """
         self.build_minimum_matrix_stack()
         if self.clobber:

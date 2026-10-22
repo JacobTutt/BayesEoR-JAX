@@ -16,8 +16,25 @@ jax.config.update("jax_enable_x64", True)
 
 @dataclass(frozen=True)
 class FourierGeometry:
-    """Retained Fourier coordinates and their integration spacings.
+    r"""Retained Fourier coordinates and their integration spacings.
 
+    Parameters
+    ----------
+    uv : jax.Array
+        Retained angular Fourier coordinates, shape (2, n_uv_mode), excluding
+        the transverse monopole.
+    eta : jax.Array
+        Retained line-of-sight Fourier coordinates in inverse Hz, shape
+        (n_eta_mode,), excluding eta=0.
+    du : float
+        Transverse u spacing in inverse radians; must be positive.
+    dv : float
+        Transverse v spacing in inverse radians; must be positive.
+    d_eta : float
+        Positive eta spacing and integration weight in inverse Hz (seconds).
+
+    Notes
+    -----
     ``uv`` has shape ``(2, n_uv_mode)`` and contains angular spatial
     frequencies; ``eta`` has shape ``(n_eta_mode,)`` in inverse Hz.
     ``du``, ``dv``, and ``d_eta`` supply the corresponding integration weights.
@@ -38,8 +55,27 @@ def _build_uv_modes(
     du: float,
     dv: float,
 ) -> jax.Array:
-    """Place transverse brightness modes on a centred rectangular uv grid.
+    r"""Place transverse brightness modes on a centred rectangular uv grid.
 
+    Parameters
+    ----------
+    n_u : int
+        Number of transverse u modes before removing the angular monopole.
+    n_v : int
+        Number of transverse v modes before removing the angular monopole.
+    du : float
+        Transverse u spacing in inverse radians; must be positive.
+    dv : float
+        Transverse v spacing in inverse radians; must be positive.
+
+    Returns
+    -------
+    uv : jax.Array
+        Centred coordinates, shape (2, n_u*n_v - 1), ordered with u varying
+        fastest.
+
+    Notes
+    -----
     Axis coordinates are ``(arange(n) - n//2) * spacing``. Return shape
     ``(2, n_u*n_v - 1)`` with u varying fastest within each v row and remove
     the angular monopole ``(u,v)=(0,0)``.
@@ -56,8 +92,22 @@ def _build_uv_modes(
 
 
 def _build_eta_modes(n_eta: int, d_eta: float) -> jax.Array:
-    """Place line-of-sight brightness modes on a centred eta axis.
+    r"""Place line-of-sight brightness modes on a centred eta axis.
 
+    Parameters
+    ----------
+    n_eta : int
+        Number of line-of-sight Fourier modes before excluding eta=0.
+    d_eta : float
+        Positive eta spacing and integration weight in inverse Hz (seconds).
+
+    Returns
+    -------
+    eta : jax.Array
+        Centred nonzero eta modes in inverse Hz, shape (n_eta - 1,).
+
+    Notes
+    -----
     Return ``(arange(n_eta) - n_eta//2) * d_eta`` in inverse Hz with the
     frequency-independent ``eta=0`` mode removed, giving ``n_eta - 1`` modes.
     """
@@ -75,8 +125,31 @@ def build_fourier_geometry(
     dv: float,
     d_eta: float,
 ) -> FourierGeometry:
-    """Define the Fourier grid on which cosmological coefficients are placed.
+    r"""Define the Fourier grid on which cosmological coefficients are placed.
 
+    Parameters
+    ----------
+    n_u : int
+        Number of transverse u modes before removing the angular monopole.
+    n_v : int
+        Number of transverse v modes before removing the angular monopole.
+    n_eta : int
+        Number of line-of-sight Fourier modes before excluding eta=0.
+    du : float
+        Transverse u spacing in inverse radians; must be positive.
+    dv : float
+        Transverse v spacing in inverse radians; must be positive.
+    d_eta : float
+        Positive eta spacing and integration weight in inverse Hz (seconds).
+
+    Returns
+    -------
+    geometry : FourierGeometry
+        Retained coordinates and spacings for (n_u*n_v - 1)*(n_eta - 1)
+        coefficients.
+
+    Notes
+    -----
     ``n_u``, ``n_v``, and ``n_eta`` count modes before zero-mode exclusions;
     ``du`` and ``dv`` are transverse spacings and ``d_eta`` is in inverse Hz.
     Return a ``FourierGeometry`` representing
