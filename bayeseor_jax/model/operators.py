@@ -1,12 +1,12 @@
 r"""Linear operators used in BayesEoR's interferometric forward model.
 
 The component models share the beam-weighted measurement operator
-:math:`R = F^{-1}P` and differ in how their coefficients define sky brightness:
+$R = F^{-1}P$ and differ in how their coefficients define sky brightness:
 
-.. math::
-
-    m_{21} = T_{21}a, \qquad T_{21} = R F' F_z,
-    \qquad m_{\rm FG} = T_{\rm FG}q, \qquad T_{\rm FG} = R Q_z.
+$$
+m_{21} = T_{21}a, \qquad T_{21} = R F' F_z,
+\qquad m_{\rm FG} = T_{\rm FG}q, \qquad T_{\rm FG} = R Q_z.
+$$
 
 ``build_transverse_fourier_operator`` constructs ``F'`` (uv to image),
 ``build_spectral_fourier_operator`` constructs ``F_z`` (eta to frequency),
@@ -68,9 +68,9 @@ def build_nudft_matrix(
     -----
     For input coordinates ``x_i`` and output coordinates ``y_j``, return
 
-    .. math::
-
-        K_{ji} = \exp\!\left(\mathrm{sign}\,2\pi i\,y_j\cdot x_i\right).
+    $$
+    K_{ji} = \exp\!\left(\mathrm{sign}\,2\pi i\,y_j\cdot x_i\right).
+    $$
 
     Multiplication by ``K`` maps input amplitudes to the output samples.
     The coordinate pairs determine the spaces being connected; ``sign``
@@ -130,12 +130,12 @@ def build_sky_to_visibility_operator(
     At each observing time, propagate the pixels' topocentric (l, m, n)
     directions through the full three-dimensional discrete Fourier response,
     including primary-beam weighting and pixel solid angle. The combined
-    operator is :math:`R=F^{-1}P`.
+    operator is $R=F^{-1}P$.
 
-    .. math::
-
-        R_{tfbp} = \Delta\Omega\,P_{tfp}\,
-        \exp[+2\pi i\,\boldsymbol u_b(\nu_f)\cdot\hat{\boldsymbol s}_p(t)].
+    $$
+    R_{tfbp} = \Delta\Omega\,P_{tfp}\,
+    \exp[+2\pi i\,\boldsymbol u_b(\nu_f)\cdot\hat{\boldsymbol s}_p(t)].
+    $$
 
     Summing ``R[t, f, b, p] * brightness[f, p]`` over pixels gives a model
     visibility. Both sky components use this response, restricted to their
@@ -201,12 +201,13 @@ def build_transverse_fourier_operator(
 
     Notes
     -----
-    This transverse Fourier operator is denoted :math:`F'`.
+    This transverse Fourier operator is denoted $F'$.
 
-    .. math::
+    $$
+    F'_{pu} = \Delta u\,\Delta v\,
+    \exp[-2\pi i(u_u l_p + v_u m_p)].
+    $$
 
-        F'_{pu} = \Delta u\,\Delta v\,
-        \exp[-2\pi i(u_u l_p + v_u m_p)].
     """
     if uv_cell_area <= 0:
         raise ValueError("uv_cell_area must be positive")
@@ -239,12 +240,13 @@ def build_spectral_fourier_operator(
 
     Notes
     -----
-    This line-of-sight Fourier operator is denoted :math:`F_z`.
+    This line-of-sight Fourier operator is denoted $F_z$.
 
-    .. math::
+    $$
+    (F_z)_{fe} = \Delta\eta\,
+    \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
+    $$
 
-        (F_z)_{fe} = \Delta\eta\,
-        \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
     """
     # Validate the line-of-sight integration weight before constructing F_z.
     if d_eta <= 0:
@@ -305,12 +307,12 @@ def build_T_21_core(
     -----
     Reconstruct their brightness on the cosmological HEALPix selection and
     propagate it through the beam-weighted three-dimensional fringe response,
-    implementing :math:`T_{21}=R F' F_z`.
+    implementing $T_{21}=R F' F_z$.
 
-    .. math::
-
-        (T_{21})_{(tfb),(ue)} =
-        \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
+    $$
+    (T_{21})_{(tfb),(ue)} =
+    \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
+    $$
 
     ``core`` denotes the equation-level calculation for supplied arrays.
     ``T_21_build_save`` handles distributed CPU construction and saving.
@@ -444,12 +446,13 @@ def build_foreground_spectral_operator(
     Notes
     -----
     These constant and power-law factors define the spectral part of
-    :math:`Q_z`, shared by every foreground HEALPix pixel.
+    $Q_z$, shared by every foreground HEALPix pixel.
 
-    .. math::
+    $$
+    Q_{f0}=1,\qquad Q_{fs}=(\nu_f/\nu_0)^{\beta_s}\ (s>0),
+    \qquad s_p(\nu_f)=\sum_s Q_{fs}q_{s,p}.
+    $$
 
-        Q_{f0}=1,\qquad Q_{fs}=(\nu_f/\nu_0)^{\beta_s}\ (s>0),
-        \qquad s_p(\nu_f)=\sum_s Q_{fs}q_{s,p}.
     """
     frequencies_mhz = jnp.asarray(frequencies_mhz, dtype=jnp.float64)
     if frequencies_mhz.ndim != 1:
@@ -505,11 +508,11 @@ def build_T_fg_core(
     -----
     Evaluate each pixel's brightness at the observing frequencies and apply
     the beam-weighted three-dimensional fringe response, implementing
-    :math:`T_{\rm FG}=R Q_z`.
+    $T_{\rm FG}=R Q_z$.
 
-    .. math::
-
-        (T_{\rm FG})_{(tfb),(sp)} = R_{tfbp} Q_{fs}.
+    $$
+    (T_{\rm FG})_{(tfb),(sp)} = R_{tfbp} Q_{fs}.
+    $$
 
     Each foreground coefficient belongs to one image pixel and one spectral
     component. ``Q`` supplies the spectral dependence at every pixel;
@@ -635,10 +638,10 @@ def weight_foreground_operator(
     -----
     With Hermitian covariance roots this is
 
-    .. math::
-
-        A = N^{-1/2} T_{\rm FG} \Sigma_q^{1/2}, \qquad
-        A A^\dagger = W T_{\rm FG} \Sigma_q T_{\rm FG}^\dagger W^\dagger.
+    $$
+    A = N^{-1/2} T_{\rm FG} \Sigma_q^{1/2}, \qquad
+    A A^\dagger = W T_{\rm FG} \Sigma_q T_{\rm FG}^\dagger W^\dagger.
+    $$
 
     Thus an SVD of ``A`` or eigendecomposition of ``A @ A.conj().T`` can
     recover its noise-relevant visibility modes. This function only applies

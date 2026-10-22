@@ -1,17 +1,103 @@
 site_name: BayesEoR-JAX
-repo_url: https://github.com/PSims/BayesEoR-v2
-nav:
-  - Installation: installation.md
-  - CSD3 Getting Started: csd3.md
-  - Basics: basics.md
-  - Forward Model: forward-model.md
-  - EoR Model: eor.md
-  - Foregrounds: foregrounds.md
-  - Instrument Model: instrument.md
-  - Inference: inference.md
-  - Configuration: configuration.md
-  - Outputs and Analysis: outputs-analysis.md
-  - HPC and Scaling: hpc-scaling.md
-  - References: references.md
+site_description: Physically motivated Bayesian inference of the cosmological 21-cm power spectrum.
+site_url: https://jacobtutt.github.io/BayesEoR-JAX/
+repo_url: https://github.com/JacobTutt/BayesEoR-JAX
+repo_name: JacobTutt/BayesEoR-JAX
+edit_uri: edit/main/docs/
+strict: true
+
 theme:
-  name: readthedocs
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: white
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    code: Roboto Mono
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  version:
+    provider: mike
+    default: dev
+    alias: true
+
+plugins:
+  - search
+  - mike:
+      alias_type: copy
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            allow_inspection: false
+            docstring_style: numpy
+            members_order: source
+            show_root_heading: true
+            show_source: false
+            show_bases: false
+            show_signature_annotations: true
+            separate_signature: true
+            heading_level: 2
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - assets/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+nav:
+  - Home:
+      - Overview: index.md
+      - Installation: installation.md
+      - Getting started: basics.md
+  - User guide:
+      - Configuration: configuration.md
+      - Forward model: forward-model.md
+      - Cosmological model: eor.md
+      - Foregrounds: foregrounds.md
+      - Instrument and data: instrument.md
+      - Inference: inference.md
+      - Outputs and analysis: outputs-analysis.md
+  - API:
+      - Overview: api/index.md
+      - Configuration and setup: api/setup.md
+      - Geometry and instrument: api/geometry.md
+      - Linear operators: api/operators.md
+      - Construction and KL reduction: api/construction.md
+      - Inference: api/inference.md
+      - Data and analysis: api/data-analysis.md
+  - Computing:
+      - HPC and scaling: hpc-scaling.md
+      - CSD3 guide: csd3.md
+  - Development:
+      - Documentation: documentation.md
+      - References: references.md

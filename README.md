@@ -21,6 +21,11 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 
 ## Documentation
 
+The documentation uses MkDocs Material with a generated Python API reference.
+For a local preview, run `python -m pip install -e ".[docs]"` followed by
+`python -m mkdocs serve`. See [building and publishing the documentation](docs/documentation.md)
+for the strict build check and optional versioned GitHub Pages deployment.
+
 - [Installation](docs/installation.md): CPU and GPU environments, JAX checks, and MultiNest setup.
 - [CSD3 Getting Started](docs/csd3.md): CSD3 environment setup, MultiNest library setup, and one-GPU Slurm scripts for the test analyses.
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.

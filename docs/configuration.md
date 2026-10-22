@@ -1,7 +1,5 @@
 # Configuration
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX uses `jsonargparse` to support YAML configuration files and command-line overrides. The parser is `BayesEoRParser`.
 
 YAML keys use underscores, while CLI flags use dashes:
@@ -232,7 +230,3 @@ For raw pyuvdata inputs, selection options may define the actual subset used.
 | `random_key` | Sampler seed. |
 
 Record sampler controls with every run because they affect both runtime and posterior quality.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

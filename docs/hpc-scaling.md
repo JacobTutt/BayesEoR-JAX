@@ -1,7 +1,5 @@
 # HPC And Scaling
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX is designed for accelerator-backed workflows, but the practical scaling limit is usually dense matrix size and likelihood linear algebra rather than Python overhead.
 
 ## JAX Devices
@@ -100,7 +98,3 @@ shared-library setup, see [CSD3 Getting Started](csd3.md).
 - Record GPU model, driver, CUDA, JAX, JAXMg, and commit hash in run notes.
 - Check that likelihood preparation and sampling use the intended GPU backend;
   physical-component construction deliberately runs on CPU.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

@@ -57,16 +57,16 @@ def required_healpix_nside(
 
     Notes
     -----
-    The largest angular phase gradient is :math:`2\pi b_{\max}/\lambda`.
-    Using the nominal HEALPix pixel width :math:`\sqrt{\Omega_{\rm pix}}`
+    The largest angular phase gradient is $2\pi b_{\max}/\lambda$.
+    Using the nominal HEALPix pixel width $\sqrt{\Omega_{\rm pix}}$
     therefore gives
 
-    .. math::
+    $$
+    \frac{\sqrt{\pi/3}}{N_{\rm side}}
+    \leq \frac{c}{s\,b_{\max}\nu_{\max}},
+    $$
 
-        \frac{\sqrt{\pi/3}}{N_{\rm side}}
-        \leq \frac{c}{s\,b_{\max}\nu_{\max}},
-
-    where :math:`s` is ``samples_per_fringe``. For a zero baseline there is
+    where $s$ is ``samples_per_fringe``. For a zero baseline there is
     no fringe-resolution requirement and the function returns one.
 
     This is a baseline-based sampling estimate, not a strict spherical
@@ -384,9 +384,9 @@ def _topocentric_coordinates(
     At each UTC Julian date, transform the selected ICRS pixel centres to
     azimuth and zenith angle at the telescope location, then evaluate
 
-    .. math::
-
-        (l,m,n)=(\sin z\sin A,\sin z\cos A,\cos z).
+    $$
+    (l,m,n)=(\sin z\sin A,\sin z\cos A,\cos z).
+    $$
 
     Return arrays of shape ``(n_time, 3, n_pixel)`` and
     ``(n_time, 2, n_pixel)`` respectively. Angles are in radians; the

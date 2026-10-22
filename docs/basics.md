@@ -1,7 +1,5 @@
 # Basics
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX estimates the 21-cm Epoch of Reionization power spectrum from interferometric visibility data using a Bayesian forward model.
 
 The signal of interest is faint. Foregrounds are much brighter, and the instrument mixes sky structure across angle and frequency. BayesEoR therefore models the data directly in visibility space rather than subtracting foregrounds and then estimating a power spectrum from residuals.
@@ -89,7 +87,3 @@ The original BayesEoR documentation remains valuable for the scientific model, v
 - The foreground model directly supports spherical, wide-field image-domain emission.
 
 The mathematical vocabulary is intentionally similar so existing BayesEoR users can transfer concepts across.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

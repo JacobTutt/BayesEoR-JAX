@@ -1,7 +1,5 @@
 # Inference
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX uses MultiNest with the analytically marginalised likelihood to infer power-spectrum parameters and evaluate Bayesian evidence.
 
 The sampler runner and conditional MAP solver live in `inference/run_ns.py` and
@@ -179,7 +177,3 @@ evidence and MAP coefficients. For serious runs, create a dedicated configuratio
 and output directory rather than using the default example paths.
 
 Record the live-point count, random seed and stopping settings with each scientific result.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

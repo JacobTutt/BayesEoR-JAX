@@ -1,7 +1,5 @@
 # References
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 This page collects the main papers and software references behind BayesEoR-JAX.
 
 ## BayesEoR And 21-cm Power-Spectrum Modelling
@@ -45,7 +43,3 @@ Original BayesEoR documentation
 When using BayesEoR-JAX for a scientific result, cite the original BayesEoR method papers that support the modelling choices used in the analysis, the BayesEoR software paper, and the sampler/software packages used for inference.
 
 If the analysis depends on wide-field or image-domain foreground modelling, include Burba, Sims & Pober (2023).
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

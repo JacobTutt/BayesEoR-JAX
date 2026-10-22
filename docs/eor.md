@@ -1,7 +1,5 @@
 # EoR Model
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 The EoR model represents the cosmological 21-cm signal in a 3D model space that is connected to observed visibilities through the forward model.
 
 ## Model Space
@@ -77,7 +75,3 @@ The shipped example configs in `test_examples/eor/` and `test_examples/eor_fgs/`
 Increasing `n_u_eor`, `n_v_eor`, `n_eta`, or `fov_eor` increases the number of latent EoR modes and the size of the cached matrix products. This can rapidly dominate memory use because the marginalised likelihood works with dense parameter-space matrices.
 
 Use small grids for installation checks and method development. Production runs should document the intended FoV, k-bin coverage, and memory budget before submission.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

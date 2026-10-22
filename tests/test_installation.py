@@ -27,7 +27,9 @@ def test_default_dependencies_do_not_install_gpu_libraries():
     assert hpc[0].name == "jaxmg" and hpc[0].extras == {"cuda12"}
     assert hpc[0].url is None and hpc[0].marker is None
     assert "1.4.1" in hpc[0].specifier and "0.0.7" not in hpc[0].specifier
-    assert set(project["optional-dependencies"]) == {"hpc"}
+    assert set(project["optional-dependencies"]) == {"hpc", "docs"}
+    docs = [Requirement(item) for item in project["optional-dependencies"]["docs"]]
+    assert {item.name for item in docs} == {"mkdocs", "mkdocs-material", "mkdocstrings", "mike"}
 
 
 def test_conda_environments_include_native_multinest_and_correct_extra():

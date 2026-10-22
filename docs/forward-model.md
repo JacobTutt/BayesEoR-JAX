@@ -1,7 +1,5 @@
 # Forward Model
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX models visibility data through a linear forward operator:
 
 ```text
@@ -410,7 +408,3 @@ Sigma(theta) = T^H N^{-1} T + Phi^{-1}(theta)
 ```
 
 The likelihood then evaluates dense linear algebra involving `Sigma(theta)`, including solves and log determinants. This is where the JAXMg downstream branch is currently used.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

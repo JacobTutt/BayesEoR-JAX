@@ -1,7 +1,5 @@
 # Foregrounds
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 BayesEoR-JAX represents smooth foreground brightness directly on a spherical
 image-domain grid. Each spatial mode has one constant coefficient and one
 coefficient for every configured power-law spectral index:
@@ -42,7 +40,3 @@ uncertainty model; setup does not construct or revalidate the KL reduction.
 Large operators are divided into contiguous ranges of time-frequency blocks
 using the active JAX process topology, constructed on CPU, and written into a
 shared NumPy memmap. This avoids materialising the full matrix on a GPU.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

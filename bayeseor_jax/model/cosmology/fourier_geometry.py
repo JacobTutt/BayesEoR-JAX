@@ -172,11 +172,11 @@ def build_fourier_geometry(
     This basis provides a natural parameterisation for power-spectrum
     inference. At a reference redshift, the modes map to comoving wavenumbers as
 
-    .. math::
-
-        k_x = 2\pi u / D_M, \qquad
-        k_y = 2\pi v / D_M, \qquad
-        k_z = 2\pi\eta / |d\chi/d\nu|.
+    $$
+    k_x = 2\pi u / D_M, \qquad
+    k_y = 2\pi v / D_M, \qquad
+    k_z = 2\pi\eta / |d\chi/d\nu|.
+    $$
 
     Here ``D_M`` is the transverse comoving distance and ``|dchi/dnu|`` is
     the line-of-sight distance per unit frequency. Under the statistically

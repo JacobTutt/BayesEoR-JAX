@@ -1,7 +1,5 @@
 # CSD3 Getting Started
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
-
 This is a step-by-step CSD3 setup guide for running the BayesEoR-JAX test examples. It uses a Python 3.12 conda environment, JAXMG from PyPI, and MultiNest as the default sampler.
 
 The recommended [HPC installation](installation.md) now installs native MultiNest
@@ -232,7 +230,3 @@ Check the analysis outputs:
 Repeat with `fgs_<job-id>` for the foreground run.
 
 The setup logs should show that JAX uses a CUDA device. CPU fallback is a configuration error for production analyses.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
