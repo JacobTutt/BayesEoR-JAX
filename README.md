@@ -12,7 +12,7 @@ BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is 
 
 - JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
 - A JAXMg-backed marginalised likelihood using GPU-native dense solves and log determinants.
-- MultiNest as the default nested-sampling workflow, with BlackJAX retained as an experimental backend.
+- MultiNest for nested sampling, posterior recovery and Bayesian-evidence evaluation.
 - A spherical image-domain foreground model propagated through the full beam and fringe response.
 - A configuration-first workflow using YAML files and `jsonargparse`.
 - Test datasets for EoR-only and EoR-plus-foreground runs.
@@ -28,7 +28,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 - [EoR Model](docs/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
 - [Foregrounds](docs/foregrounds.md): spherical image-domain foreground modelling and distributed operator construction.
 - [Instrument Model](docs/instrument.md): visibility inputs, beam models, time/frequency selection, and noise.
-- [Inference](docs/inference.md): marginalised likelihood, MultiNest, BlackJAX nested sampling, and MAP helpers.
+- [Inference](docs/inference.md): marginalised likelihood, MultiNest, and MAP helpers.
 - [Configuration](docs/configuration.md): grouped reference for YAML and CLI parameters.
 - [Outputs and Analysis](docs/outputs-analysis.md): cached matrices, sampler outputs, metadata, and plotting helpers.
 - [HPC and Scaling](docs/hpc-scaling.md): JAX devices, precision, memory scaling, and cluster notes.

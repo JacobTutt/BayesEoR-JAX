@@ -149,7 +149,6 @@ By default the example script runs setup only. Add `--sample` to run MultiNest a
 python test_examples/run_analysis_example.py \
   --config test_examples/eor/config.yaml \
   --sample \
-  --sampler multinest \
   --nested-sampling-dirname ns \
   --analysis-label "EoR" \
   --array-save-directory ../r/manual_eor/m \

@@ -136,11 +136,7 @@ For raw pyuvdata inputs, selection options may define the actual subset used.
 | `foreground_prior_std_mk` | Physical prior width for each foreground spectral coefficient field. |
 | `foreground_kl_path` | Optional saved, unwhitened KL foreground operator; selects unit coefficient widths instead of the original physical prior. |
 | `use_intrinsic_noise_fitting` | Include a global intrinsic noise amplitude. |
-| `sampler` | Nested-sampling backend. Defaults to `multinest`. |
 | `n_live_scale_factor` | Live points as a multiple of parameter dimension. |
-| `num_inner_scale_factor` | BlackJAX-only inner steps as a multiple of dimension. |
-| `delete_scale_factor` | BlackJAX-only fraction of live points replaced per nested-sampling step. |
-| `stop_threshold` | BlackJAX-only nested-sampling termination threshold. |
 | `random_key` | Sampler seed. |
 
 Record sampler controls with every run because they affect both runtime and posterior quality.

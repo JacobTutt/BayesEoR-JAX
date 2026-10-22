@@ -33,7 +33,6 @@ cd "${REPO_DIR}"
 python test_examples/run_analysis_example.py \
   --config test_examples/eor/config.yaml \
   --sample \
-  --sampler multinest \
   --nested-sampling-dirname ns \
   --analysis-label "EoR" \
   --array-save-directory "${RUN_DIR}/m" \

@@ -2,7 +2,7 @@
 
 **Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
-BayesEoR-JAX uses the analytically marginalised likelihood for power-spectrum inference, with MultiNest as the default sampler for posterior distributions and Bayesian evidence. BlackJAX nested sampling remains available as an experimental backend.
+BayesEoR-JAX uses MultiNest with the analytically marginalised likelihood to infer power-spectrum parameters and evaluate Bayesian evidence.
 
 ## Marginalised Likelihood
 
@@ -24,13 +24,13 @@ Evaluating the likelihood requires dense positive-definite linear algebra, inclu
 
 ## MultiNest
 
-MultiNest is the default nested-sampling backend. It is available directly through:
+MultiNest is the supported nested sampler. It is available directly through:
 
 ```python
 from bayeseor_jax import run_multinest
 ```
 
-or through the backend selector:
+The generic name `run_nestedsampling` is an alias for the same function:
 
 ```python
 from bayeseor_jax import run_nestedsampling
@@ -42,36 +42,6 @@ summary = run_nestedsampling(
 ```
 
 MultiNest is often useful when likelihood evaluations are expensive and evidence estimates are required. It requires the native MultiNest library as well as `pymultinest`.
-
-## BlackJAX Nested Sampling
-
-The BlackJAX nested-sampling backend is experimental for the marginalised JAXMg likelihood. The current JAXMg FFI solve/log-determinant path is scalar and can fail under BlackJAX batching transforms such as `vmap`. Use MultiNest for the production pipeline.
-
-The backend remains available for development through:
-
-```python
-from bayeseor_jax import run_blackjaxns
-```
-
-or:
-
-```python
-summary = run_nestedsampling(
-    setup_result,
-    out_dir="outputs/nested_sampling",
-    sampler="blackjaxns",
-)
-```
-
-Important controls are:
-
-- `n_live_scale_factor`
-- `num_inner_scale_factor`
-- `delete_scale_factor`
-- `stop_threshold`
-- `random_key`
-
-BlackJAX outputs are written in an Anesthetic-style CSV file named `nested_sampling_results.csv`, together with `summary.json`.
 
 ## MAP Helper
 
@@ -91,23 +61,9 @@ Add `--sample` to run nested sampling:
 python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
 ```
 
-The example uses the package-level `run_nestedsampling` selector, which defaults to MultiNest. After sampling, it runs the example analysis step and writes posterior summaries and diagnostic plots. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
+The example calls `run_multinest`. After sampling, it runs the example analysis step and writes posterior summaries and diagnostic plots. For serious runs, create a dedicated configuration and output directory rather than using the default example paths.
 
-## Choosing A Sampler
-
-Use MultiNest when:
-
-- you need a mature nested-sampling backend;
-- evidence estimates are central to the analysis;
-- you are running the JAXMg-backed marginalised likelihood.
-
-Use BlackJAX nested sampling when:
-
-- you want a JAX-native experimental backend;
-- you are comparing sampler behaviour;
-- you are working on likelihood paths that are compatible with JAX batching transforms.
-
-Document the sampler, live-point settings, random seed, and stopping criterion in any scientific result.
+Record the live-point count, random seed and stopping settings with each scientific result.
 
 ---
 

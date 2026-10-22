@@ -47,7 +47,6 @@ def _copy_run_metadata(output_dir: Path, sampler_dir: Path) -> None:
 def run_output_analysis(
     sampler_dir: Path | str,
     output_dir: Path | str | None = None,
-    sampler: str = "multinest",
     label: str = "BayesEoR-JAX",
 ) -> dict:
     """
@@ -58,16 +57,14 @@ def run_output_analysis(
     analysis_dir = output_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    sampler_key = "blackjax" if sampler.lower() in {"blackjaxns", "blackjax"} else "multinest"
     _copy_run_metadata(output_dir, sampler_dir)
 
     data = DataContainer(
         [sampler_dir],
-        sampler=sampler_key,
         labels=[label],
     )
     summary = {
-        "sampler": sampler_key,
+        "sampler": "multinest",
         "sampler_dir": str(sampler_dir),
         "k_vals": _json_ready(data.k_vals[0]),
         "averages": _json_ready(data.avgs[0]),
@@ -100,7 +97,6 @@ def run_output_analysis(
 def run_example(
     config_path: str = "test_examples/eor/config.yaml",
     do_sampling: bool = False,
-    sampler: str | None = None,
     extra_bayeseor_args: list[str] | None = None,
     nested_sampling_dirname: str = "nested_sampling",
     analysis_label: str = "BayesEoR-JAX",
@@ -113,8 +109,6 @@ def run_example(
     """
     parser = BayesEoRParser()
     args_list = ["--config", config_path]
-    if sampler is not None:
-        args_list.extend(["--sampler", sampler])
     if do_sampling:
         args_list.append("--run")
     if extra_bayeseor_args:
@@ -133,26 +127,12 @@ def run_example(
     write_log_files(parser, args, out_dir=out_dir)
 
     ns_out_dir = out_dir / nested_sampling_dirname
-    sampler_key = args.sampler.lower()
-    ns_kwargs = {
-        "sampler": args.sampler,
-        "random_key": args.random_key,
-        "n_live_scale_factor": args.n_live_scale_factor,
-    }
-    if sampler_key in {"blackjaxns", "blackjax", "blackjax-ns"}:
-        ns_kwargs.update(
-            {
-                "num_inner_scale_factor": args.num_inner_scale_factor,
-                "delete_scale_factor": args.delete_scale_factor,
-                "stop_threshold": args.stop_threshold,
-            }
-        )
-    else:
-        ns_kwargs["resume"] = args.resume
-    summary = run_nestedsampling(
+    summary = run_multinest(
         setup_result=setup_result,
         out_dir=ns_out_dir,
-        **ns_kwargs,
+        random_key=args.random_key,
+        n_live_scale_factor=args.n_live_scale_factor,
+        resume=args.resume,
     )
 
     print("Run summary:")
@@ -161,7 +141,6 @@ def run_example(
     analysis_summary = run_output_analysis(
         sampler_dir=ns_out_dir,
         output_dir=out_dir,
-        sampler=args.sampler,
         label=analysis_label,
     )
     return setup_result, summary, analysis_summary
@@ -188,12 +167,6 @@ def main() -> None:
         help="Enable nested sampling (default is setup-only).",
     )
     parser.add_argument(
-        "--sampler",
-        choices=("multinest", "blackjaxns"),
-        default=None,
-        help="Nested-sampling backend. Defaults to the config/package default.",
-    )
-    parser.add_argument(
         "--nested-sampling-dirname",
         default="nested_sampling",
         help="Directory name, under output_dir, for sampler products.",
@@ -207,7 +180,6 @@ def main() -> None:
     run_example(
         config_path=args.config,
         do_sampling=args.sample,
-        sampler=args.sampler,
         extra_bayeseor_args=extra_bayeseor_args,
         nested_sampling_dirname=args.nested_sampling_dirname,
         analysis_label=args.analysis_label,

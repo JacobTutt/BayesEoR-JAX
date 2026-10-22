@@ -51,21 +51,11 @@ class BayesEoRParser(ArgumentParser):
         instead of foreground_prior_std_mk; does not run the decomposition.
     use_intrinsic_noise_fitting : bool, optional
         Fit for global intrinsic noise amplitude. Defaults to False.
-    sampler : str, optional
-        Nested-sampling backend. Defaults to ``"multinest"``.
     resume : bool, optional
         Resume an existing MultiNest run from the current ``output_dir``.
         Defaults to False.
     n_live_scale_factor : float, optional
         Multiplier converting ``n_dim`` to live-point count. Defaults to 25.
-    num_inner_scale_factor : float, optional
-        BlackJAX-only multiplier converting ``n_dim`` to inner-step count.
-        Defaults to 3.
-    delete_scale_factor : float, optional
-        BlackJAX-only fraction of live points replaced per NS iteration.
-        Defaults to 0.025.
-    stop_threshold : float, optional
-        BlackJAX-only stop threshold on ``logZ_live - logZ``. Defaults to -3.
     random_key : int, optional
         Base PRNG seed for nested sampling. Defaults to 0.
 
@@ -218,21 +208,11 @@ class BayesEoRParser(ArgumentParser):
             help="Use a saved unwhitened KL foreground operator with a standard-normal prior.",
         )
         self.add_argument(
-            "--sampler",
-            type=str,
-            default="multinest",
-            choices=("multinest", "blackjaxns"),
-            help="Nested-sampling backend.",
-        )
-        self.add_argument(
             "--resume",
             action="store_true",
             help="Resume an existing MultiNest run from the current output_dir.",
         )
         self.add_argument("--n-live-scale-factor", type=float, default=25.0, help="Live points = factor * n_dim.")
-        self.add_argument("--num-inner-scale-factor", type=float, default=3.0, help="BlackJAX inner steps = factor * n_dim.")
-        self.add_argument("--delete-scale-factor", type=float, default=0.025, help="BlackJAX fraction of live points deleted per NS step.")
-        self.add_argument("--stop-threshold", type=float, default=-3.0, help="BlackJAX stop when logZ_live - logZ is below this threshold.")
         self.add_argument("--random-key", type=int, default=0, help="PRNG seed for nested sampling.")
 
         # UV model grids

@@ -26,9 +26,6 @@ Sims, Burba & Pober (2025), "BayesEoR: Bayesian 21-cm Power Spectrum Estimation 
 Feroz, Hobson & Bridges (2009), "MultiNest: an efficient and robust Bayesian inference tool for cosmology and particle physics"  
 [arXiv:0809.3437](https://arxiv.org/abs/0809.3437)
 
-BlackJAX documentation and nested sampling references  
-[BlackJAX documentation](https://blackjax-devs.github.io/blackjax/)
-
 ## Core Software
 
 JAX documentation  

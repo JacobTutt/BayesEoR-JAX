@@ -19,10 +19,7 @@ dependencies = [
   "pyuvdata",
   "jsonargparse",
   "matplotlib",
-  "tqdm",
-  "anesthetic",
   "pymultinest",
-  "blackjax @ git+https://github.com/handley-lab/blackjax@95e93ed93e726b95143b2f4a9582888621625f52",
 ]
 
 [project.optional-dependencies]

@@ -13,7 +13,8 @@ def test_full_likelihood_and_hmc_are_not_exported():
             assert name not in module.__all__
             assert not hasattr(module, name)
         assert "MarginalisedLikelihood" in module.__all__
-    for name in ("run_multinest", "run_blackjaxns", "run_nestedsampling"):
+    assert not hasattr(bayeseor_jax, "run_blackjaxns")
+    for name in ("run_multinest", "run_nestedsampling"):
         assert name in bayeseor_jax.__all__
 
 
@@ -47,6 +48,8 @@ def test_foreground_example_uses_spherical_model_options_only():
     assert len(args.foreground_prior_std_mk) == 3
     assert not hasattr(args, "fg_model_domain")
     assert not hasattr(args, "sky_mask_time_mode")
+    for name in ("sampler", "num_inner_scale_factor", "delete_scale_factor", "stop_threshold"):
+        assert not hasattr(args, name)
 
 
 def test_parser_accepts_preconstructed_kl_operator():
