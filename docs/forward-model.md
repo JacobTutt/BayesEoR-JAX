@@ -40,7 +40,9 @@ There are two explicit interfaces to the same mathematics:
 - `T_21_build_save(...)` and `T_fg_build_save(...)` evaluate those functions on
   CPU in distributed time-frequency blocks, returning paths to complete
   disk-backed component matrices. `BuildMatrices` exposes methods with these
-  same names using its configured observation and model.
+  same names using its configured observation and model. The weighted variant,
+  `T_fg_weighted_build_save(...)`, uses this same CPU writer to construct the
+  KL input directly, without saving an unweighted foreground matrix first.
 
 The pure functions can be used directly inside compiled computations:
 
@@ -134,6 +136,31 @@ is propagated separately as a mean visibility contribution, not included in `A`.
 Neither function saves an array or selects a device; the existing physical
 operator caches and inference setup are unchanged.
 
+For disk-backed construction with diagonal priors and noise, use the same
+weights with the CPU block writer:
+
+```python
+from bayeseor_jax import T_fg_weighted_build_save
+
+weighted_path = T_fg_weighted_build_save(
+    lmn_fg, uvw_lambda, beam_fg, pixel_area_sr, Q,
+    prior_sqrt=prior_std, noise_whitener=noise_whitener,
+    output_path="arrays/A_fg.npy",
+)
+# With an existing BuildMatrices configuration, the equivalent call is:
+# weighted_path = builder.T_fg_weighted_build_save(
+#     prior_sqrt=prior_std, noise_whitener=noise_whitener,
+# )
+```
+
+All participating processes call this together. Each evaluates its assigned
+time-frequency blocks on CPU, applies the prior weights to the columns and
+the corresponding noise weights to the rows, then writes directly to the
+shared weighted matrix. No complete unweighted matrix is constructed, saved or
+reread. The weight vectors can vary across coefficients and visibilities;
+dense covariance factors are not supported by this block writer. No reduction
+is performed until the separate decomposition call below.
+
 ## Distributed Foreground SVD and Truncation
 
 `T_fg_svd_build_save` takes the **already prior- and noise-weighted** matrix
@@ -145,7 +172,7 @@ retained rank and saves the reduced operator in one call:
 from bayeseor_jax import T_fg_svd_build_save, assemble_joint_operator
 
 reduced_path = T_fg_svd_build_save(
-    "arrays/A_fg.npy", "arrays/Ninv.npy",
+    weighted_path, "arrays/Ninv.npy",
     output_path="arrays/T_fg_reduced.npy", f=0.1, tile_size=128,
 )
 joint_path = assemble_joint_operator(
@@ -231,7 +258,8 @@ and `model.cosmology.power_spectrum`, respectively.
 The former saving methods `BuildMatrices.build_T_21` and `build_T_fg` are now
 named `T_21_build_save` and `T_fg_build_save` to distinguish them from pure
 operator evaluation. `BuildMatrices` now prepares physical inputs and exposes
-only those two component writers. The former `build_T`, noise-building,
+those component writers plus `T_fg_weighted_build_save`, whose weights are
+explicit arguments rather than constructor settings. The former `build_T`, noise-building,
 likelihood-product and stack-building methods have been removed. Their stages
 are explicit functions rather than methods that silently construct dependencies.
 Noise settings, `clobber` and Gram-block tuning no longer belong to its constructor.
