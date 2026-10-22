@@ -65,7 +65,7 @@ supports comparison and validation of competing models.
 - [Model overview](model.md): the shared measurement equation and operator conventions.
 - [EoR model](eor.md): from $(u,v,\eta)$ coefficients to cosmological visibilities.
 - [Foreground model](foregrounds.md): from image-domain spectral amplitudes to wide-field visibilities.
-- [KL foreground basis](foregrounds.md#kl-foreground-basis): from physical foreground uncertainty to a reduced operator.
+- [KL Reduced Basis](kl-reduced-basis.md): from physical foreground uncertainty to a reduced operator.
 - [Inference](inference.md): marginalisation, posterior sampling and evidence evaluation.
 
 ## Get started
