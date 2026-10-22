@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 
-from .build_matricies import BuildMatrices, LMN_ModelSpace
+from .build_matricies import BuildMatrices, build_image_geometry
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
@@ -296,7 +296,7 @@ def run_setup(
     # Build the configured HEALPix FoV model once before the expensive matrix
     # construction so the spherical-aware local angular widths can define the
     # uv sampling and automatic n_u/n_v sizing.
-    lmn_model_space = LMN_ModelSpace(
+    image_geometry = build_image_geometry(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
         nside=int(nside),
@@ -307,8 +307,8 @@ def run_setup(
         d_t=float(d_t),
     )
     resolved_grid = _resolve_uv_grid_from_extents(
-        extent_u_eor=float(lmn_model_space.fov_l_angle_eor),
-        extent_v_eor=float(lmn_model_space.fov_m_angle_eor),
+        extent_u_eor=float(image_geometry.fov_l_angle_eor),
+        extent_v_eor=float(image_geometry.fov_m_angle_eor),
         freqs_hz=np.asarray(freqs_hz, dtype=float),
         uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
         beam_type=beam_type,
@@ -347,10 +347,10 @@ def run_setup(
         "nside": int(nside),
         "fov_eor": float(fov_eor),
         "fov_fg": float(fov_fg),
-        "fov_l_angle_eor": float(lmn_model_space.fov_l_angle_eor),
-        "fov_m_angle_eor": float(lmn_model_space.fov_m_angle_eor),
-        "fov_l_angle_fg": float(lmn_model_space.fov_l_angle_fg),
-        "fov_m_angle_fg": float(lmn_model_space.fov_m_angle_fg),
+        "fov_l_angle_eor": float(image_geometry.fov_l_angle_eor),
+        "fov_m_angle_eor": float(image_geometry.fov_m_angle_eor),
+        "fov_l_angle_fg": float(image_geometry.fov_l_angle_fg),
+        "fov_m_angle_fg": float(image_geometry.fov_m_angle_fg),
         "beam_aperture_width_uv": float(resolved_grid["beam_aperture_width_uv"]),
         "u_max_inst_model": float(resolved_grid["u_max_inst_model"]),
         "v_max_inst_model": float(resolved_grid["v_max_inst_model"]),
@@ -401,8 +401,8 @@ def run_setup(
     z = float(cosmo.f2z(jnp.mean(freqs_hz)))
     bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     ps_box_size_para_mpc = float(cosmo.dL_df(z) * bandwidth_hz)
-    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_l_angle_eor))
-    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * float(lmn_model_space.fov_m_angle_eor))
+    ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * float(image_geometry.fov_l_angle_eor))
+    ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * float(image_geometry.fov_m_angle_eor))
 
     # Build the EoR k-cube model:
     # 1) generate physical k coordinates
@@ -486,7 +486,7 @@ def run_setup(
         fov_fg=float(fov_fg),
         n_t=int(n_t),
         d_t=float(d_t),
-        lmn_model_space=lmn_model_space,
+        image_geometry=image_geometry,
         beam_type=beam_type,
         peak_amp=float(peak_amp),
         fwhm_deg=fwhm_deg,
@@ -508,7 +508,7 @@ def run_setup(
     # data-dependent compressed terms needed by the marginalized Gaussian path.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     n_params = bm.build_minimum_likelihood_stack(vis_noisy)
-    setup_args_dict["n_pix_fg_final"] = int(bm.lmn_model_space.n_pix_fg)
+    setup_args_dict["n_pix_fg_final"] = int(bm.image_geometry.n_pix_fg)
 
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.

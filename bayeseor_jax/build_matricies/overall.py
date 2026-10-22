@@ -25,7 +25,7 @@ from .dft_funcs import (
     build_nudft_matrix,
 )
 from .uv_model_space import UV_ModelSpace
-from .lmn_model_space import LMN_ModelSpace
+from .image_geometry import ImageGeometry, build_image_geometry
 from .beam_model import Beam_Model
 from .forward_model import (
     build_T_eor_core,
@@ -75,7 +75,7 @@ class BuildMatrices:
         fov_fg: Optional[float] = None,
         n_t: int = 1,
         d_t: Optional[float] = None,
-        lmn_model_space: Optional[LMN_ModelSpace] = None,
+        image_geometry: Optional[ImageGeometry] = None,
         beam_type: str = 'uniform',
         peak_amp: float = 1.0,
         fwhm_deg: Optional[float] = None,
@@ -175,7 +175,7 @@ class BuildMatrices:
         )
 
         # Reuse setup geometry when available; direct callers may construct it here.
-        self.lmn_model_space = lmn_model_space or LMN_ModelSpace(
+        self.image_geometry = image_geometry or build_image_geometry(
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
             nside=self.nside,
@@ -198,10 +198,10 @@ class BuildMatrices:
             self.freq_interp_kind,
         )
         self.beam_response = self.beam_model.get_beam_vals(
-            self.lmn_model_space.az_za_fg, self.freq_hz
+            self.image_geometry.az_za_fg, self.freq_hz
             )  # Shape (n_freq, n_t, n_pix_fg)
 
-        self.n_fg_spatial_modes = int(self.lmn_model_space.n_pix_fg)
+        self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
 
 
     # ---------------------------
@@ -212,8 +212,11 @@ class BuildMatrices:
         Construct the EoR NUDFT kernel (model UV -> image LM/RaDec).
         """
         # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
-        lmn_center = self.lmn_model_space.lmn_fg[self.lmn_model_space.time_ind_center, :2]
-        lmn_center = lmn_center[:, self.lmn_model_space.eor_fg_shared_axis]
+        lmn_center = self.image_geometry.lmn_fg[
+            self.image_geometry.time_ind_center,
+            :2,
+        ]
+        lmn_center = lmn_center[:, self.image_geometry.eor_fg_shared_axis]
         nuidft_uv_to_lm_eor = build_nudft_matrix(
             self.uv_model_space.uv_eor,  # (2, n_uv_eor)
             lmn_center,  # (2, n_pix_eor)
@@ -248,18 +251,18 @@ class BuildMatrices:
             )
 
         response = build_sky_to_visibility_core(
-            np.asarray(self.lmn_model_space.lmn_fg[i_t : i_t + 1]),
+            np.asarray(self.image_geometry.lmn_fg[i_t : i_t + 1]),
             np.asarray(self.inst_uvw_irad[i_f : i_f + 1]),
             np.asarray(
                 self.beam_response[i_f : i_f + 1, i_t : i_t + 1]
             ).transpose(1, 0, 2),
-            self.lmn_model_space.pixel_area_sr,
+            self.image_geometry.pixel_area_sr,
         )
 
         components = []
         if component in {"all", "eor"}:
             eor_response = response[
-                ..., self.lmn_model_space.eor_fg_shared_axis
+                ..., self.image_geometry.eor_fg_shared_axis
             ]
             components.append(
                 build_T_eor_core(

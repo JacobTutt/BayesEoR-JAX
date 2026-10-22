@@ -39,7 +39,7 @@ def _minimal_builder(tmp_path):
     builder.uv_model_space = SimpleNamespace(
         uv_eor=jnp.asarray([[0.5], [0.0]])
     )
-    builder.lmn_model_space = SimpleNamespace(
+    builder.image_geometry = SimpleNamespace(
         lmn_fg=jnp.asarray(
             [
                 [[0.0, 0.5], [0.0, 0.0], [1.0, np.sqrt(0.75)]],
@@ -120,9 +120,9 @@ def test_builder_reuses_precomputed_image_geometry(tmp_path):
         n_eta=1,
         n_t=1,
         d_t=10.0,
-        lmn_model_space=geometry,
+        image_geometry=geometry,
         uvw_array_m=jnp.zeros((1, 1, 3)),
         array_save_directory=tmp_path,
     )
 
-    assert builder.lmn_model_space is geometry
+    assert builder.image_geometry is geometry

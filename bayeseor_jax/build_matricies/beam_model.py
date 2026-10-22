@@ -1,6 +1,6 @@
 """
 HEALPix-based beam model for evaluating the primary beam response at given
-(za, az) coordinates of the image domain pixels calculated in `lmn_model_space.py`.
+(za, az) coordinates of the image-domain pixels built by `image_geometry.py`.
 """
 import warnings
 

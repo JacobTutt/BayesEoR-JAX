@@ -11,15 +11,16 @@ from .forward_model import (
     build_T_eor_core,
     build_T_fg_core,
 )
-from .lmn_model_space import LMN_ModelSpace
+from .image_geometry import ImageGeometry, build_image_geometry
 from .overall import BuildMatrices
 from .uv_model_space import UV_ModelSpace
 
 __all__ = [
     "Beam_Model",
     "BuildMatrices",
-    "LMN_ModelSpace",
+    "ImageGeometry",
     "UV_ModelSpace",
+    "build_image_geometry",
     "build_foreground_spectral_basis",
     "build_nudft_matrix",
     "build_sky_to_visibility_core",
