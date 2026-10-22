@@ -1,4 +1,26 @@
-"""Linear operators connecting the model, image, and visibility spaces."""
+r"""Linear mappings used in the paper's interferometric forward model.
+
+The component models share the beam-weighted measurement operator
+:math:`R = F^{-1}P` and differ in how their coefficients define sky brightness:
+
+.. math::
+
+    m_{21} = T_{21}a, \qquad T_{21} = R F' F_z,
+    \qquad m_{\rm FG} = T_{\rm FG}q, \qquad T_{\rm FG} = R Q_z.
+
+``build_transverse_fourier_operator`` constructs ``F'`` (uv to image),
+``build_spectral_fourier_operator`` constructs ``F_z`` (eta to frequency),
+and ``build_foreground_spectral_operator`` supplies the spectral part of
+``Q_z``. ``build_sky_to_visibility_operator`` constructs ``R``, including
+the pixel solid angle and primary beam. The two ``build_T_*_core`` functions
+combine these factors for supplied blocks of visibility rows.
+
+These functions perform numerical construction only. Geometry modules define
+the coordinates; ``BuildMatrices`` in ``overall.py`` chooses the blocks,
+distributes their construction, and saves the assembled matrices. The compact
+factors below implement the paper's products without forming full Kronecker
+matrices. No unit conversion, prior weighting, or KL compression is applied.
+"""
 
 from __future__ import annotations
 
@@ -15,19 +37,19 @@ def build_nudft_matrix(
     coords_out: jnp.ndarray,
     sign: int = -1,
 ) -> jnp.ndarray:
-    """
-    Construct a NUDFT Operator for Forward or Inverse transforms.
+    r"""Construct the unnormalised non-uniform discrete Fourier kernel.
 
-    This function generates a kernel matrix that represents a Non-Uniform
-    Discrete Fourier Transform. It is designed to be bi-directional:
+    For input coordinates ``x_i`` and output coordinates ``y_j``, return
 
-    1. Forward Transform (Sky -> Visibilities):
-       Set sign=-1. Maps spatial coordinates (l, m, n) to baselines (u, v, w).
+    .. math::
 
-    2. Inverse Transform (Visibilities -> Sky):
-       Set sign=+1. Maps baselines (u, v, w) to spatial coordinates (l, m, n).
-       Note: For a mathematically exact Inverse DFT, the result may require
-       normalization by (1 / N).
+        K_{ji} = \exp\!\left(\mathrm{sign}\,2\pi i\,y_j\cdot x_i\right).
+
+    Multiplication by ``K`` maps input amplitudes to the output samples.
+    The coordinate pairs determine the spaces being connected; ``sign``
+    selects the Fourier phase convention. Reversing the sign alone does not
+    construct a matrix inverse for arbitrary non-uniform sampling. The
+    physical operator builders supply their own integration weights.
 
     Parameters
     ----------
@@ -38,17 +60,16 @@ def build_nudft_matrix(
         Target coordinates. Shape (N_axes, N_out).
         e.g., Baselines (u, v, w) for a forward transform.
     sign : int, optional
-        Direction of the Fourier phase wrap. Default is -1.
-        - -1 : Forward (e^-2πiθ)
-        - +1 : Inverse/Reverse (e^+2πiθ)
+        Fourier exponent sign: -1 gives ``exp(-2 pi i phase)`` and +1 gives
+        its complex conjugate. This is independent of the baseline convention
+        documented in ``build_sky_to_visibility_operator``.
 
     Returns
     -------
     nudft_matrix : jnp.ndarray
         A Complex128 matrix of shape (N_out, N_in).
     """
-    # Shape Normalization
-    # Ensures inputs are (N_axes, N_points).
+    # Treat one-dimensional coordinates as a single coordinate axis.
     c_in = jnp.atleast_2d(jnp.array(coords_in, dtype=jnp.float64))
     c_out = jnp.atleast_2d(jnp.array(coords_out, dtype=jnp.float64))
 
@@ -56,9 +77,7 @@ def build_nudft_matrix(
     # (N_out, N_axes) @ (N_axes, N_in) -> (N_out, N_in)
     phase = jnp.matmul(c_out.T, c_in)
 
-    # Complex Exponentiation
-    # The 'sign' determines the direction of the phase wrap.
-    # 2j * pi * phase converts the geometric distance into a phase angle.
+    # Coordinate dot products are in cycles; 2 pi converts them to radians.
     return jnp.exp(sign * (2.0 * jnp.pi * 1j) * phase)
 
 
@@ -67,7 +86,32 @@ def build_transverse_fourier_operator(
     lm: jax.Array,
     uv_cell_area: float,
 ) -> jax.Array:
-    r"""Build :math:`F'`, mapping transverse Fourier modes to image pixels."""
+    r"""Build :math:`F'`, mapping transverse Fourier modes to image pixels.
+
+    .. math::
+
+        F'_{pu} = \Delta u\,\Delta v\,
+        \exp[-2\pi i(u_u l_p + v_u m_p)].
+
+    Parameters
+    ----------
+    uv : jax.Array
+        Retained model coordinates, shape ``(2, n_uv_mode)``. These are the
+        cosmological Fourier grid, not the instrument's sampled baselines.
+    lm : jax.Array
+        Image direction cosines, shape ``(2, n_pixel)``. The caller selects
+        the cosmological pixels at the reference time, defining a fixed
+        transverse chart for the intrinsic brightness field.
+    uv_cell_area : float
+        Fourier-cell integration weight ``du * dv``.
+
+    Returns
+    -------
+    jax.Array
+        Complex matrix of shape ``(n_pixel, n_uv_mode)``. Applied alongside
+        ``F_z`` in ``build_T_21_core``; drift-scan time dependence enters the
+        separate sky-to-visibility operator.
+    """
     if uv_cell_area <= 0:
         raise ValueError("uv_cell_area must be positive")
     return build_nudft_matrix(uv, lm, sign=-1) * uv_cell_area
@@ -78,7 +122,30 @@ def build_spectral_fourier_operator(
     frequency_offsets_hz: jax.Array,
     d_eta: float,
 ) -> jax.Array:
-    r"""Build :math:`F_z`, mapping line-of-sight modes to frequency."""
+    r"""Build :math:`F_z`, mapping line-of-sight modes to frequency.
+
+    .. math::
+
+        (F_z)_{fe} = \Delta\eta\,
+        \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
+
+    Parameters
+    ----------
+    eta : jax.Array
+        Retained line-of-sight Fourier coordinates in inverse Hz (seconds),
+        shape ``(n_eta_mode,)``. Geometry construction excludes ``eta=0``.
+    frequency_offsets_hz : jax.Array
+        Frequencies relative to the chosen reference channel, in Hz, shape
+        ``(n_frequency,)``. ``BuildMatrices`` uses channel ``n_freq // 2``.
+    d_eta : float
+        Fourier integration weight in inverse Hz, normally ``1 / bandwidth``.
+
+    Returns
+    -------
+    jax.Array
+        Complex matrix of shape ``(n_frequency, n_eta_mode)``. The same
+        spectral mapping applies to every transverse cosmological mode.
+    """
     if d_eta <= 0:
         raise ValueError("d_eta must be positive")
     eta = jnp.asarray(eta, dtype=jnp.float64)
@@ -108,16 +175,30 @@ def build_sky_to_visibility_operator(
 ) -> jax.Array:
     r"""Build :math:`R=F^{-1}P` for a block of time integrations.
 
+    .. math::
+
+        R_{tfbp} = \Delta\Omega\,P_{tfp}\,
+        \exp[+2\pi i\,\boldsymbol u_b(\nu_f)\cdot\hat{\boldsymbol s}_p(t)].
+
+    Summing ``R[t, f, b, p] * brightness[f, p]`` over pixels gives a model
+    visibility. Both sky components use this response, restricted to their
+    respective pixel selections. ``F^{-1}`` denotes the measurement operator
+    in the paper; it does not imply a numerical matrix inversion here.
+
     Parameters
     ----------
     lmn
         Topocentric sky coordinates with shape ``(n_time, 3, n_pixel)``.
+        Pixel identities remain fixed on the celestial sky while their
+        topocentric direction cosines change with observing time.
     uvw_lambda
         Baselines in observing wavelengths with shape
         ``(n_frequency, 3, n_baseline)``. BayesEoR follows the PyUVData
         ``ant2 - ant1`` baseline convention, hence the positive phase used
         below is equivalent to the negative phase in the paper's
         ``r_i - r_j`` convention.
+        Baselines are fixed in the instrument frame; sky rotation is already
+        represented by ``lmn``.
     beam
         Horizon-limited primary-beam power response with shape
         ``(n_time, n_frequency, n_pixel)``. Pixels at or below the horizon
@@ -147,6 +228,7 @@ def build_sky_to_visibility_operator(
             f"beam must have shape {expected_beam_shape}, got {beam.shape}"
         )
 
+    # Contract all three direction components, retaining the full-sky fringe.
     phase = jnp.einsum("fcb,tcp->tfbp", uvw_lambda, lmn)
     fringe = jnp.exp(2j * jnp.pi * phase)
     return (
@@ -161,7 +243,39 @@ def build_T_21_core(
     transverse_operator: jax.Array,
     spectral_operator: jax.Array,
 ) -> jax.Array:
-    r"""Build :math:`T_{21}=R F' F_z` for one visibility-row block."""
+    r"""Build :math:`T_{21}=R F' F_z` for one visibility-row block.
+
+    .. math::
+
+        (T_{21})_{(tfb),(ue)} =
+        \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
+
+    Parameters
+    ----------
+    sky_to_visibility : jax.Array
+        ``R`` restricted to cosmological image pixels, with shape
+        ``(n_time, n_frequency, n_baseline, n_pixel)``.
+    transverse_operator : jax.Array
+        ``F'`` with shape ``(n_pixel, n_uv_mode)``. Its pixel order must match
+        the last axis of ``sky_to_visibility``.
+    spectral_operator : jax.Array
+        ``F_z`` with shape ``(n_frequency, n_eta_mode)``, selected for the
+        same frequency rows as ``sky_to_visibility``.
+
+    Returns
+    -------
+    jax.Array
+        Matrix of shape ``(n_time * n_frequency * n_baseline,
+        n_uv_mode * n_eta_mode)``. Rows are ordered by time, frequency, then
+        baseline; columns by transverse mode, then eta (fastest varying).
+        Multiplication by the correspondingly ordered ``a`` gives ``m_21``.
+
+    Notes
+    -----
+    ``core`` denotes the equation-level calculation for supplied arrays.
+    ``BuildMatrices.build_T_21`` handles distributed construction and saving.
+    All integration weights are already included in the input operators.
+    """
     sky_to_visibility = jnp.asarray(sky_to_visibility)
     transverse_operator = jnp.asarray(transverse_operator)
     spectral_operator = jnp.asarray(spectral_operator)
@@ -187,11 +301,13 @@ def build_T_21_core(
             "spectral_operator must have shape (n_frequency, n_eta_mode)"
         )
 
+    # Sum over sky pixels first, avoiding a full image-by-(uv, eta) matrix.
     transverse_response = jnp.einsum(
         "tfbp,pu->tfbu",
         sky_to_visibility,
         transverse_operator,
     )
+    # At each frequency, attach the eta response to every transverse mode.
     operator = jnp.einsum(
         "tfbu,fe->tfbue",
         transverse_response,
@@ -209,8 +325,37 @@ def build_T_fg_core(
 ) -> jax.Array:
     r"""Build :math:`T_{\rm FG}=R Q_z` for one visibility-row block.
 
-    Columns are ordered by spectral component and then image-domain pixel,
-    matching ``q = (q_0.T, q_1.T, ...).T`` in the physical model.
+    .. math::
+
+        (T_{\rm FG})_{(tfb),(sp)} = R_{tfbp} Q_{fs}.
+
+    Each foreground coefficient belongs to one image pixel and one spectral
+    component. ``Q`` supplies the spectral dependence at every pixel;
+    ``R`` propagates the resulting brightness through the instrument.
+
+    Parameters
+    ----------
+    sky_to_visibility : jax.Array
+        ``R`` for the foreground pixel selection, with shape
+        ``(n_time, n_frequency, n_baseline, n_pixel)``.
+    spectral_operator : jax.Array
+        Spectral factors ``Q`` from ``build_foreground_spectral_operator``,
+        shape ``(n_frequency, n_spectral_component)``. Frequency rows must
+        match those in ``sky_to_visibility``.
+
+    Returns
+    -------
+    jax.Array
+        Matrix of shape ``(n_time * n_frequency * n_baseline,
+        n_spectral_component * n_pixel)``. Rows are ordered by time,
+        frequency, then baseline. Columns are ordered by spectral component,
+        then pixel, matching ``q = (q_0.T, q_1.T, ...).T`` in the paper.
+
+    Notes
+    -----
+    ``BuildMatrices.build_T_fg`` distributes and saves blocks from this core.
+    The pixel identity in ``Q_z`` is applied implicitly, so no dense
+    Kronecker product or additional pixel-area factor is needed.
     """
     sky_to_visibility = jnp.asarray(sky_to_visibility)
     spectral_operator = jnp.asarray(spectral_operator)
@@ -246,7 +391,34 @@ def build_foreground_spectral_operator(
     reference_frequency_mhz: float,
     spectral_indices: Sequence[float] = (-2.63, -2.82),
 ) -> jax.Array:
-    """Return the constant and power-law columns defining ``Q_z``."""
+    r"""Build the spectral factors of the foreground operator :math:`Q_z`.
+
+    .. math::
+
+        Q_{f0}=1,\qquad Q_{fs}=(\nu_f/\nu_0)^{\beta_s}\ (s>0),
+        \qquad s_p(\nu_f)=\sum_s Q_{fs}q_{s,p}.
+
+    Parameters
+    ----------
+    frequencies_mhz : jax.Array
+        Observing frequencies in MHz, shape ``(n_frequency,)``.
+    reference_frequency_mhz : float
+        Positive reference frequency ``nu_0`` in MHz. Power-law amplitudes
+        are defined at this frequency.
+    spectral_indices : sequence of float
+        Signed exponents for the power-law components, following the constant
+        component. For example, ``-2.63`` gives a spectrum decreasing with
+        frequency. ``BuildMatrices`` converts its positive ``beta_fg``
+        configuration values to this signed convention.
+
+    Returns
+    -------
+    jax.Array
+        Dimensionless complex matrix of shape
+        ``(n_frequency, 1 + len(spectral_indices))``. It contains only the
+        spectral factors; ``build_T_fg_core`` applies them independently to
+        each image pixel to implement the full ``Q_z`` mapping.
+    """
     frequencies_mhz = jnp.asarray(frequencies_mhz, dtype=jnp.float64)
     if frequencies_mhz.ndim != 1:
         raise ValueError("frequencies_mhz must be one-dimensional")
