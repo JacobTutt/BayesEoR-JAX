@@ -345,7 +345,7 @@ def run_setup(config: RunConfig) -> SetupResult:
                 valid_mask=valid_compact, clobber=config.clobber,
             )
         else:
-            write_log_files(parser=None, args=setup_args_dict, out_dir=output_dir)
+            write_log_files(args=setup_args_dict, out_dir=output_dir)
     if jax.process_count() > 1:
         multihost_utils.sync_global_devices("k-vals-metadata-saved")
 

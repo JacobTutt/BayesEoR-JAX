@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
@@ -9,7 +10,7 @@ import numpy as np
 import pytest
 
 import bayeseor_jax as api
-from bayeseor_jax.configuration import BayesEoRParser
+from bayeseor_jax.configuration import BayesEoRParser, RunConfig
 from bayeseor_jax.inference.multinest_paths import (
     MultiNestPathManager, _prepare_multinest_path, _cleanup_multinest_path,
 )
@@ -17,6 +18,7 @@ from bayeseor_jax.inference.prior import parse_uprior_inds
 from bayeseor_jax.inference.run_ns import estimate_average_eval_time
 from bayeseor_jax.io import (
     load_numpy_dict, save_numpy_dict, load_sharded_npy, write_analysis_metadata,
+    write_log_files,
 )
 
 
@@ -46,6 +48,31 @@ def test_sharded_loading_preserves_plain_array(tmp_path):
     sharding = NamedSharding(Mesh(np.asarray(jax.devices()[:1]), ("x",)), PartitionSpec())
     np.testing.assert_array_equal(load_sharded_npy(path, sharding), data)
     np.testing.assert_array_equal(load_numpy_dict(path), data)
+
+
+def test_run_metadata_preserves_existing_settings_and_version(tmp_path):
+    write_log_files({"model": "fg"}, out_dir=tmp_path, version="first")
+    write_log_files(RunConfig(model="eor"), out_dir=tmp_path, version="second")
+    assert json.loads((tmp_path / "args.json").read_text()) == {"model": "fg"}
+    assert (tmp_path / "version.txt").read_text() == "first\n"
+
+
+def test_numpy_payload_accepts_run_configuration(tmp_path):
+    path = tmp_path / "data.npy"
+    save_numpy_dict(path, np.arange(3), RunConfig(model="fg"))
+    saved = np.load(path, allow_pickle=True).item()
+    assert saved["args"]["model"] == "fg"
+    np.testing.assert_array_equal(saved["data"], np.arange(3))
+
+
+@pytest.mark.parametrize("args", [None, SimpleNamespace(model="fg")])
+def test_metadata_rejects_unsupported_argument_types(tmp_path, args):
+    with pytest.raises(TypeError, match="RunConfig or dictionary"):
+        write_log_files(args, out_dir=tmp_path)
+    with pytest.raises(TypeError, match="RunConfig or dictionary"):
+        save_numpy_dict(tmp_path / "data.npy", np.arange(3), args)
+    assert not (tmp_path / "args.json").exists()
+    assert not (tmp_path / "data.npy").exists()
 
 
 def test_analysis_metadata_retains_output_format(tmp_path):

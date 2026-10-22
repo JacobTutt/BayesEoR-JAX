@@ -113,7 +113,7 @@ def run_example(
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_log_files(parser, args, out_dir=out_dir)
+    write_log_files(args, out_dir=out_dir)
 
     ns_out_dir = out_dir / nested_sampling_dirname
     summary = run_nestedsampling(

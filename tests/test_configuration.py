@@ -44,7 +44,7 @@ def test_typo_cannot_be_silently_ignored_by_config():
 def test_config_metadata_serializes_without_parser_namespace(tmp_path):
     parser = BayesEoRParser()
     config = parser.parse_args(["--config", "test_examples/eor/config.yaml"])
-    write_log_files(parser, config, out_dir=tmp_path)
+    write_log_files(config, out_dir=tmp_path)
     saved = json.loads((tmp_path / "args.json").read_text())
     assert saved["nside"] == config.nside
     assert saved["model"] == config.model

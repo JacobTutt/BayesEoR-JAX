@@ -32,6 +32,10 @@ These files are written by `write_analysis_metadata` during setup when the
 cosmological model is included. Foreground-only setup writes configuration
 metadata but no cosmological k-bin files.
 
+For standalone workflows, `write_log_files(config, out_dir=output_dir)` accepts
+a `RunConfig` or metadata dictionary. It writes `args.json` and, when supplied,
+`version.txt`, leaving existing files unchanged. No parser object is needed.
+
 ## Sampler Outputs
 
 MultiNest writes its standard `data-*` products and a BayesEoR-JAX `summary.json`. The main weighted-chain file is usually `data-.txt`, though a shorter file root may be used to avoid MultiNest path-length limits.
