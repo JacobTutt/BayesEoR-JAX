@@ -28,7 +28,12 @@ A typical run has five stages:
 4. Run an inference backend.
 5. Analyse the posterior samples and k-bin metadata.
 
-The central setup function is `bayeseor_jax.run_setup`. It returns a `SetupResult` containing the matrix builder, prior, precision model, likelihood object, visibility metadata, and k-bin metadata used by the samplers.
+The central setup function is `bayeseor_jax.run_setup(config)`, where `config` is
+a `RunConfig` constructed in Python or returned by `BayesEoRParser`. It returns
+a `SetupResult` containing the requested configuration, matrix builder, prior,
+precision model, likelihood object, visibility metadata and k-bin metadata used
+by the samplers. Resolved observation and geometry inputs remain separate from
+the requested settings.
 
 Choose `model: eor`, `fg`, or `eor+fg` in the configuration to fit either component independently or jointly. The default is joint inference. With fixed foreground priors and noise, foreground-only inference instead evaluates the evidence and MAP coefficients analytically, without posterior sampling. See [model selection](inference.md#selecting-the-fitted-components).
 

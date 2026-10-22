@@ -6,13 +6,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-jax.config.update("jax_enable_x64", True)
+from ..configuration import DEFAULT_FOREGROUND_PRIOR_STD_MK
 
-DEFAULT_FOREGROUND_PRIOR_STD_MK = (
-    8690.961932554002,
-    2479547.297490031,
-    1406322.413511489,
-)
+jax.config.update("jax_enable_x64", True)
 
 
 class PhiInverse:

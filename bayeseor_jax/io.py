@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,8 @@ def _coerce_args_dict(args: Any) -> dict[str, Any]:
     """Convert parser output or mapping-like object to a JSON-serializable dict."""
     if args is None:
         return {}
+    if is_dataclass(args):
+        return asdict(args)
     if isinstance(args, dict):
         return dict(args)
     if hasattr(args, "as_dict"):
@@ -57,7 +60,7 @@ def write_log_files(
 
     args_file = out_dir / "args.json"
     if not args_file.exists():
-        if hasattr(parser, "save"):
+        if hasattr(parser, "save") and not is_dataclass(args):
             parser.save(args, args_file, format="json", skip_none=False)
         else:
             args_dict = _coerce_args_dict(args)

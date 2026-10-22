@@ -105,8 +105,7 @@ def run_example(
         args_list.extend(extra_bayeseor_args)
     args = parser.parse_args(args_list)
 
-    args_dict = dict(vars(args))
-    setup_result = run_setup(**args_dict)
+    setup_result = run_setup(args)
 
     if not args.run:
         print("Setup complete. Sampling disabled.")

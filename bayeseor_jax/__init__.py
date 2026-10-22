@@ -32,7 +32,7 @@ from .model import (
     Cosmology,
     InstrumentModel,
 )
-from .configuration import BayesEoRParser
+from .configuration import BayesEoRParser, ModelConfig, RunConfig
 from .io import (
     load_numpy_dict,
     save_numpy_dict,
@@ -81,6 +81,8 @@ __all__ = [
     "DataContainer",
     "BuildMatrices",
     "BayesEoRParser",
+    "ModelConfig",
+    "RunConfig",
     "Cosmology",
     "InstrumentModel",
     "MarginalisedLikelihood",

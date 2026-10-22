@@ -19,7 +19,7 @@ For reproducible analyses, prefer YAML files committed or archived with the outp
 
 ## Code responsibilities
 
-- `configuration.py` defines YAML and command-line options.
+- `configuration.py` defines `ModelConfig`, `RunConfig` and the YAML/CLI parser.
 - `setup.py` coordinates data loading, physical-model construction and likelihood preparation; it does not run the sampler.
 - `model/` owns the physical geometry and operators, including automatic Fourier-grid sizing in `model/cosmology/fourier_geometry.py`.
 - `inference/` owns priors, likelihood evaluation and sampling, including MultiNest output-path handling.
@@ -30,6 +30,55 @@ unchanged. Direct imports from the former `bayeseor_jax.params` and
 `bayeseor_jax.utils` modules should use the modules above instead;
 `parse_uprior_inds` now belongs to `inference/prior.py` and remains available
 at package level.
+
+## Typed configuration workflow
+
+The parser returns a `RunConfig`, which setup accepts directly:
+
+```python
+from dataclasses import replace
+from bayeseor_jax import BayesEoRParser, RunConfig, run_setup
+
+config = BayesEoRParser().parse_args([
+    "--config", "test_examples/eor_fgs/config.yaml",
+])
+result = run_setup(config)
+
+# A new analysis gets a new configuration, leaving the original unchanged.
+foreground_only = replace(config, model="fg", array_save_directory="matrices_fg")
+# Direct Python construction also works: RunConfig(data_path=..., ...).
+```
+
+`RunConfig` contains requested settings. Selected observation axes and derived
+image/Fourier grids remain separate: setup does not overwrite `config.n_freq`,
+`config.n_t` or other requests when it resolves them from the data. The original
+configuration remains available as `result.config`, while actual inputs are
+available through `result.vis_dict` and the builder's geometry objects.
+
+`BuildMatrices` accepts the model settings plus resolved arrays and geometry:
+
+```python
+from bayeseor_jax import BuildMatrices, ModelConfig
+
+builder = BuildMatrices(
+    ModelConfig(model="eor+fg", beam_type="airy", diam=14.2),
+    frequencies_hz=frequencies_hz,
+    uvw_array_m=uvw_array_m,
+    image_geometry=image_geometry,
+    fourier_geometry=fourier_geometry,
+)
+```
+
+A `RunConfig` extends `ModelConfig` and can be passed directly to this builder.
+The builder no longer reconstructs geometry from a second list of nominal
+settings. Low-level operator functions continue to take explicit arrays.
+
+Migration: replace `run_setup(**settings)` with `run_setup(RunConfig(**settings))`;
+replace long `BuildMatrices(...)` keyword lists with model settings and prepared
+geometry as above. Unknown configuration keys now raise an error instead of
+being silently discarded by setup. YAML/CLI flags and their required fields are
+unchanged. The historical CLI output-directory default is `./BayesEoROutputs/`,
+while direct Python configuration retains the setup default `./`.
 
 ## Choosing a HEALPix resolution
 

@@ -13,7 +13,7 @@ must use these new paths.
 ## Selecting the fitted components
 
 Set `model` in YAML, pass `--model` on the command line, or supply it to
-`run_setup`. The default remains `eor+fg`.
+`RunConfig` passed to `run_setup(config)`. The default remains `eor+fg`.
 
 | `model` | Forward operator | Sampled parameters | Evaluation |
 |---|---|---|---|

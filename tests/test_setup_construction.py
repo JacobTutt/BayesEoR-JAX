@@ -4,10 +4,13 @@ import importlib.util
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from dataclasses import asdict, FrozenInstanceError
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
+
+from bayeseor_jax.configuration import RunConfig
 
 
 @pytest.fixture
@@ -58,10 +61,27 @@ def setup_case(tmp_path, monkeypatch):
     return setup, arguments, vis
 
 
+def test_setup_preserves_requested_settings_and_resolves_observation(setup_case):
+    setup, arguments, vis = setup_case
+    requested = dict(arguments, n_freq=99, f0_mhz=1., df_mhz=.01, n_t=20,
+                     jd_center=2450000., fov_fg=None, sigma=.5)
+    config = RunConfig(**requested)
+    before = asdict(config)
+    result = setup.run_setup(config)
+    assert asdict(config) == before
+    assert result.config is config
+    assert result.bm.config is config
+    assert result.bm.n_freq == 3
+    assert result.bm.n_t == 1
+    np.testing.assert_array_equal(result.bm.freq_hz, vis["freqs_hz"])
+    with pytest.raises(FrozenInstanceError):
+        config.n_freq = 3
+
+
 def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, setup_case):
     setup, arguments, vis = setup_case
     data = vis['vis_noisy']
-    result = setup.run_setup(**arguments, sigma=.5)
+    result = setup.run_setup(RunConfig(**arguments, sigma=.5))
     operator = np.load(tmp_path / "T.npy")
     inverse_noise = np.load(tmp_path / "Ninv.npy")
     assert operator.shape == (6, 22)
@@ -75,14 +95,14 @@ def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, 
               for name in ("T_21.npy", "T_fg.npy", "T.npy", "T_Ninv_T.npy")}
 
     vis["vis_noisy"] = 2 * data
-    setup.run_setup(**arguments, sigma=.5)
+    setup.run_setup(RunConfig(**arguments, sigma=.5))
     assert all((tmp_path / name).stat().st_mtime_ns == stamp for name, stamp in stamps.items())
     np.testing.assert_allclose(np.load(tmp_path / "dbar.npy"),
                                2 * operator.conj().T @ (inverse_noise * data))
     np.testing.assert_allclose(np.load(tmp_path / "d_ninv_d.npy"),
                                4 * np.vdot(data, inverse_noise * data).real)
 
-    setup.run_setup(**arguments, sigma=1.)
+    setup.run_setup(RunConfig(**arguments, sigma=1.))
     assert (tmp_path / "T.npy").stat().st_mtime_ns == stamps["T.npy"]
     np.testing.assert_allclose(np.load(tmp_path / "Ninv.npy"), inverse_noise / 4)
     np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"),
@@ -92,7 +112,7 @@ def test_setup_refreshes_data_and_noise_without_rebuilding_components(tmp_path, 
 @pytest.mark.parametrize('rank', [0, 3, 6])
 def test_setup_selects_kl_operator_and_unit_prior(tmp_path, setup_case, monkeypatch, rank):
     setup, arguments, vis = setup_case
-    original = setup.run_setup(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.])
+    original = setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.]))
     original_t = np.load(tmp_path / 'T.npy')
     np.testing.assert_allclose(original.phi_inverse_class.foreground_precision,
                                [1., 1., .25, .25, .0625, .0625])
@@ -108,8 +128,8 @@ def test_setup_selects_kl_operator_and_unit_prior(tmp_path, setup_case, monkeypa
     with monkeypatch.context() as patch:
         patch.setattr(setup.BuildMatrices, 'T_fg_build_save', unexpected_build)
         # Even different physical widths must not be applied a second time.
-        result = setup.run_setup(**arguments, sigma=.5, foreground_kl_path=reduced_path,
-                                 foreground_prior_std_mk=[100., 200., 400.])
+        result = setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_kl_path=reduced_path,
+                                 foreground_prior_std_mk=[100., 200., 400.]))
     operator = np.load(tmp_path / 'T.npy')
     np.testing.assert_array_equal(operator[:, :16], original_t[:, :16])
     np.testing.assert_array_equal(operator[:, 16:], reduced)
@@ -127,7 +147,7 @@ def test_setup_selects_kl_operator_and_unit_prior(tmp_path, setup_case, monkeypa
     )
 
     # Switching back invalidates cached joint products, including equal-sized bases.
-    setup.run_setup(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.])
+    setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_prior_std_mk=[1., 2., 4.]))
     np.testing.assert_array_equal(np.load(tmp_path / 'T.npy'), original_t)
 
 
@@ -136,7 +156,7 @@ def test_kl_setup_does_not_need_original_foreground_file(tmp_path, setup_case, m
     path = tmp_path / 'reduced.npy'
     np.save(path, np.ones((6, 2), dtype=np.complex128))
     monkeypatch.setattr(setup.BuildMatrices, 'T_fg_build_save', lambda **kwargs: pytest.fail('Unexpected build'))
-    setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path)
+    setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_kl_path=path))
     assert not (tmp_path / 'T_fg.npy').exists()
 
 
@@ -146,7 +166,7 @@ def test_setup_rejects_incompatible_kl_matrix(tmp_path, setup_case, matrix):
     path = tmp_path / 'reduced.npy'
     np.save(path, matrix)
     with pytest.raises(ValueError, match='KL foreground operator'):
-        setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path)
+        setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_kl_path=path))
 
 
 def test_kl_input_cannot_be_overwritten_by_setup(tmp_path, setup_case):
@@ -155,7 +175,7 @@ def test_kl_input_cannot_be_overwritten_by_setup(tmp_path, setup_case):
     np.save(path, np.ones((6, 2), dtype=np.complex128))
     before = path.read_bytes()
     with pytest.raises(ValueError, match='setup output'):
-        setup.run_setup(**arguments, sigma=.5, foreground_kl_path=path, clobber=True)
+        setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_kl_path=path, clobber=True))
     assert path.read_bytes() == before
 
 
@@ -170,7 +190,7 @@ def test_setup_constructs_only_selected_components(tmp_path, setup_case, monkeyp
     if model == "eor":
         arguments.update(beta_fg=[], foreground_prior_std_mk=None)
         monkeypatch.setattr(setup.BuildMatrices, "T_fg_build_save", lambda **kw: pytest.fail("Unexpected T_fg"))
-    result = setup.run_setup(**arguments, model=model, sigma=.5)
+    result = setup.run_setup(RunConfig(**arguments, model=model, sigma=.5))
     assert result.model == model
     assert np.load(tmp_path / "T.npy").shape == (6, n_columns)
     assert (tmp_path / "T_21.npy").exists() == (model != "fg")
@@ -187,7 +207,7 @@ def test_fg_only_setup_accepts_kl_basis_without_cosmological_priors(tmp_path, se
     np.save(path, reduced)
     arguments["priors"] = None
     monkeypatch.setattr(setup.BuildMatrices, "T_fg_build_save", lambda **kw: pytest.fail("Unexpected T_fg"))
-    result = setup.run_setup(**arguments, model="fg", foreground_kl_path=path, sigma=.5)
+    result = setup.run_setup(RunConfig(**arguments, model="fg", foreground_kl_path=path, sigma=.5))
     np.testing.assert_array_equal(np.load(tmp_path / "T.npy"), reduced)
     np.testing.assert_array_equal(result.phi_inverse_class.evaluate(jnp.empty(0)), np.ones(2))
     assert not (tmp_path / "T_21.npy").exists()
@@ -197,7 +217,7 @@ def test_fg_only_setup_accepts_kl_basis_without_cosmological_priors(tmp_path, se
 def test_switching_models_invalidates_joint_and_gram_caches(tmp_path, setup_case):
     setup, arguments, _ = setup_case
     for model, n_columns in (("eor+fg", 22), ("eor", 16), ("fg", 6), ("eor+fg", 22)):
-        setup.run_setup(**arguments, model=model, sigma=.5)
+        setup.run_setup(RunConfig(**arguments, model=model, sigma=.5))
         operator = np.load(tmp_path / "T.npy")
         inverse_noise = np.load(tmp_path / "Ninv.npy")
         assert operator.shape == (6, n_columns)
@@ -210,7 +230,7 @@ def test_fg_only_rejects_empty_kl_basis(tmp_path, setup_case):
     path = tmp_path / "empty.npy"
     np.save(path, np.empty((6, 0), dtype=np.complex128))
     with pytest.raises(ValueError, match="at least one retained foreground mode"):
-        setup.run_setup(**arguments, model="fg", foreground_kl_path=path)
+        setup.run_setup(RunConfig(**arguments, model="fg", foreground_kl_path=path))
 
 
 @pytest.mark.parametrize("options", [dict(model="unknown"),
@@ -219,4 +239,4 @@ def test_fg_only_rejects_empty_kl_basis(tmp_path, setup_case):
 def test_model_selection_rejects_incompatible_options(setup_case, options):
     setup, arguments, _ = setup_case
     with pytest.raises(ValueError):
-        setup.run_setup(**arguments, **options)
+        setup.run_setup(RunConfig(**arguments, **options))

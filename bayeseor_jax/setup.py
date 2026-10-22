@@ -16,7 +16,8 @@ from .model import (
     build_image_geometry,
 )
 from .inference.likelihood_marg import MarginalisedLikelihood
-from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
+from .inference.phi import PhiInverse
+from .configuration import RunConfig
 from .inference.prior import Prior
 from .model.instrument.noise import build_noise_variance
 from .model.construction.operator_construction import assemble_joint_operator
@@ -45,6 +46,7 @@ class SetupResult:
 
     def __init__(
         self,
+        config: RunConfig,
         likelihood_class: MarginalisedLikelihood,
         prior_class: Prior,
         phi_inverse_class: PhiInverse,
@@ -58,6 +60,7 @@ class SetupResult:
         ps_box_size_para_mpc: float,
         model: str = "eor+fg",
     ) -> None:
+        self.config = config
         self.likelihood_class = likelihood_class
         self.prior_class = prior_class
         self.phi_inverse_class = phi_inverse_class
@@ -70,179 +73,56 @@ class SetupResult:
         self.ps_box_size_dec_mpc = ps_box_size_dec_mpc
         self.ps_box_size_para_mpc = ps_box_size_para_mpc
         self.model = model
-def run_setup(
-    *,
-    # IO
-    data_path: Path | str,
-    model: str = "eor+fg",
-    inst_model: Path | str | None = None,
-    noise_data_path: Path | str | None = None,
-    array_save_directory: Path | str = "./matrices/",
-    # UV model
-    n_u_eor: int | None = None,
-    n_v_eor: int | None = None,
-    du_eor: float | None = None,
-    dv_eor: float | None = None,
-    beta_fg: list[float] = [2.63, 2.82],
-    # Frequency / time
-    n_freq: int | None = None,
-    f0_mhz: float | None = None,
-    df_mhz: float | None = None,
-    n_eta: int | None = None,
-    n_t: int = 1,
-    d_t: float | None = None,
-    jd_center: float | None = None,
-    # Sky / beam
-    nside: int = 128,
-    fov_eor: float = 10.0,
-    fov_fg: float | None = None,
-    telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0),
-    beam_type: str = "uniform",
-    peak_amp: float = 1.0,
-    fwhm_deg: float | None = None,
-    diam: float | None = None,
-    cosfreq: float | None = None,
-    tanh_freq: float | None = None,
-    tanh_sl_red: float | None = None,
-    pol: str = "xx",
-    freq_interp_kind: str = "cubic",
-    # Data preprocessing
-    antenna_selection: str = "cross",
-    bl_cutoff: float | None = None,
-    freq_idx_min: int | None = None,
-    freq_min: float | None = None,
-    freq_center: float | None = None,
-    n_freqs_select: int | None = None,
-    jd_idx_min: int | None = None,
-    jd_min: float | None = None,
-    n_times_select: int | None = None,
-    form_pi: bool = True,
-    pi_norm: float = 1.0,
-    redundant_avg: bool = False,
-    uniform_redundancy: bool = False,
-    calc_noise: bool = False,
-    sigma: float | None = None,
-    noise_seed: int = 742123,
-    save_vis: bool = False,
-    save_model: bool = False,
-    save_dir: Path | str = "./",
-    output_dir: Path | str = "./",
-    clobber: bool = False,
-    effective_noise_path: Path | str | None = None,
-    # Prior / likelihood
-    priors: Any = None,
-    uniform_priors: Any = None,
-    foreground_prior_std_mk: tuple[float, ...] = DEFAULT_FOREGROUND_PRIOR_STD_MK,
-    foreground_kl_path: Path | str | None = None,
-    use_intrinsic_noise_fitting: bool = False,
-    **_: Any,
-) -> SetupResult:
-    """
-    Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    This is the main setup entry point used by :mod:`bayeseor_jax.inference.run_ns`. It:
 
-    1. Loads or preprocesses visibilities/noise metadata.
-    2. Builds k-bin metadata and power-spectrum normalization inputs.
-    3. Constructs or reuses the separate physical operators, assembles the joint
-       matrix, and prepares noise-weighted likelihood products from saved inputs.
-    4. Instantiates sampler-space prior, latent-space precision config, and
-       likelihood config objects.
+def run_setup(config: RunConfig) -> SetupResult:
+    """Prepare the physical operators, priors and marginalised likelihood.
 
     Parameters
     ----------
-    data_path : pathlib.Path or str
-        Input visibility path. Supports raw pyuvdata files (``.uvh5``,
-        ``.uvfits``, ``.ms``) or preprocessed vectors (``.npy``).
-    model : {"eor", "fg", "eor+fg"}, optional
-        Components included in the inference model, independently of the data
-        contents. Defaults to the joint model. FG-only inference has no sampled
-        power-spectrum parameters and does not require power-spectrum priors.
-    inst_model : pathlib.Path or str, optional
-        Instrument model directory for ``.npy`` input mode.
-    noise_data_path : pathlib.Path or str, optional
-        Optional precomputed noise vector path.
-    array_save_directory : pathlib.Path or str, optional
-        Directory used to store/load matrix products.
-    output_dir : pathlib.Path or str, optional
-        Directory where analysis-side metadata files are written. The new
-        pipeline saves old-style `k-vals*.txt` products here for downstream
-        analysis compatibility.
-
-    n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
-        EoR model UV grid shape and spacing. When omitted, these are
-        auto-resolved from the configured sky-mask FoV widths and instrument support.
-    beta_fg : sequence of float, optional
-        Brightness-temperature power-law indices for the spherical foreground
-        coefficient fields.
-
-    n_freq, f0_mhz, df_mhz : optional
-        Frequency-axis setup (overridden by data-driven values in raw mode).
-    n_eta : int, optional
-        Number of line-of-sight Fourier modes. Defaults to ``n_freq``.
-    n_t, d_t, jd_min, jd_center : optional
-        Time-axis controls.
-
-    nside, fov_eor, fov_fg, telescope_latlonalt : optional
-        Sky geometry controls.
-    beam_type, peak_amp, fwhm_deg, diam, cosfreq, tanh_freq, tanh_sl_red, pol,
-    freq_interp_kind : optional
-        Beam model controls.
-
-    antenna_selection, bl_cutoff, freq_idx_min, freq_min, freq_center,
-    n_freqs_select, jd_idx_min, jd_min, n_times_select, form_pi, pi_norm,
-    redundant_avg, uniform_redundancy, calc_noise, sigma, noise_seed, save_vis,
-    save_model, save_dir, clobber, effective_noise_path : optional
-        Data selection/preprocessing and noise-model controls.
-
-    priors : array-like
-        Power-spectrum prior bounds with shape ``(n_power_params, 2)`` in
-        log10 space.
-    uniform_priors : array-like of bool, optional
-        Boolean mask of length ``n_power_params`` where True bins use the
-        old BayesEoR linear-uniform physical prior implemented via a Jacobian
-        correction inside the likelihood. Sampler coordinates remain in
-        log10-power space for all bins.
-    foreground_prior_std_mk : sequence of float, optional
-        Physical prior width for each foreground spectral coefficient field,
-        repeated across its pixels. Ignored when foreground_kl_path is supplied.
-    foreground_kl_path : pathlib.Path or str, optional
-        Preconstructed, unwhitened reduced foreground operator from
-        T_fg_svd_build_save, with the same visibility ordering as the data.
-        Replaces construction of T_fg and selects a unit coefficient prior;
-        the physical foreground uncertainty is already absorbed in this file.
-        Its observation and physical prior must match the intended analysis.
-        This option does not run a decomposition or alter the saved operator.
-    use_intrinsic_noise_fitting : bool, optional
-        Whether to include a global intrinsic noise amplitude parameter in the
-        likelihood.
-    **_ : Any
-        Catch-all for extra parser keys that are not consumed here.
+    config : RunConfig
+        Requested data/model/inference settings. Actual observation axes and
+        model coordinates are resolved locally without modifying this object.
 
     Returns
     -------
     SetupResult
-        Container with:
+        Configured likelihood, coefficient and power-spectrum priors, matrix
+        builder, selected visibility data and cosmological bin metadata.
 
-        - `likelihood_class`: configured marginalized Gaussian likelihood.
-        - `prior_class`: sampler-space prior object.
-        - `phi_inverse_class`: latent prior-precision object.
-        - `bm`: matrix builder instance.
-        - `vis_dict`: visibility/noise/instrument metadata.
-        - `k_vals`, `bin_id_per_k_mode`, `valid_mask`: k-binning metadata.
-        - `ps_box_size_ra_mpc`, `ps_box_size_dec_mpc`, `ps_box_size_para_mpc`:
-          cosmological box extents used for power normalization.
+    Notes
+    -----
+    This coordinates loading, geometry, component construction, joint assembly
+    and likelihood products; it does not run nested sampling. A supplied KL
+    operator is loaded with a standard-normal prior, not recomputed.
     """
-    # Resolve parser-like defaults that are independent of the actual selected
-    # data product. The uv-grid shapes themselves are resolved later from the
-    # time-union FoV extents and instrument uv coverage once vis metadata are
-    # available.
-    if model not in ("eor", "fg", "eor+fg"):
+    if not isinstance(config, RunConfig):
+        raise TypeError("run_setup requires a RunConfig")
+    # Resolve derived values locally; retain the caller's requested settings.
+    array_save_directory = config.array_save_directory
+    n_u_eor = config.n_u_eor
+    n_v_eor = config.n_v_eor
+    du_eor = config.du_eor
+    dv_eor = config.dv_eor
+    n_freq = config.n_freq
+    f0_mhz = config.f0_mhz
+    df_mhz = config.df_mhz
+    n_eta = config.n_eta
+    n_t = config.n_t
+    d_t = config.d_t
+    jd_center = config.jd_center
+    fov_eor = config.fov_eor
+    fov_fg = config.fov_fg
+    save_dir = config.save_dir
+    output_dir = config.output_dir
+    foreground_kl_path = config.foreground_kl_path
+
+    if config.model not in ("eor", "fg", "eor+fg"):
         raise ValueError("model must be 'eor', 'fg' or 'eor+fg'")
-    include_eor, include_fg = model != "fg", model != "eor"
+    include_eor, include_fg = config.model != "fg", config.model != "eor"
     if not include_fg and foreground_kl_path is not None:
         raise ValueError("foreground_kl_path cannot be used with model='eor'")
-    if not include_eor and use_intrinsic_noise_fitting:
+    if not include_eor and config.use_intrinsic_noise_fitting:
         raise ValueError("Foreground-only inference currently requires a fixed noise model")
     if fov_fg is None:
         fov_fg = fov_eor
@@ -251,14 +131,14 @@ def run_setup(
         fov_fg = fov_eor
     if not include_eor:
         fov_eor = fov_fg
-    if len(telescope_latlonalt) != 3:
+    if len(config.telescope_latlonalt) != 3:
         raise ValueError("telescope_latlonalt must contain exactly 3 values: [lat, lon, alt].")
     fov_eor = float(fov_eor)
     fov_fg = float(fov_fg)
 
-    if include_fg and not beta_fg:
+    if include_fg and not config.beta_fg:
         raise ValueError("beta_fg must contain at least one spectral index")
-    if include_fg and foreground_kl_path is None and len(foreground_prior_std_mk) != 1 + len(beta_fg):
+    if include_fg and foreground_kl_path is None and len(config.foreground_prior_std_mk) != 1 + len(config.beta_fg):
         raise ValueError(
             "foreground_prior_std_mk must contain one width for the constant "
             "field and one for each beta_fg power law"
@@ -280,36 +160,36 @@ def run_setup(
     save_dir = Path(save_dir).expanduser().resolve()
 
     vis_dict = get_vis_data(
-        data_path=data_path,
-        inst_model=inst_model,
-        noise_data_path=noise_data_path,
-        sigma=sigma,
-        noise_seed=noise_seed,
-        calc_noise=calc_noise,
-        antenna_selection=antenna_selection,
-        bl_cutoff=bl_cutoff,
-        freq_idx_min=freq_idx_min,
-        freq_min=freq_min,
-        freq_center=freq_center,
-        n_freqs_select=n_freqs_select,
-        jd_idx_min=jd_idx_min,
-        jd_min=jd_min,
+        data_path=config.data_path,
+        inst_model=config.inst_model,
+        noise_data_path=config.noise_data_path,
+        sigma=config.sigma,
+        noise_seed=config.noise_seed,
+        calc_noise=config.calc_noise,
+        antenna_selection=config.antenna_selection,
+        bl_cutoff=config.bl_cutoff,
+        freq_idx_min=config.freq_idx_min,
+        freq_min=config.freq_min,
+        freq_center=config.freq_center,
+        n_freqs_select=config.n_freqs_select,
+        jd_idx_min=config.jd_idx_min,
+        jd_min=config.jd_min,
         jd_center=jd_center,
-        n_times_select=n_times_select,
-        form_pi=form_pi,
-        pi_norm=pi_norm,
-        pol=pol,
-        redundant_avg=redundant_avg,
-        uniform_redundancy=uniform_redundancy,
+        n_times_select=config.n_times_select,
+        form_pi=config.form_pi,
+        pi_norm=config.pi_norm,
+        pol=config.pol,
+        redundant_avg=config.redundant_avg,
+        uniform_redundancy=config.uniform_redundancy,
         n_freq=n_freq,
         f0_mhz=f0_mhz,
         df_mhz=df_mhz,
         n_t=n_t,
         d_t=d_t,
-        save_vis=save_vis,
-        save_model=save_model,
+        save_vis=config.save_vis,
+        save_model=config.save_model,
         save_dir=save_dir,
-        clobber=clobber,
+        clobber=config.clobber,
     )
 
     # Data-driven values overwrite nominal values in raw-file mode.
@@ -334,8 +214,8 @@ def run_setup(
     image_geometry = build_image_geometry(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
-        nside=int(nside),
-        telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
+        nside=int(config.nside),
+        telescope_latlonalt=tuple(float(x) for x in config.telescope_latlonalt),
         jd_center=float(jd_center),
         n_t=int(n_t),
         d_t=float(d_t),
@@ -350,9 +230,9 @@ def run_setup(
             extent_v_eor=float(image_geometry.fov_m_angle_eor),
             freqs_hz=np.asarray(freqs_hz, dtype=float),
             uvws_m=np.asarray(vis_dict["uvws"], dtype=float),
-            beam_type=beam_type,
-            fwhm_deg=None if fwhm_deg is None else float(fwhm_deg),
-            diam=None if diam is None else float(diam),
+            beam_type=config.beam_type,
+            fwhm_deg=None if config.fwhm_deg is None else float(config.fwhm_deg),
+            diam=None if config.diam is None else float(config.diam),
             n_u_eor=n_u_eor, n_v_eor=n_v_eor, du_eor=du_eor, dv_eor=dv_eor,
         )
         n_u_eor = int(resolved_grid["n_u_eor"])
@@ -365,64 +245,64 @@ def run_setup(
         )
 
     setup_args_dict = {
-        "model": model,
-        "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
-        "inst_model": None if inst_model is None else str(Path(inst_model).expanduser().resolve()),
-        "noise_data_path": None if noise_data_path is None else str(Path(noise_data_path).expanduser().resolve()),
+        "model": config.model,
+        "data_path": None if config.data_path is None else str(Path(config.data_path).expanduser().resolve()),
+        "inst_model": None if config.inst_model is None else str(Path(config.inst_model).expanduser().resolve()),
+        "noise_data_path": None if config.noise_data_path is None else str(Path(config.noise_data_path).expanduser().resolve()),
         "array_save_directory": str(array_save_directory),
         "output_dir": str(output_dir),
         **resolved_grid,
-        "beta_fg": None if beta_fg is None else list(beta_fg),
+        "beta_fg": None if config.beta_fg is None else list(config.beta_fg),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
         "df_mhz": float(df_mhz),
         "n_eta": int(n_eta),
         "n_t": int(n_t),
         "d_t": None if d_t is None else float(d_t),
-        "jd_min": None if jd_min is None else float(jd_min),
+        "jd_min": None if config.jd_min is None else float(config.jd_min),
         "jd_center": None if jd_center is None else float(jd_center),
-        "nside": int(nside),
+        "nside": int(config.nside),
         "fov_eor": float(fov_eor),
         "fov_fg": float(fov_fg),
         "fov_l_angle_eor": float(image_geometry.fov_l_angle_eor),
         "fov_m_angle_eor": float(image_geometry.fov_m_angle_eor),
         "fov_l_angle_fg": float(image_geometry.fov_l_angle_fg),
         "fov_m_angle_fg": float(image_geometry.fov_m_angle_fg),
-        "telescope_latlonalt": [float(x) for x in telescope_latlonalt],
-        "beam_type": beam_type,
-        "peak_amp": float(peak_amp),
-        "fwhm_deg": None if fwhm_deg is None else float(fwhm_deg),
-        "diam": None if diam is None else float(diam),
-        "cosfreq": None if cosfreq is None else float(cosfreq),
-        "tanh_freq": None if tanh_freq is None else float(tanh_freq),
-        "tanh_sl_red": None if tanh_sl_red is None else float(tanh_sl_red),
-        "pol": pol,
-        "freq_interp_kind": freq_interp_kind,
-        "antenna_selection": antenna_selection,
-        "bl_cutoff": None if bl_cutoff is None else float(bl_cutoff),
-        "freq_idx_min": None if freq_idx_min is None else int(freq_idx_min),
-        "freq_min": None if freq_min is None else float(freq_min),
-        "freq_center": None if freq_center is None else float(freq_center),
-        "n_freqs_select": None if n_freqs_select is None else int(n_freqs_select),
-        "jd_idx_min": None if jd_idx_min is None else int(jd_idx_min),
-        "n_times_select": None if n_times_select is None else int(n_times_select),
-        "form_pi": bool(form_pi),
-        "pi_norm": float(pi_norm),
-        "redundant_avg": bool(redundant_avg),
-        "uniform_redundancy": bool(uniform_redundancy),
-        "calc_noise": bool(calc_noise),
-        "sigma": None if sigma is None else float(sigma),
-        "noise_seed": int(noise_seed),
-        "save_vis": bool(save_vis),
-        "save_model": bool(save_model),
+        "telescope_latlonalt": [float(x) for x in config.telescope_latlonalt],
+        "beam_type": config.beam_type,
+        "peak_amp": float(config.peak_amp),
+        "fwhm_deg": None if config.fwhm_deg is None else float(config.fwhm_deg),
+        "diam": None if config.diam is None else float(config.diam),
+        "cosfreq": None if config.cosfreq is None else float(config.cosfreq),
+        "tanh_freq": None if config.tanh_freq is None else float(config.tanh_freq),
+        "tanh_sl_red": None if config.tanh_sl_red is None else float(config.tanh_sl_red),
+        "pol": config.pol,
+        "freq_interp_kind": config.freq_interp_kind,
+        "antenna_selection": config.antenna_selection,
+        "bl_cutoff": None if config.bl_cutoff is None else float(config.bl_cutoff),
+        "freq_idx_min": None if config.freq_idx_min is None else int(config.freq_idx_min),
+        "freq_min": None if config.freq_min is None else float(config.freq_min),
+        "freq_center": None if config.freq_center is None else float(config.freq_center),
+        "n_freqs_select": None if config.n_freqs_select is None else int(config.n_freqs_select),
+        "jd_idx_min": None if config.jd_idx_min is None else int(config.jd_idx_min),
+        "n_times_select": None if config.n_times_select is None else int(config.n_times_select),
+        "form_pi": bool(config.form_pi),
+        "pi_norm": float(config.pi_norm),
+        "redundant_avg": bool(config.redundant_avg),
+        "uniform_redundancy": bool(config.uniform_redundancy),
+        "calc_noise": bool(config.calc_noise),
+        "sigma": None if config.sigma is None else float(config.sigma),
+        "noise_seed": int(config.noise_seed),
+        "save_vis": bool(config.save_vis),
+        "save_model": bool(config.save_model),
         "save_dir": str(save_dir),
-        "clobber": bool(clobber),
-        "effective_noise_path": None if effective_noise_path is None else str(Path(effective_noise_path).expanduser().resolve()),
-        "priors": None if priors is None else np.asarray(priors, dtype=float).tolist(),
-        "uniform_priors": None if uniform_priors is None else np.asarray(uniform_priors, dtype=bool).astype(int).tolist(),
-        "foreground_prior_std_mk": list(foreground_prior_std_mk) if include_fg and foreground_kl_path is None else None,
+        "clobber": bool(config.clobber),
+        "effective_noise_path": None if config.effective_noise_path is None else str(Path(config.effective_noise_path).expanduser().resolve()),
+        "priors": None if config.priors is None else np.asarray(config.priors, dtype=float).tolist(),
+        "uniform_priors": None if config.uniform_priors is None else np.asarray(config.uniform_priors, dtype=bool).astype(int).tolist(),
+        "foreground_prior_std_mk": list(config.foreground_prior_std_mk) if include_fg and foreground_kl_path is None else None,
         "foreground_kl_path": str(foreground_kl_path) if foreground_kl_path is not None else None,
-        "use_intrinsic_noise_fitting": bool(use_intrinsic_noise_fitting),
+        "use_intrinsic_noise_fitting": bool(config.use_intrinsic_noise_fitting),
     }
 
     # Cosmology-derived physical cube dimensions.
@@ -462,7 +342,7 @@ def run_setup(
             write_analysis_metadata(
                 output_dir=output_dir, args=setup_args_dict, k_vals=k_vals,
                 mod_k_vo=mod_k_vo, bin_id_per_k_mode=bid_compact,
-                valid_mask=valid_compact, clobber=clobber,
+                valid_mask=valid_compact, clobber=config.clobber,
             )
         else:
             write_log_files(parser=None, args=setup_args_dict, out_dir=output_dir)
@@ -472,9 +352,9 @@ def run_setup(
     # Optional per-visibility effective-noise model.
     # If provided, this overrides sigma/redundancy-based covariance construction.
     effective_noise = None
-    if effective_noise_path is not None:
+    if config.effective_noise_path is not None:
         effective_noise = jnp.asarray(
-            load_numpy_dict(effective_noise_path, as_jax=True),
+            load_numpy_dict(config.effective_noise_path, as_jax=True),
             dtype=jnp.complex128,
         ).reshape(-1)
         expected_n_vis = int(vis_dict["vis_noisy"].size)
@@ -487,52 +367,27 @@ def run_setup(
 
     # Prepare only physical-model inputs; likelihood preparation is a later stage.
     bm = BuildMatrices(
-        n_u_eor=n_u_eor,
-        du_eor=du_eor,
-        n_v_eor=n_v_eor,
-        dv_eor=dv_eor,
-        beta_fg=beta_fg,
-        n_freq=int(n_freq),
-        f0_mhz=float(f0_mhz),
-        df_mhz=float(df_mhz),
-        n_eta=int(n_eta),
-        d_eta=d_eta,
-        telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
-        jd_center=float(jd_center),
-        nside=int(nside),
-        fov_eor=float(fov_eor),
-        fov_fg=float(fov_fg),
-        n_t=int(n_t),
-        d_t=float(d_t),
+        config,
+        # Keep the established regular-channel construction and normalization.
+        frequencies_hz=(f0_mhz + df_mhz * jnp.arange(n_freq, dtype=jnp.float64)) * 1e6,
         image_geometry=image_geometry,
         fourier_geometry=fourier_geometry,
-        beam_type=beam_type,
-        peak_amp=float(peak_amp),
-        fwhm_deg=fwhm_deg,
-        diam=diam,
-        cosfreq=cosfreq,
-        tanh_freq=tanh_freq,
-        tanh_sl_red=tanh_sl_red,
-        pol=pol,
-        freq_interp_kind=freq_interp_kind,
         uvw_array_m=vis_dict["uvws"],
-        array_save_directory=str(array_save_directory),
-        model=model,
     )
 
     # Select the foreground response and its matching prior together. Everything
     # downstream uses the same joint operator and likelihood-product functions.
     t21_path = None
     if include_eor:
-        t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=clobber)
+        t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=config.clobber)
     foreground_path = None
     foreground_std = np.empty(0)
     if include_fg and foreground_kl_path is None:
-        foreground_std = np.repeat(foreground_prior_std_mk, bm.n_fg_spatial_modes)
+        foreground_std = np.repeat(config.foreground_prior_std_mk, bm.n_fg_spatial_modes)
         if (not np.isrealobj(foreground_std) or not np.all(np.isfinite(foreground_std))
                 or np.any(foreground_std <= 0)):
             raise ValueError("foreground prior widths must be finite, real and positive")
-        foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=clobber)
+        foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=config.clobber)
     elif include_fg:
         foreground_path = foreground_kl_path
         if reduced.shape[0] != np.asarray(vis_dict["vis_noisy"]).size:
@@ -543,23 +398,23 @@ def run_setup(
         t_path,
         lambda: assemble_joint_operator(t21_path, foreground_path, output_path=t_path),
         dependencies=tuple(path for path in (t21_path, foreground_path) if path is not None),
-        clobber=clobber,
+        clobber=config.clobber,
     )
 
     # Noise belongs to the observation, not to either coefficient representation.
     variance = build_noise_variance(
-        int(n_t), int(n_freq), bm.nbls, sigma=sigma,
+        int(n_t), int(n_freq), bm.nbls, sigma=config.sigma,
         redundancy=vis_dict["redundancy"], effective_noise=effective_noise,
     )
     ninv_path = array_save_directory / "Ninv.npy"
     # This small vector can be compared exactly, so changed noise cannot reuse G.
     noise_changed = not ninv_path.exists() or not np.array_equal(np.load(ninv_path), np.asarray(1.0 / variance))
-    ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=clobber or noise_changed)
+    ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=config.clobber or noise_changed)
 
     # Only now prepare the likelihood products from the selected joint matrix.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
     save_likelihood_products(
-        t_path, ninv_path, vis_noisy, output_directory=array_save_directory, clobber=clobber,
+        t_path, ninv_path, vis_noisy, output_directory=array_save_directory, clobber=config.clobber,
     )
     n_params = int(np.load(t_path, mmap_mode="r").shape[1])
     setup_args_dict["n_pix_fg_final"] = int(bm.image_geometry.n_pix_fg)
@@ -567,10 +422,10 @@ def run_setup(
     # Assemble sampler-space prior and latent-space precision configs.
     # `Prior` now works directly in log10(power) sampler coordinates.
     # `PhiInverse` maps linearized power amplitudes to latent precision diag.
-    if include_eor and priors is None:
+    if include_eor and config.priors is None:
         raise ValueError("priors must be provided")
 
-    bounds_log = jnp.asarray(priors, dtype=jnp.float64) if include_eor else jnp.empty((0, 2))
+    bounds_log = jnp.asarray(config.priors, dtype=jnp.float64) if include_eor else jnp.empty((0, 2))
     if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
         raise ValueError("priors must have shape (n_power_params, 2)")
     n_power_params = int(k_vals.shape[0])
@@ -579,10 +434,10 @@ def run_setup(
             f"priors has {bounds_log.shape[0]} bins, but k binning produced {n_power_params} non-empty bins"
         )
 
-    if uniform_priors is None or not include_eor:
+    if config.uniform_priors is None or not include_eor:
         uniform_priors_mask = jnp.zeros((n_power_params,), dtype=bool)
     else:
-        uniform_priors_mask = jnp.asarray(uniform_priors, dtype=bool)
+        uniform_priors_mask = jnp.asarray(config.uniform_priors, dtype=bool)
         if uniform_priors_mask.shape != (n_power_params,):
             raise ValueError(
                 "uniform_priors must have shape "
@@ -613,7 +468,7 @@ def run_setup(
         phi_inv_class=phi_inverse_class,
         prior_class=prior_class,
         uniform_priors=uniform_priors_mask,
-        intrinsic_noise_fitting=bool(use_intrinsic_noise_fitting),
+        intrinsic_noise_fitting=bool(config.use_intrinsic_noise_fitting),
         power_param_start=0,
         n_power_params=n_power_params,
     )
@@ -621,6 +476,7 @@ def run_setup(
     # Return one object containing both configs and diagnostics needed by
     # run_nestedsampling.
     return SetupResult(
+        config=config,
         likelihood_class=likelihood_class,
         prior_class=prior_class,
         phi_inverse_class=phi_inverse_class,
@@ -632,5 +488,5 @@ def run_setup(
         ps_box_size_ra_mpc=ps_box_size_ra_mpc,
         ps_box_size_dec_mpc=ps_box_size_dec_mpc,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
-        model=model,
+        model=config.model,
     )

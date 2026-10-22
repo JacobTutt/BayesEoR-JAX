@@ -354,8 +354,9 @@ The supplied foreground operator must use the same visibility rows as `T_21`.
 Its coefficient prior must also match the chosen representation: physical prior
 widths for the original basis, or a standard-normal prior when those widths have
 already been absorbed into a reduced operator. The SVD stage above is explicit;
-`run_setup(foreground_kl_path=...)` selects a saved reduced operator and its
-standard-normal prior. Without that argument, setup uses the original representation.
+`run_setup(RunConfig(..., foreground_kl_path=...))` selects a saved reduced
+operator and its standard-normal prior. Without that setting, setup uses the
+original representation.
 
 ## Cached Matrix Products
 
@@ -386,7 +387,8 @@ and the assembled joint matrix increases disk usage but permits independent reus
 
 ## Setup Flow
 
-`run_setup` performs the high-level orchestration:
+`run_setup(config)` accepts a `RunConfig` and performs the high-level
+orchestration without modifying the requested settings:
 
 1. Load raw or preprocessed visibility data.
 2. Select the components using `model: eor`, `fg`, or `eor+fg` (the default).

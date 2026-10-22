@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
+from bayeseor_jax.configuration import ModelConfig
 from bayeseor_jax.model.construction.model_builder import BuildMatrices
 from bayeseor_jax.model.construction.operator_construction import assemble_joint_operator
 from bayeseor_jax.model.construction.likelihood_products import save_gram_matrix
@@ -163,22 +165,11 @@ def test_builder_reuses_precomputed_geometries(tmp_path):
     )
 
     builder = BuildMatrices(
-        n_u_eor=1,
-        du_eor=1.0,
-        n_v_eor=1,
-        dv_eor=1.0,
-        beta_fg=[2.0, 3.0],
-        n_freq=2,
-        f0_mhz=100.0,
-        df_mhz=100.0,
-        n_eta=1,
-        d_eta=1.0,
-        n_t=1,
-        d_t=10.0,
+        ModelConfig(beta_fg=(2.0, 3.0), array_save_directory=tmp_path),
+        frequencies_hz=jnp.array([100e6, 200e6]),
         image_geometry=image_geometry,
         fourier_geometry=fourier_geometry,
         uvw_array_m=jnp.zeros((1, 1, 3)),
-        array_save_directory=tmp_path,
     )
 
     assert builder.image_geometry is image_geometry
@@ -187,3 +178,31 @@ def test_builder_reuses_precomputed_geometries(tmp_path):
         builder.foreground_spectral_operator,
         [[1.0, 1.0, 1.0], [1.0, 0.25, 0.125]],
     )
+
+
+@pytest.mark.parametrize("frequencies,uvw", [
+    ([], np.zeros((1, 1, 3))),
+    ([0.], np.zeros((1, 1, 3))),
+    ([np.nan], np.zeros((1, 1, 3))),
+    ([1e8 + 1j], np.zeros((1, 1, 3))),
+    ([1e8], np.zeros((1, 3))),
+    ([1e8], np.zeros((2, 1, 3))),
+    ([1e8], np.zeros((1, 0, 3))),
+    ([1e8], np.full((1, 1, 3), np.nan)),
+])
+def test_builder_rejects_invalid_resolved_axes(tmp_path, frequencies, uvw):
+    geometry = SimpleNamespace(lmn_fg=np.zeros((1, 3, 1)))
+    with pytest.raises(ValueError):
+        BuildMatrices(
+            ModelConfig(model="fg", array_save_directory=tmp_path),
+            frequencies_hz=frequencies, uvw_array_m=uvw, image_geometry=geometry,
+        )
+
+
+def test_builder_requires_explicit_cosmological_geometry(tmp_path):
+    with pytest.raises(ValueError, match="resolved Fourier geometry"):
+        BuildMatrices(
+            ModelConfig(array_save_directory=tmp_path),
+            frequencies_hz=[1e8], uvw_array_m=np.zeros((1, 1, 3)),
+            image_geometry=SimpleNamespace(lmn_fg=np.zeros((1, 3, 1))),
+        )
