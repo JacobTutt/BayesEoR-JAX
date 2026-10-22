@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import time
 
 import jax
 import jax.numpy as jnp
-# from jax.experimental import sparse
 import numpy as np
 from jax.experimental import multihost_utils
 
@@ -20,6 +18,10 @@ from .model import (
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
+from .model.instrument.noise import build_noise_variance
+from .model.construction.forward import assemble_joint_operator
+from .model.construction.likelihood import save_gram_matrix, save_data_projection, save_data_power
+from .model.construction.storage import ensure_cached, save_array
 from .model.cosmology.transforms import Cosmology
 from .model.cosmology.power_spectrum import (
     calc_mean_binned_k_vals,
@@ -42,7 +44,7 @@ class SetupResult:
 
     def __init__(
         self,
-        likelihood_class: Likelihood,
+        likelihood_class: MarginalisedLikelihood,
         prior_class: Prior,
         phi_inverse_class: PhiInverse,
         bm: BuildMatrices,
@@ -137,9 +139,9 @@ def run_setup(
     This is the main setup entry point used by :mod:`bayeseor_jax.run_ns`. It:
 
     1. Loads or preprocesses visibilities/noise metadata.
-    2. Builds matrix products (`T`, `Ninv`, `T_Ninv_T`) needed by the
-       marginalized Gaussian likelihood.
-    3. Builds k-bin metadata and power-spectrum normalization inputs.
+    2. Builds k-bin metadata and power-spectrum normalization inputs.
+    3. Constructs or reuses the separate physical operators, assembles the joint
+       matrix, and prepares noise-weighted likelihood products from saved inputs.
     4. Instantiates sampler-space prior, latent-space precision config, and
        likelihood config objects.
 
@@ -469,10 +471,7 @@ def run_setup(
                 "(must match vis_noisy size = n_t * n_freq * n_bls)."
             )
 
-    # Build minimum sufficient matrix stack for likelihood compression:
-    # - T   : forward operator from latent coefficients to data space
-    # - Ninv: inverse noise covariance
-    # - T_Ninv_T: dense normal matrix used in marginalized Gaussian objective
+    # Prepare only physical-model inputs; likelihood preparation is a later stage.
     bm = BuildMatrices(
         n_u_eor=int(n_u_eor),
         du_eor=float(du_eor),
@@ -504,17 +503,42 @@ def run_setup(
         pol=pol,
         freq_interp_kind=freq_interp_kind,
         uvw_array_m=vis_dict["uvws"],
-        bl_red_array=vis_dict["redundancy"],
-        sigma=sigma,
-        effective_noise=effective_noise,
         array_save_directory=str(array_save_directory),
-        clobber=bool(clobber),
     )
 
-    # The likelihood stack extends the heavy matrix products with the
-    # data-dependent compressed terms needed by the marginalized Gaussian path.
+    # Construct the components independently. This setup uses the original
+    # foreground basis; a reduced operator can be supplied to assembly in a
+    # staged workflow, together with its corresponding prior at inference time.
+    t21_path = ensure_cached(array_save_directory / "T_21.npy", bm.T_21_build_save, clobber=clobber)
+    foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=clobber)
+    t_path = array_save_directory / "T.npy"
+    ensure_cached(
+        t_path,
+        lambda: assemble_joint_operator(t21_path, foreground_path, output_path=t_path),
+        dependencies=(t21_path, foreground_path), clobber=clobber,
+    )
+
+    # Noise belongs to the observation, not to either coefficient representation.
+    variance = build_noise_variance(
+        int(n_t), int(n_freq), bm.nbls, sigma=sigma,
+        redundancy=vis_dict["redundancy"], effective_noise=effective_noise,
+    )
+    ninv_path = array_save_directory / "Ninv.npy"
+    # This small vector can be compared exactly, so changed noise cannot reuse G.
+    noise_changed = not ninv_path.exists() or not np.array_equal(np.load(ninv_path), np.asarray(1.0 / variance))
+    ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=clobber or noise_changed)
+
+    # Only now prepare the likelihood products from the selected joint matrix.
+    gram_path = array_save_directory / "T_Ninv_T.npy"
+    ensure_cached(
+        gram_path, lambda: save_gram_matrix(t_path, ninv_path, output_path=gram_path),
+        dependencies=(t_path, ninv_path), clobber=clobber,
+    )
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)
-    n_params = bm.build_minimum_likelihood_stack(vis_noisy)
+    # Always refresh data-dependent terms, even when the physical model is reused.
+    save_data_projection(t_path, ninv_path, vis_noisy, output_path=array_save_directory / "dbar.npy")
+    save_data_power(ninv_path, vis_noisy, output_path=array_save_directory / "d_ninv_d.npy")
+    n_params = int(np.load(t_path, mmap_mode="r").shape[1])
     setup_args_dict["n_pix_fg_final"] = int(bm.image_geometry.n_pix_fg)
 
     # Assemble sampler-space prior and latent-space precision configs.

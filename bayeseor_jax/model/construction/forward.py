@@ -9,37 +9,10 @@ from pathlib import Path
 
 import jax
 import numpy as np
-from jax.experimental import multihost_utils
 
 from ..operators import T_21, T_fg
 from .distribution import discover_cpu_resources, partition_blocks
-from .storage import _prepare_memmap_output
-
-
-def _publish_output(partial_path: Path, path: Path) -> None:
-    """Publish a completed matrix only after every participating process has finished.
-
-    Parameters
-    ----------
-    partial_path : pathlib.Path
-        Temporary NumPy file, already flushed and closed by each writer.
-    path : pathlib.Path
-        Final output path. An existing file is replaced on publication.
-
-    Returns
-    -------
-    None
-        Renames the completed file and removes its allocation marker.
-    """
-    distributed = jax.distributed.is_initialized()
-    # Prevent readers from observing a partially written operator as a cache hit.
-    if distributed:
-        multihost_utils.sync_global_devices(f"{path.name}-write-complete")
-    if jax.process_index() == 0:
-        partial_path.replace(path)
-        partial_path.with_suffix(partial_path.suffix + ".ready").unlink(missing_ok=True)
-    if distributed:
-        multihost_utils.sync_global_devices(f"{path.name}-published")
+from .storage import _prepare_memmap_output, publish_output
 
 
 def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_path) -> Path:
@@ -119,7 +92,7 @@ def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_
             output[row_start:row_start + n_baseline] = np.asarray(block)
         output.flush()
     del output
-    _publish_output(partial_path, path)
+    publish_output(partial_path, path)
     return path
 
 
@@ -205,7 +178,10 @@ def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=102
     ----------
     T_21_path, T_fg_path : str or pathlib.Path
         Saved two-dimensional complex128 operators with identical visibility-row
-        ordering. The caller must ensure they describe the same observation.
+        ordering. The foreground input may be the original physical operator or a
+        retained operator with its prior already absorbed; the caller supplies
+        the corresponding coefficient prior during inference. Both files must
+        describe the same observation.
     output_path : str or pathlib.Path
         Shared destination, distinct from either input file; conventionally T.npy.
     block_rows : int, optional
@@ -252,5 +228,5 @@ def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=102
         output[rows, n_left:] = right[rows]
     output.flush()
     del output
-    _publish_output(partial_path, path)
+    publish_output(partial_path, path)
     return path

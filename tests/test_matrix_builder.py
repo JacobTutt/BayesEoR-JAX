@@ -4,6 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from bayeseor_jax.model.construction.builder import BuildMatrices
+from bayeseor_jax.model.construction.forward import assemble_joint_operator
+from bayeseor_jax.model.construction.likelihood import save_gram_matrix
 
 
 def _minimal_builder(tmp_path):
@@ -18,7 +20,6 @@ def _minimal_builder(tmp_path):
     builder.freq_hz = jnp.asarray([100.0e6, 110.0e6])
     builder.n_fg_spatial_modes = 2
     builder.array_save_directory = tmp_path
-    builder.clobber = False
     builder.inst_uvw_irad = jnp.asarray(
         [
             [[0.0], [0.0], [0.0]],
@@ -62,7 +63,7 @@ def test_component_builders_match_concatenated_operator(tmp_path):
 
     eor_path = builder.T_21_build_save()
     foreground_path = builder.T_fg_build_save()
-    joint_path = builder.build_T()
+    joint_path = assemble_joint_operator(eor_path, foreground_path, output_path=tmp_path / "T.npy")
 
     eor = np.load(eor_path)
     foreground = np.load(foreground_path)
@@ -85,11 +86,6 @@ def test_foreground_builder_uses_prepared_spectral_operator(tmp_path):
 
 
 def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
-    builder = BuildMatrices.__new__(BuildMatrices)
-    builder.array_save_directory = tmp_path
-    builder.t_ninv_t_block_cols = 2
-    builder.t_ninv_t_right_block_batch = 1
-
     T = np.asarray(
         [
             [1.0 + 1.0j, 2.0, -1.0j],
@@ -102,7 +98,8 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
     np.save(tmp_path / "T.npy", T)
     np.save(tmp_path / "Ninv.npy", Ninv)
 
-    builder.save_T_Ninv_T_blockwise_memmap()
+    save_gram_matrix(tmp_path / "T.npy", tmp_path / "Ninv.npy",
+                     output_path=tmp_path / "T_Ninv_T.npy", block_cols=2, right_block_batch=1)
 
     expected = T.conj().T @ (Ninv[:, None] * T)
     np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"), expected)
@@ -120,21 +117,17 @@ def test_joint_assembly_reuses_separate_component_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builder, "T_21_build_save", unexpected_build)
     monkeypatch.setattr(builder, "T_fg_build_save", unexpected_build)
-    assert builder.build_T().exists()
+    assert assemble_joint_operator(tmp_path / "T_21.npy", tmp_path / "T_fg.npy",
+                                   output_path=tmp_path / "T.npy").exists()
 
 
-def test_replacing_one_component_invalidates_joint_products_only(tmp_path):
+def test_replacing_one_component_leaves_other_components_untouched(tmp_path):
     builder = _minimal_builder(tmp_path)
-    builder.build_T()
-    for name in ("T_Ninv_T", "dbar", "Ninv", "d_ninv_d"):
-        np.save(tmp_path / f"{name}.npy", np.zeros(1))
+    builder.T_21_build_save()
+    builder.T_fg_build_save()
     original_21 = (tmp_path / "T_21.npy").read_bytes()
     builder.T_fg_build_save()
     assert (tmp_path / "T_21.npy").read_bytes() == original_21
-    for name in ("T", "T_Ninv_T", "dbar"):
-        assert not (tmp_path / f"{name}.npy").exists()
-    for name in ("Ninv", "d_ninv_d"):
-        assert (tmp_path / f"{name}.npy").exists()
 
 
 def test_builder_reuses_precomputed_geometries(tmp_path):

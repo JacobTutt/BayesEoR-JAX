@@ -1,107 +1,14 @@
-"""Store forward-model arrays and coordinate access across JAX processes.
+"""Shared-file publication and dependency-aware cache reuse for construction."""
 
-These helpers manage paths and shared memory-mapped files. They preserve the operator ordering supplied by the builders and
-perform no transformation of the sky model or observational coordinates.
-"""
-
-from __future__ import annotations
-
-import time
 from pathlib import Path
 from uuid import uuid4
+from collections.abc import Callable, Sequence
+import json
+import time
 
 import jax
-jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
-
-
-def _dense_matrix_path(bm, matrix_name: str) -> Path:
-    r"""Resolve a cached model array's name to its NumPy file in the build directory.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory.
-    matrix_name : str
-        Logical matrix name, e.g. ``"T"`` or ``"Ninv"``.
-
-    Returns
-    -------
-    pathlib.Path
-        Full path to the `.npy` file on disk.
-
-    Notes
-    -----
-    Names such as ``T``, ``Ninv``, and ``dbar`` identify matrices, vectors,
-    or scalars. This helper returns a path without creating or loading a file.
-    """
-    return Path(bm.array_save_directory) / f"{matrix_name}.npy"
-
-
-def _log_build(bm, message: str) -> None:
-    r"""Report construction or saving progress once across the distributed build.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the build.
-    message : str
-        Message to print.
-
-    Returns
-    -------
-    None
-        The message is printed on process zero.
-
-    Notes
-    -----
-    Only process zero prints the message, avoiding duplicate output when
-    multiple processes construct different portions of the same operator.
-    """
-    if jax.process_index() == 0:
-        print(f"[BuildMatrices] {message}", flush=True)
-
-
-def check_if_matrix_exists(bm, matrix_name: str) -> bool:
-    r"""Decide consistently across processes whether a cached array file exists.
-
-    Parameters
-    ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory.
-    matrix_name : str
-        Logical matrix name, e.g. ``"T"`` or ``"Ninv"``.
-
-    Returns
-    -------
-    exists : bool
-        Whether the saved array exists, using the same decision on every
-        process.
-
-    Notes
-    -----
-    In distributed runs, process zero publishes its decision on the shared
-    filesystem and all processes read it before building or reusing a product.
-    Only existence is checked, not array contents or physical configuration.
-    """
-    path = _dense_matrix_path(bm, matrix_name)
-    exists = path.exists()
-    if getattr(jax, "distributed", None) is None or not jax.distributed.is_initialized():
-        return exists
-
-    # Publish one cache decision so processes cannot take different build paths.
-    decision_path = path.with_suffix(path.suffix + ".exists")
-    if jax.process_index() == 0:
-        decision_path.write_text("1" if exists else "0")
-
-    # All readers must observe that decision before any process begins a rebuild.
-    multihost_utils.sync_global_devices(f"{matrix_name}-exists-ready")
-    _wait_for_file(decision_path)
-    exists = decision_path.read_text().strip() == "1"
-    multihost_utils.sync_global_devices(f"{matrix_name}-exists-read")
-    return exists
 
 
 def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
@@ -222,73 +129,137 @@ def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
     return start, stop
 
 
-def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
-    r"""Save a model matrix, vector, or scalar without changing its axis ordering.
+def publish_output(partial_path: Path, path: Path) -> None:
+    """Publish a completed matrix only after every participating process has finished.
 
     Parameters
     ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory and distributed state.
-    matrix_name : str
-        Logical matrix name, e.g. ``"T"``.
-    matrix : jax.Array or numpy.ndarray
-        Dense matrix to persist.
+    partial_path : pathlib.Path
+        Temporary NumPy file, already flushed and closed by each writer.
+    path : pathlib.Path
+        Final output path. An existing file is replaced on publication.
 
     Returns
     -------
     None
-        The array is written to the configured save directory.
-
-    Notes
-    -----
-    Ordinary arrays are written directly. For JAX arrays, each process
-    writes its addressable shards into the shared NumPy file and flushes
-    them before the final distributed barrier.
-
-    Distributed arrays are written shard-by-shard into a shared memmap so
-    that no process needs to gather the full global array.
+        Renames the completed file and removes its allocation marker.
     """
-    path = _dense_matrix_path(bm, matrix_name)
-    if not hasattr(matrix, "addressable_shards"):
-        np.save(path, np.asarray(matrix))
-        return
-
-    mm = _prepare_memmap_output(
-        path,
-        shape=tuple(int(dim) for dim in matrix.shape),
-        dtype=np.dtype(matrix.dtype),
-        sync_name=f"{matrix_name}-save-ready",
-    )
-    for shard in matrix.addressable_shards:
-        # Each process writes only the global slices for the shards it owns.
-        mm[shard.index] = np.asarray(shard.data)
-    mm.flush()
-    if getattr(jax, "distributed", None) is not None and jax.distributed.is_initialized():
-        multihost_utils.sync_global_devices(f"{matrix_name}-save-done")
+    distributed = jax.distributed.is_initialized()
+    # Prevent readers from observing a partially written operator as a cache hit.
+    if distributed:
+        multihost_utils.sync_global_devices(f"{path.name}-write-complete")
+    if jax.process_index() == 0:
+        partial_path.replace(path)
+        partial_path.with_suffix(partial_path.suffix + ".ready").unlink(missing_ok=True)
+    if distributed:
+        multihost_utils.sync_global_devices(f"{path.name}-published")
 
 
-def load_matrix(bm, matrix_name: str):
-    r"""Load a complete cached model array into a JAX array.
+def save_array(path: Path | str, array) -> Path:
+    """Publish a small replicated array or scalar from process zero.
 
     Parameters
     ----------
-    bm : BuildMatrices
-        Matrix builder instance owning the save directory.
-    matrix_name : str
-        Logical matrix name.
+    path : pathlib.Path or str
+        Destination NumPy file, shared by all participating processes.
+    array : array-like
+        Host array or replicated JAX array. Distributed non-replicated arrays
+        must instead be written shard-by-shard using a shared memmap.
 
     Returns
     -------
-    jax.numpy.ndarray
-        Dense matrix loaded from disk.
+    pathlib.Path
+        Completed file, published only after its temporary write finishes.
+    """
+    path = Path(path)
+    if isinstance(array, jax.Array) and not array.is_fully_replicated:
+        raise ValueError("save_array requires a replicated array")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
+    if jax.process_index() == 0:
+        # A failed write must not replace an existing completed product.
+        with partial_path.open("wb") as handle:
+            np.save(handle, np.asarray(array))
+    publish_output(partial_path, path)
+    return path
+
+
+def _file_signature(path: Path | str) -> dict:
+    """Identify a saved input by its resolved path, byte size and modification time."""
+    path = Path(path).resolve()
+    stat = path.stat()
+    return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def ensure_cached(
+    path: Path | str,
+    build: Callable[[], object],
+    *,
+    dependencies: Sequence[Path | str] = (),
+    clobber: bool = False,
+) -> Path:
+    """Reuse a completed product or collectively build it from explicit inputs.
+
+    Parameters
+    ----------
+    path : pathlib.Path or str
+        Shared destination file.
+    build : callable
+        No-argument callback that builds and publishes path on all processes.
+    dependencies : sequence of pathlib.Path or str, optional
+        Saved inputs whose paths, sizes and modification times define reuse.
+        Selecting a different foreground representation therefore invalidates
+        a cached joint matrix even if both representations have the same shape.
+    clobber : bool, optional
+        Force a rebuild without deleting the previous completed output first.
+
+    Returns
+    -------
+    pathlib.Path
+        Existing or newly completed product.
 
     Notes
     -----
-    This reads the full NumPy file into memory; it does not stream blocks or
-    distribute the array across devices. Raise ``FileNotFoundError`` when
-    the requested product has not been saved.
+    All participating processes must call together. Physical component files
+    without dependencies are reused by filename; use separate directories or
+    clobber when changing their observation/model configuration. File stamps
+    are not content hashes. Data projections are rebuilt by setup rather than
+    cached by dataset name. No downstream files are silently deleted.
     """
-    path = _dense_matrix_path(bm, matrix_name)
-    if path.exists():
-        return jnp.array(np.load(path))
-    raise FileNotFoundError(f"No saved matrix found for '{matrix_name}'.")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    inputs = [_file_signature(item) for item in dependencies]
+    metadata_path = path.with_suffix(path.suffix + ".cache.json")
+    distributed = jax.distributed.is_initialized()
+    decision_path = path.with_suffix(path.suffix + ".exists")
+    reuse = False
+    if jax.process_index() == 0:
+        reuse = path.exists() and not clobber
+        if reuse and inputs:
+            try:
+                stored = json.loads(metadata_path.read_text())
+                reuse = stored == {"inputs": inputs, "output": _file_signature(path)}
+            except (OSError, ValueError):
+                reuse = False
+        if distributed:
+            decision_path.write_text("1" if reuse else "0")
+    if distributed:
+        multihost_utils.sync_global_devices(f"{path.name}-cache-ready")
+        _wait_for_file(decision_path)
+        reuse = decision_path.read_text().strip() == "1"
+        multihost_utils.sync_global_devices(f"{path.name}-cache-read")
+    if reuse:
+        return path
+
+    # Call the same writer on every rank; it owns temporary-file publication.
+    build()
+    if not path.exists():
+        raise RuntimeError(f"Builder did not publish {path}")
+    if jax.process_index() == 0:
+        metadata = {"inputs": inputs, "output": _file_signature(path)}
+        temporary = metadata_path.with_suffix(".partial.json")
+        temporary.write_text(json.dumps(metadata, indent=2) + "\n")
+        temporary.replace(metadata_path)
+    if distributed:
+        multihost_utils.sync_global_devices(f"{path.name}-cache-saved")
+    return path
