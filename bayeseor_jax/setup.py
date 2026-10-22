@@ -29,8 +29,8 @@ from .model.cosmology.power_spectrum import (
     generate_k_modes_in_physical_coordinates,
     generate_k_cube_model_spherical_binning,
 )
-from .utils import (
-    _resolve_uv_grid_from_extents,
+from .model.cosmology.fourier_geometry import _resolve_uv_grid_from_extents
+from .io import (
     load_numpy_dict,
     write_analysis_metadata,
     write_log_files,

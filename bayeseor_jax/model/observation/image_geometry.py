@@ -28,6 +28,72 @@ HERA_LOCATION = (
 )
 
 
+def required_healpix_nside(
+    longest_baseline_m: float,
+    highest_frequency_hz: float,
+    *,
+    samples_per_fringe: float = 2.0,
+) -> int:
+    r"""Estimate the HEALPix resolution needed to sample the shortest fringe.
+
+    Parameters
+    ----------
+    longest_baseline_m : float
+        Largest physical baseline length in metres, finite and non-negative.
+        Use the full three-dimensional length, not just its uv projection.
+    highest_frequency_hz : float
+        Highest observing frequency in Hz, finite and positive. This sets the
+        shortest wavelength and hence the finest instrumental fringe scale.
+    samples_per_fringe : float, optional
+        Number of nominal pixels per fringe, at least two. Defaults to the
+        two-sample Nyquist estimate; larger values provide finer sampling.
+
+    Returns
+    -------
+    int
+        Smallest power-of-two ``nside`` satisfying the nominal pixel-size
+        criterion, with a minimum of one. Values outside the supported
+        HEALPix range (``nside < 2**30``) raise ValueError.
+
+    Notes
+    -----
+    The largest angular phase gradient is :math:`2\pi b_{\max}/\lambda`.
+    Using the nominal HEALPix pixel width :math:`\sqrt{\Omega_{\rm pix}}`
+    therefore gives
+
+    .. math::
+
+        \frac{\sqrt{\pi/3}}{N_{\rm side}}
+        \leq \frac{c}{s\,b_{\max}\nu_{\max}},
+
+    where :math:`s` is ``samples_per_fringe``. For a zero baseline there is
+    no fringe-resolution requirement and the function returns one.
+
+    This is a baseline-based sampling estimate, not a strict spherical
+    sampling theorem: HEALPix pixels have different shapes, and beam, sky
+    structure and sharp horizon masks can require finer quadrature. Check
+    visibility convergence at higher resolution when accuracy matters. The
+    helper does not change a run's configured resolution or foreground prior.
+    See https://healpy.readthedocs.io/en/latest/generated/healpy.pixelfunc.nside2resol.html
+    for the nominal pixel-width convention.
+    """
+    baseline = float(longest_baseline_m)
+    frequency = float(highest_frequency_hz)
+    samples = float(samples_per_fringe)
+    if not np.isfinite(baseline) or baseline < 0:
+        raise ValueError("longest_baseline_m must be finite and non-negative")
+    if not np.isfinite(frequency) or frequency <= 0:
+        raise ValueError("highest_frequency_hz must be finite and positive")
+    if not np.isfinite(samples) or samples < 2:
+        raise ValueError("samples_per_fringe must be finite and at least two")
+
+    # Round upward, never to the nearest resolution, to preserve the criterion.
+    minimum = np.sqrt(np.pi / 3.0) * samples * baseline * (frequency / 299792458.0)
+    if not np.isfinite(minimum) or minimum > 2**29:
+        raise ValueError("Required resolution exceeds the supported HEALPix nside range")
+    return 1 << max(0, (max(1, int(np.ceil(minimum))) - 1).bit_length())
+
+
 @dataclass(frozen=True)
 class ImageGeometry:
     r"""Coordinates of the HEALPix pixels used to represent sky brightness.

@@ -7,7 +7,7 @@ from typing import Optional
 import jax
 import jax.numpy as jnp
 
-from ...utils import load_numpy_dict
+from ...io import load_numpy_dict
 
 jax.config.update("jax_enable_x64", True)
 

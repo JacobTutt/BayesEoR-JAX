@@ -120,3 +120,43 @@ def linear_uniform_log_jacobian(
     equivalent to ``log(10) * sum(theta_power)`` over those bins.
     """
     return jnp.log(10.0) * jnp.sum(jnp.where(uniform_priors, theta_power, 0.0))
+
+
+def parse_uprior_inds(upriors_str: str, nkbins: int) -> jnp.ndarray:
+    """
+    Parse a uniform-prior bin selection string.
+
+    Parameters
+    ----------
+    upriors_str : str
+        Selection string. Supported forms:
+        - ``"all"``
+        - ``""`` (empty)
+        - slice form, e.g. ``"1:4"``
+        - comma list, e.g. ``"1,4,6"``
+        - single index, e.g. ``"3"`` or ``"-1"``
+    nkbins : int
+        Total number of k-bins.
+
+    Returns
+    -------
+    jax.numpy.ndarray
+        Boolean array of length ``nkbins`` where True indicates uniform prior.
+    """
+    if upriors_str.lower() == "all":
+        return jnp.ones(nkbins, dtype=bool)
+
+    uprior_inds = jnp.zeros(nkbins, dtype=bool)
+    if upriors_str == "":
+        return uprior_inds
+
+    if ":" in upriors_str:
+        bounds = list(map(int, upriors_str.split(":")))
+        uprior_inds = uprior_inds.at[slice(*bounds)].set(True)
+    elif "," in upriors_str:
+        up_inds = list(map(int, upriors_str.split(",")))
+        uprior_inds = uprior_inds.at[up_inds].set(True)
+    else:
+        uprior_inds = uprior_inds.at[int(upriors_str)].set(True)
+
+    return uprior_inds

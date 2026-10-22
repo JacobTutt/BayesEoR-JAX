@@ -19,6 +19,7 @@ from .model import (
     build_fourier_geometry,
     build_foreground_spectral_operator,
     build_image_geometry,
+    required_healpix_nside,
     build_nudft_matrix,
     build_sky_to_visibility_operator,
     build_spectral_fourier_operator,
@@ -31,10 +32,9 @@ from .model import (
     Cosmology,
     InstrumentModel,
 )
-from .params import BayesEoRParser
-from .utils import (
+from .configuration import BayesEoRParser
+from .io import (
     load_numpy_dict,
-    parse_uprior_inds,
     save_numpy_dict,
     write_log_files,
 )
@@ -42,6 +42,7 @@ from .data import form_pI_vis, get_vis_data, jy_to_ksr, preprocess_uvdata, uvd_t
 
 
 _LAZY_EXPORTS = {
+    "parse_uprior_inds": (".inference.prior", "parse_uprior_inds"),
     "MarginalisedLikelihood": (".inference", "MarginalisedLikelihood"),
     "PhiInverse": (".inference", "PhiInverse"),
     "Prior": (".inference", "Prior"),
@@ -107,6 +108,7 @@ __all__ = [
     "build_fourier_geometry",
     "build_foreground_spectral_operator",
     "build_image_geometry",
+    "required_healpix_nside",
     "build_nudft_matrix",
     "build_sky_to_visibility_operator",
     "build_spectral_fourier_operator",

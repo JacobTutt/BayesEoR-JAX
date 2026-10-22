@@ -17,6 +17,42 @@ python test_examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
 
 For reproducible analyses, prefer YAML files committed or archived with the outputs.
 
+## Code responsibilities
+
+- `configuration.py` defines YAML and command-line options.
+- `setup.py` coordinates data loading, physical-model construction and likelihood preparation; it does not run the sampler.
+- `model/` owns the physical geometry and operators, including automatic Fourier-grid sizing in `model/cosmology/fourier_geometry.py`.
+- `inference/` owns priors, likelihood evaluation and sampling, including MultiNest output-path handling.
+- `io.py` provides shared array loading/saving and run-metadata output.
+
+The public imports `from bayeseor_jax import BayesEoRParser, run_setup` are
+unchanged. Direct imports from the former `bayeseor_jax.params` and
+`bayeseor_jax.utils` modules should use the modules above instead;
+`parse_uprior_inds` now belongs to `inference/prior.py` and remains available
+at package level.
+
+## Choosing a HEALPix resolution
+
+Use the longest selected three-dimensional baseline and the highest selected
+observing frequency to estimate a baseline-driven resolution:
+
+```python
+from bayeseor_jax import required_healpix_nside
+
+nside = required_healpix_nside(
+    longest_baseline_m=40.0,
+    highest_frequency_hz=159.082e6,
+)  # 64
+```
+
+The helper requires the nominal pixel width `sqrt(pi/3) / nside` to be no
+larger than `lambda_min / (2 * b_max)`, then rounds up to a power of two.
+Set `samples_per_fringe` above two to request finer sampling. This is an
+estimate based on the [nominal HEALPix pixel size](https://healpy.readthedocs.io/en/latest/generated/healpy.pixelfunc.nside2resol.html),
+not a guarantee of visibility convergence for arbitrary sky structure, beams
+or horizon masks. It does not override the configured `nside`; changes to
+resolution also require reconsidering the pixel-domain prior.
+
 ## Minimal Structure
 
 Most runs need these groups:

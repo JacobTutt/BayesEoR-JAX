@@ -7,7 +7,7 @@ operators and their noise-weighted products for inference.
 
 from .instrument.beam import Beam_Model
 from .cosmology.fourier_geometry import FourierGeometry, build_fourier_geometry
-from .observation.image_geometry import ImageGeometry, build_image_geometry
+from .observation.image_geometry import ImageGeometry, build_image_geometry, required_healpix_nside
 from .operators import (
     T_21,
     T_fg,
@@ -47,6 +47,7 @@ __all__ = [
     "InstrumentModel",
     "build_fourier_geometry",
     "build_image_geometry",
+    "required_healpix_nside",
     "build_foreground_spectral_operator",
     "build_nudft_matrix",
     "build_sky_to_visibility_operator",

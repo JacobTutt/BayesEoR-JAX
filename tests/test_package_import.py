@@ -61,7 +61,7 @@ def test_model_layout_preserves_public_exports():
 
 
 def test_foreground_example_uses_spherical_model_options_only():
-    from bayeseor_jax.params import BayesEoRParser
+    from bayeseor_jax.configuration import BayesEoRParser
 
     args = BayesEoRParser().parse_args(
         ["--config", "test_examples/eor_fgs/config.yaml"]
@@ -76,7 +76,7 @@ def test_foreground_example_uses_spherical_model_options_only():
 
 
 def test_parser_accepts_preconstructed_kl_operator():
-    from bayeseor_jax.params import BayesEoRParser
+    from bayeseor_jax.configuration import BayesEoRParser
 
     args = BayesEoRParser().parse_args([
         '--config', 'test_examples/eor_fgs/config.yaml',
@@ -86,7 +86,7 @@ def test_parser_accepts_preconstructed_kl_operator():
 
 
 def test_parser_selects_model_components():
-    from bayeseor_jax.params import BayesEoRParser
+    from bayeseor_jax.configuration import BayesEoRParser
 
     parser = BayesEoRParser()
     assert parser.parse_args(["--config", "test_examples/eor/config.yaml"]).model == "eor"

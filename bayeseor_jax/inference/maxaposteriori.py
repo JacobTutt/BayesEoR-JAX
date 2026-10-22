@@ -15,7 +15,7 @@ from ..model.construction.parallel_layout import build_solver_mesh
 from .phi import PhiInverse
 from .linear_solver import build_gaussian_solver
 from .prior import linear_uniform_log_jacobian, theta_power_to_linear
-from ..utils import load_sharded_npy
+from ..io import load_sharded_npy
 
 
 class MaximumAPosteriori:

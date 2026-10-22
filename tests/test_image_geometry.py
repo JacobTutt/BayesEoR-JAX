@@ -1,7 +1,36 @@
 import numpy as np
+import pytest
 
-from bayeseor_jax import ImageGeometry, build_image_geometry
+from bayeseor_jax import ImageGeometry, build_image_geometry, required_healpix_nside
 from bayeseor_jax.model.observation.image_geometry import _query_disc_union, _select_image_pixels
+
+
+@pytest.mark.parametrize("baseline,frequency,samples,expected", [
+    (40., 159.082e6, 2., 64),
+    (80., 159.082e6, 2., 128),
+    (40., 318.164e6, 2., 128),
+    (40., 159.082e6, 4., 128),
+    (0., 159.082e6, 2., 1),
+    (0.1, 1e6, 2., 1),
+])
+def test_required_nside_samples_shortest_fringe(baseline, frequency, samples, expected):
+    nside = required_healpix_nside(baseline, frequency, samples_per_fringe=samples)
+    assert nside == expected
+    minimum = np.sqrt(np.pi / 3.) * samples * baseline * frequency / 299792458.
+    assert nside >= minimum
+    if nside > 1:
+        assert nside / 2 < minimum
+
+
+@pytest.mark.parametrize("baseline,frequency,samples", [
+    (-1., 1e8, 2.), (np.nan, 1e8, 2.), (np.inf, 1e8, 2.),
+    (40., 0., 2.), (40., -1., 2.), (40., np.nan, 2.), (40., np.inf, 2.),
+    (40., 1e8, 1.), (40., 1e8, np.nan), (40., 1e8, np.inf),
+    (1e20, 1e8, 2.),
+])
+def test_required_nside_rejects_invalid_inputs(baseline, frequency, samples):
+    with pytest.raises(ValueError):
+        required_healpix_nside(baseline, frequency, samples_per_fringe=samples)
 
 
 def test_image_geometry_contains_nested_time_dependent_sky_support():

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from bayeseor_jax.data import vis
-from bayeseor_jax.utils import save_numpy_dict
+from bayeseor_jax.io import save_numpy_dict
 
 
 def test_data_exports_preserve_top_level_visibility_helpers():

@@ -1,4 +1,4 @@
-"""Analysis settings for the BayesEoR-JAX pipeline."""
+"""Command-line and YAML configuration for data, models and inference."""
 
 from __future__ import annotations
 

@@ -39,7 +39,7 @@ from pyuvdata.utils import polstr2num
 
 from ..model.instrument.baselines import InstrumentModel
 from .noise import generate_gaussian_noise
-from ..utils import load_numpy_dict, save_numpy_dict
+from ..io import load_numpy_dict, save_numpy_dict
 
 LOGGER = logging.getLogger(__name__)
 
