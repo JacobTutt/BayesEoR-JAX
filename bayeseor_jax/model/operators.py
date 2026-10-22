@@ -156,6 +156,7 @@ def build_spectral_fourier_operator(
         (F_z)_{fe} = \Delta\eta\,
         \exp[-2\pi i(\nu_f-\nu_{\rm ref})\eta_e].
     """
+    # Validate the line-of-sight integration weight before constructing F_z.
     if d_eta <= 0:
         raise ValueError("d_eta must be positive")
     eta = jnp.asarray(eta, dtype=jnp.float64)
@@ -167,6 +168,7 @@ def build_spectral_fourier_operator(
         raise ValueError("eta must be one-dimensional")
     if frequency_offsets_hz.ndim != 1:
         raise ValueError("frequency_offsets_hz must be one-dimensional")
+    # Fourier phases map eta coefficients to frequency, weighted by the eta spacing.
     return (
         build_nudft_matrix(
             eta[jnp.newaxis, :],
@@ -400,11 +402,13 @@ def build_T_fg_core(
             "(n_frequency, n_spectral_component)"
         )
 
+    # Each spectral component weights every pixel without mixing spatial indices.
     operator = jnp.einsum(
         "tfbp,fs->tfbsp",
         sky_to_visibility,
         spectral_operator,
     )
+    # Flatten rows as time/frequency/baseline and columns as component/pixel.
     return operator.reshape(
         n_time * n_frequency * n_baseline,
         spectral_operator.shape[1] * n_pixel,
@@ -455,10 +459,12 @@ def build_foreground_spectral_operator(
     if reference_frequency_mhz <= 0:
         raise ValueError("reference_frequency_mhz must be positive")
 
+    # Power laws are normalised to unity at the foreground reference frequency.
     indices = jnp.asarray(tuple(spectral_indices), dtype=jnp.float64)
     power_laws = (
         frequencies_mhz[:, None] / float(reference_frequency_mhz)
     ) ** indices[None, :]
+    # Prepend the constant spectrum, matching the component-major coefficient order.
     return jnp.concatenate(
         [
             jnp.ones((frequencies_mhz.size, 1), dtype=jnp.float64),

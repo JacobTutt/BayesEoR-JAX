@@ -24,6 +24,7 @@ def build_solver_mesh() -> Mesh:
     and performs factorisation or solves. Distributed JAX must already be
     initialised to include devices on other hosts.
     """
+    # Include all registered devices; distributed initialisation happens upstream.
     devices = np.asarray(jax.devices(), dtype=object)
     return Mesh(devices, ("x",))
 
@@ -76,11 +77,13 @@ def padded_visibility_partition(
     local_device_count = max(1, int(local_device_count))
     process_index = int(process_index)
 
+    # Round up per host, then per local device so every shard has equal length.
     rows_per_process = (n_vis + process_count - 1) // process_count
     rows_per_process = (
         (rows_per_process + local_device_count - 1) // local_device_count
     ) * local_device_count
 
+    # Clip real-data coverage; the remaining local rows are zero-padding.
     row0 = process_index * rows_per_process
     row1 = min(row0 + rows_per_process, n_vis)
     return row0, row1, rows_per_process

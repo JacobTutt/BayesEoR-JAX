@@ -1,5 +1,5 @@
 """
-JAX-native transforms between observational coordinates and comoving distances.
+Convert observational coordinates to cosmological distances and volume factors.
 
 The module provides conversion factors used in 21-cm analyses:
 - `f <-> z` via `1 + z = f_21 / f`
@@ -40,6 +40,9 @@ class Cosmology:
         Present-day dark-energy density parameter.
     Ok0 : float
         Present-day curvature density parameter.
+    Or0 : float
+        Present-day radiation density parameter, including the Planck18
+        photon and neutrino contributions.
     f_21_hz : float
         Rest frequency of the 21-cm line in `Hz`.
     c_ms : float
@@ -47,10 +50,12 @@ class Cosmology:
 
     Notes
     -----
-    Defaults are loaded from `astropy.cosmology.Planck18`, but all runtime
-    operations use `jax.numpy` arrays to keep transforms accelerator-friendly.
-    Assumes matter + radiation + curvature + dark energy terms:
-    `E(z)^2 = Om0*(1+z)^3 + Or0*(1+z)^4 + Ok0*(1+z)^2 + Ode0`.
+    Defaults are loaded from ``astropy.cosmology.Planck18``. Expansion rates
+    and transverse distances are evaluated with that fixed Astropy cosmology
+    on the host and returned as JAX arrays; those methods are not JIT-compatible.
+    Changing the stored density parameters does not change these Astropy
+    evaluations. Frequency/redshift and line-of-sight conversions use the
+    stored rest frequency, speed of light, and Hubble constant where applicable.
     """
 
     H0_km_s_Mpc: float = float(Planck18.H0.value)
@@ -108,6 +113,11 @@ class Cosmology:
         -------
         e_z : jnp.ndarray
             Dimensionless expansion-rate factor, same shape as input.
+
+        Notes
+        -----
+        Uses ``Planck18.efunc`` on the host, independently of the density
+        parameters stored on this instance.
         """
         # Convert to NumPy for Astropy Planck18 evaluation to match legacy behavior exactly.
         z_np = np.asarray(z, dtype=np.float64)
@@ -146,10 +156,10 @@ class Cosmology:
         Parameters
         ----------
         z : jnp.ndarray
-            Redshift array with shape `(N,)` (or broadcast-compatible array).
+            Scalar or array of redshifts; the output preserves its shape.
         n_z_samples : int, optional
-            Number of trapezoid samples for `D_C` quadrature (`>=2`).
-            Larger values improve accuracy at higher cost. Defaults to 2048.
+            Unused compatibility argument, default 2048. Astropy controls
+            the distance calculation rather than an explicit sampling grid.
 
         Returns
         -------
@@ -159,20 +169,9 @@ class Cosmology:
 
         Notes
         -----
-        This computes:
-        1. Radial comoving distance `D_C = D_H * integral_0^z dz' / E(z')`.
-        2. Transverse comoving distance `D_M` by curvature mapping:
-           - Flat: `D_M = D_C`
-           - Open: `D_M = D_H/sqrt(Ok0) * sinh(sqrt(Ok0) * D_C / D_H)`
-           - Closed: `D_M = D_H/sqrt(|Ok0|) * sin(sqrt(|Ok0|) * D_C / D_H)`.
-
-        Internal shapes
-        ---------------
-        - `z_arr`: `(N,)`
-        - `t`: `(n_z_samples,)`
-        - `z_grid`: `(N, n_z_samples)`
-        - `integrand`: `(N, n_z_samples)`
-        - `d_c`, `d_m`: `(N,)`
+        Uses ``Planck18.comoving_transverse_distance`` on the host. This
+        distance converts transverse angular Fourier modes to cosmological
+        wavenumbers through ``k_perp = 2*pi*sqrt(u**2 + v**2)/D_M``.
         """
         # Convert to NumPy and evaluate Astropy transverse comoving distance for exact parity.
         # `n_z_samples` is retained for API compatibility with earlier integration-based version.
@@ -191,7 +190,7 @@ class Cosmology:
         z : jnp.ndarray
             Redshift array; output shape follows input/broadcast.
         n_z_samples : int, optional
-            Quadrature samples for `D_M(z)` via `dL_dth` (`>=2`).
+            Unused compatibility argument forwarded to ``dL_dth``.
 
         Returns
         -------

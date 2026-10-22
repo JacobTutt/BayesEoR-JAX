@@ -115,10 +115,12 @@ def _construct_time_array(
     by ``d_t`` seconds. The reference date is at index ``n_t // 2``; for an
     even count there is one more integration before it than after it.
     """
+    # Place the reference integration at index n_t//2 for odd and even counts.
     if n_t % 2:
         time_inds = np.arange(-(n_t // 2), n_t // 2 + 1)
     else:
         time_inds = np.arange(-(n_t // 2), n_t // 2)
+    # Julian dates are measured in days, while integration spacing is in seconds.
     times_jd = jd_center + time_inds * d_t / (24 * 60 * 60)
     return times_jd, n_t // 2
 
@@ -150,6 +152,7 @@ def _observation_field_center(
     ICRS, returning ``(right_ascension, declination)`` in degrees. Repeating
     this over the observation defines the path of the drift-scan field.
     """
+    # Locate the instrument zenith on the celestial sphere at this integration.
     altaz = AltAz(
         obstime=Time(jd, scale="utc", format="jd"),
         location=telescope_location,
@@ -197,11 +200,13 @@ def _query_disc_union(
     pixels inside the field at any integration; ``center`` uses only the
     reference integration. Pixel overlap with the boundary is not included.
     """
+    # The default union follows the drift scan; centre mode selects one snapshot.
     if sky_mask_time_mode == "center":
         field_centers = [field_centers[time_ind_center]]
 
     npix = 12 * nside**2
     indices = []
+    # Query a spherical disc around each pointing using a Cartesian unit vector.
     for ra_deg, dec_deg in field_centers:
         ra_rad = jnp.radians(ra_deg)
         dec_rad = jnp.radians(dec_deg)
@@ -218,10 +223,12 @@ def _query_disc_union(
             radius=radius_rad,
             inclusive=False,
         )
+        # Discard padded query entries that lie outside the HEALPix index range.
         indices.append(np.asarray(pixels[pixels < npix], dtype=np.int64))
 
     if not indices:
         return np.asarray([], dtype=np.int64)
+    # One celestial pixel can enter several snapshots but appears only once.
     return np.unique(np.concatenate(indices))
 
 
@@ -272,6 +279,7 @@ def _select_image_pixels(
     response construction assumes the foreground selection contains the
     cosmological selection.
     """
+    # Convert full field diameters into selection radii for each component.
     pix_indices_eor_np = _query_disc_union(
         field_centers,
         float(np.deg2rad(fov_eor / 2)),
@@ -279,6 +287,7 @@ def _select_image_pixels(
         sky_mask_time_mode=sky_mask_time_mode,
         time_ind_center=time_ind_center,
     )
+    # Reuse an identical selection instead of querying the same field twice.
     if fov_fg == fov_eor:
         pix_indices_fg_np = pix_indices_eor_np
     else:
@@ -289,6 +298,7 @@ def _select_image_pixels(
             sky_mask_time_mode=sky_mask_time_mode,
             time_ind_center=time_ind_center,
         )
+    # The membership mask selects cosmological columns from the wider sky response.
     pix_indices_eor = jnp.asarray(pix_indices_eor_np, dtype=jnp.int64)
     pix_indices_fg = jnp.asarray(pix_indices_fg_np, dtype=jnp.int64)
     return (
@@ -340,6 +350,7 @@ def _topocentric_coordinates(
     direction cosines point east, north, and up. Below-horizon directions
     remain in these arrays; the beam model sets their gain to zero.
     """
+    # Celestial pixel centres stay fixed while the instrument frame rotates.
     ra_deg, dec_deg = jhp.pix2ang(nside, pix_indices_fg, lonlat=True)
     sky = SkyCoord(
         np.asarray(ra_deg) * u.deg,
@@ -349,6 +360,7 @@ def _topocentric_coordinates(
 
     lmn_by_time = []
     az_za_by_time = []
+    # Transform the same sky pixels at each integration, preserving their ordering.
     for jd in times_jd:
         altaz = sky.transform_to(
             AltAz(
@@ -358,6 +370,7 @@ def _topocentric_coordinates(
         )
         az = jnp.asarray(altaz.az.rad)
         za = jnp.pi / 2 - jnp.asarray(altaz.alt.rad)
+        # East/north/up direction cosines enter the full three-dimensional fringe.
         lmn_by_time.append(
             jnp.stack(
                 [
@@ -367,6 +380,7 @@ def _topocentric_coordinates(
                 ]
             )
         )
+        # Angular coordinates independently supply the primary-beam evaluation.
         az_za_by_time.append(jnp.stack([az, za]))
 
     return jnp.stack(lmn_by_time), jnp.stack(az_za_by_time)
@@ -411,6 +425,7 @@ def _angular_lm_extent(
             f"lmn_coords must have shape (3, n_pix), got {lmn.shape}"
         )
 
+    # Project into the reference tangent chart and include one pixel width.
     l_angle = np.arctan2(lmn[0], lmn[2])
     m_angle = np.arctan2(lmn[1], lmn[2])
     pixel_angle = float(np.sqrt(pixel_area_sr))
@@ -474,6 +489,7 @@ def build_image_geometry(
             f"got {sky_mask_time_mode!r}."
         )
 
+    # Establish the observing times and terrestrial location before selecting sky pixels.
     times_jd, time_ind_center = _construct_time_array(jd_center, n_t, d_t)
     lat, lon, alt = telescope_latlonalt
     telescope_location = EarthLocation.from_geodetic(
@@ -481,6 +497,7 @@ def build_image_geometry(
         lat=lat * u.deg,
         height=alt * u.m,
     )
+    # Follow zenith through celestial coordinates to define the drift-scan footprint.
     field_centers = [
         _observation_field_center(float(jd), telescope_location)
         for jd in times_jd
@@ -495,12 +512,14 @@ def build_image_geometry(
             time_ind_center=time_ind_center,
         )
     )
+    # Keep one celestial pixel set and evaluate its moving instrumental coordinates.
     lmn_fg, az_za_fg = _topocentric_coordinates(
         times_jd,
         pix_indices_fg,
         nside=nside,
         telescope_location=telescope_location,
     )
+    # Equal-area pixel weights enter the fringe operator; angular extents set uv spacing.
     pixel_area_sr = float(jhp.nside2pixarea(nside))
     fov_l_angle_fg, fov_m_angle_fg = _angular_lm_extent(
         lmn_fg[time_ind_center],

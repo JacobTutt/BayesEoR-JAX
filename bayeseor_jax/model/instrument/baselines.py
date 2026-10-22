@@ -61,7 +61,32 @@ class InstrumentModel:
         red_file: str = "redundancy_model.npy",
         antpairs_file: str = "antpairs.npy",
     ) -> None:
-        
+        """Load sampled baselines and redundancy weights from saved NumPy arrays.
+
+        Parameters
+        ----------
+        inst_model_dir : pathlib.Path or str
+            Directory containing an ``instrument_model.npy`` dictionary or
+            separate coordinate, redundancy, and optional antenna-pair files.
+        uvw_file : str, optional
+            Coordinate file relative to the directory; defaults to
+            ``uvw_model.npy``. Coordinates are in metres, not wavelengths.
+        red_file : str, optional
+            Redundancy file; defaults to ``redundancy_model.npy``.
+        antpairs_file : str, optional
+            Optional antenna-pair file; defaults to ``antpairs.npy``.
+
+        Returns
+        -------
+        None
+            Populates the instance with validated baseline arrays.
+
+        Notes
+        -----
+        A combined dictionary takes precedence over separate files. The time
+        and baseline axes are preserved so visibility rows, noise weights,
+        and forward-operator rows refer to the same measurements.
+        """
         # Validate and normalise `inst_model_dir` path.
         if not isinstance(inst_model_dir, Path):
             inst_model_dir = Path(inst_model_dir)
@@ -118,7 +143,21 @@ class InstrumentModel:
         self._validate_shapes()
 
     def _validate_shapes(self) -> None:
-        """Validate and normalize loaded instrument-model arrays."""
+        """Validate baseline coordinates and align redundancy weights with their axes.
+
+        Returns
+        -------
+        None
+            Validates instance arrays and removes a trailing singleton axis
+            from ``bl_red_array`` when present.
+
+        Raises
+        ------
+        ValueError
+            If coordinates are not shaped ``(n_t, n_bls, 3)`` or redundancy
+            weights do not match their time and baseline axes.
+        """
+        # Each sampled baseline must carry three physical coordinate components.
         if self.uvw_array_m.ndim != 3:
             raise ValueError(
                 "uvw_array_m must have shape (n_t, n_bls, 3); "
@@ -130,6 +169,7 @@ class InstrumentModel:
                 f"got shape {self.uvw_array_m.shape}"
             )
 
+        # Accept a singleton weight axis, then require one weight per measurement.
         if self.bl_red_array.ndim == 3 and self.bl_red_array.shape[-1] == 1:
             self.bl_red_array = jnp.squeeze(self.bl_red_array, axis=-1)
         if self.bl_red_array.ndim != 2:
@@ -147,10 +187,22 @@ class InstrumentModel:
 
     @property
     def n_t(self) -> int:
-        """Number of time integrations."""
+        """Return the number of time integrations in the loaded baseline array.
+
+        Returns
+        -------
+        int
+            Length of the time axis of ``uvw_array_m``.
+        """
         return int(self.uvw_array_m.shape[0])
 
     @property
     def n_bls(self) -> int:
-        """Number of sampled baselines."""
+        """Return the number of sampled baselines per integration.
+
+        Returns
+        -------
+        int
+            Length of the baseline axis of ``uvw_array_m``.
+        """
         return int(self.uvw_array_m.shape[1])

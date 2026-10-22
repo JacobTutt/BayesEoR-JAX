@@ -537,10 +537,12 @@ class Beam_Model:
             )
             return 0.0
 
+        # Estimate aperture support across the frequency range used by the model.
         freq_min_hz = float(freqs_hz.min())
         freq_max_hz = float(freqs_hz.max())
         wavelength_max_model = float(self.c_ms / freq_max_hz)
 
+        # Circular-aperture support is set by diameter expressed in wavelengths.
         if self.beam_type in {"airy", "taperairy", "tanhairy"}:
             if self.diam is not None:
                 diam_eff = float(self.diam)
@@ -553,6 +555,7 @@ class Beam_Model:
                 )
             return float(diam_eff / wavelength_max_model)
 
+        # The Fourier width of a Gaussian is reciprocal to its angular width.
         if self.beam_type in {"gaussian", "gausscosine"}:
             if gaussian_nsigma <= 0:
                 raise ValueError("gaussian_nsigma must be > 0")

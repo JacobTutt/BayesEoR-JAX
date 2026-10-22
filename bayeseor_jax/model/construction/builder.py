@@ -391,6 +391,7 @@ class BuildMatrices:
             dv=dv_eor,
             d_eta=d_eta,
         )
+        # F' uses the reference-time tangent chart within the cosmological field.
         lm_21 = self.image_geometry.lmn_fg[
             self.image_geometry.time_ind_center,
             :2,
@@ -401,6 +402,7 @@ class BuildMatrices:
             lm_21,
             uv_cell_area=self.fourier_geometry.du * self.fourier_geometry.dv,
         )
+        # F_z uses offsets from the central channel to define line-of-sight phases.
         frequency_offsets_hz = self.freq_hz - self.freq_hz[n_freq // 2]
         self.spectral_fourier_operator = build_spectral_fourier_operator(
             self.fourier_geometry.eta,
@@ -498,6 +500,7 @@ class BuildMatrices:
                 "component must be one of {'all', 'eor', 'foreground'}"
             )
 
+        # Build F^-1 P for one time/frequency block over the full foreground field.
         response = build_sky_to_visibility_operator(
             np.asarray(self.image_geometry.lmn_fg[i_t : i_t + 1]),
             np.asarray(self.inst_uvw_irad[i_f : i_f + 1]),
@@ -507,8 +510,10 @@ class BuildMatrices:
             self.image_geometry.pixel_area_sr,
         )
 
+        # Reuse the same physical response for both coefficient parameterisations.
         components = []
         if component in {"all", "eor"}:
+            # The cosmological field selects a subset of the shared sky-pixel axis.
             eor_response = response[
                 ..., self.image_geometry.eor_fg_shared_axis
             ]
@@ -528,6 +533,7 @@ class BuildMatrices:
                 )
             )
 
+        # Joint columns always contain cosmological coefficients before foregrounds.
         return components[0] if len(components) == 1 else jnp.concatenate(
             components,
             axis=1,
@@ -553,6 +559,7 @@ class BuildMatrices:
         foreground count is ``n_pixel * n_spectral_component``. Their sum
         determines the column dimension of the joint operator on disk.
         """
+        # Count Cartesian uv/eta pairs and spectral-component/pixel pairs separately.
         eor_width = (
             self.fourier_geometry.uv.shape[1]
             * self.fourier_geometry.eta.shape[0]
@@ -601,6 +608,7 @@ class BuildMatrices:
         return that path rather than loading the completed matrix into memory.
         """
         path = _dense_matrix_path_impl(self, matrix_name)
+        # Write to a temporary name so an incomplete operator is not treated as cached.
         partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
         n_rows = int(self.n_t * self.n_freq * self.nbls)
         n_cols = self._forward_operator_width(component)
@@ -612,6 +620,7 @@ class BuildMatrices:
             sync_name=f"{matrix_name}-forward-operator-ready",
         )
 
+        # Dense sky-response blocks stay on CPU to avoid exhausting accelerator memory.
         cpu_devices = jax.local_devices(backend="cpu")
         if not cpu_devices:
             raise RuntimeError("No local JAX CPU device is available.")
@@ -642,6 +651,7 @@ class BuildMatrices:
                 else jnp.zeros((0, 0), dtype=jnp.complex128)
             )
 
+            # Assign disjoint, contiguous time ranges, including any remainder.
             process_index = int(jax.process_index())
             process_count = int(jax.process_count())
             base_times, extra_times = divmod(int(self.n_t), process_count)
@@ -657,6 +667,7 @@ class BuildMatrices:
                 f"{matrix_name}: process {process_index}/{process_count} "
                 f"building times [{time_start}, {time_stop}) on CPU",
             )
+            # Stream each baseline block directly into its final visibility-row range.
             for i_t in range(time_start, time_stop):
                 for i_f in range(self.n_freq):
                     block = self._build_forward_operator_row_block(
@@ -673,6 +684,7 @@ class BuildMatrices:
                     )
             output.flush()
 
+        # Close local mappings before the collective publication of the completed file.
         del output
         distributed = (
             getattr(jax, "distributed", None) is not None
@@ -1200,6 +1212,7 @@ class BuildMatrices:
                 f"{ninv_matrix_name} has shape {tuple(Ninv_mm.shape)} but expected {(n_vis,)}"
             )
 
+        # Data, inverse noise and operator rows must describe the same measurements.
         vis_noisy_np = np.asarray(vis_noisy, dtype=np.complex128).reshape(-1)
         if vis_noisy_np.shape != (n_vis,):
             raise ValueError(
@@ -1217,6 +1230,7 @@ class BuildMatrices:
                 local_device_count=local_device_count,
                 process_index=process_index,
             )
+            # Match operator and weighted-data padding so extra rows contribute zero.
             local_ninv_d = np.asarray(Ninv_mm[row0:row1]) * vis_noisy_np[row0:row1]
             pad_rows = int(rows_per_process - local_ninv_d.shape[0])
             if pad_rows:
@@ -1255,6 +1269,7 @@ class BuildMatrices:
                 """
                 return jnp.conj(T).T @ ninv_d
 
+            # Load only this host's stripe, then reduce projections across the device mesh.
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
             if pad_rows:
                 local_T = np.pad(local_T, ((0, pad_rows), (0, 0)), mode="constant")
@@ -1348,6 +1363,7 @@ class BuildMatrices:
         if not matrix_names:
             return
 
+        # One process owns deletion; all others wait before checking cache existence.
         removed = False
         if jax.process_index() == 0:
             for matrix_name in matrix_names:
@@ -1394,6 +1410,7 @@ class BuildMatrices:
             invalidate_existing = self.clobber
 
         if invalidate_existing:
+            # Rebuilding an upstream array also invalidates every cached dependent product.
             invalidation_map = {
                 "T": ("T", "T_Ninv_T", "dbar"),
                 "Ninv": ("Ninv", "T_Ninv_T", "dbar", "d_ninv_d"),
@@ -1403,6 +1420,7 @@ class BuildMatrices:
             }
             self._invalidate_saved_outputs(invalidation_map.get(matrix_name, (matrix_name,)))
 
+        # Reuse complete cached products, otherwise build their prerequisites first.
         if check_if_matrix_exists_impl(self, matrix_name):
             return
         _log_build(self, f"building and saving {matrix_name}")
@@ -1473,6 +1491,7 @@ class BuildMatrices:
         Existing files are reused unless ``clobber`` is set. A changed dataset
         therefore requires invalidating its saved projections or a new directory.
         """
+        # Data-independent products are shared; dbar and d^H N^-1 d depend on this dataset.
         self.build_minimum_matrix_stack()
         if self.clobber:
             self._invalidate_saved_outputs(("dbar", "d_ninv_d"))

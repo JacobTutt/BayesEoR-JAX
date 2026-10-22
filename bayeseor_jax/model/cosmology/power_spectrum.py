@@ -20,7 +20,33 @@ def generate_k_modes_in_physical_coordinates(
     transverse_distance_mpc: float,
     line_of_sight_distance_mpc_per_hz: float,
 ) -> jax.Array:
-    """Convert retained instrumental Fourier modes directly to ``|k|``."""
+    """Convert retained instrumental Fourier modes to cosmological wavenumbers.
+
+    Parameters
+    ----------
+    uv : jax.Array
+        Transverse angular Fourier coordinates, shape ``(2, n_uv_mode)``,
+        in inverse radians; these are model modes, not sampled baselines.
+    eta : jax.Array
+        Line-of-sight Fourier coordinates, shape ``(n_eta_mode,)``, in inverse Hz.
+    transverse_distance_mpc : float
+        Transverse comoving distance ``D_M`` at the reference redshift, in Mpc.
+    line_of_sight_distance_mpc_per_hz : float
+        Positive conversion factor ``|dchi/df|`` at that redshift, in Mpc/Hz.
+
+    Returns
+    -------
+    mod_k : jax.Array
+        Wavenumber magnitudes in inverse Mpc, shape ``(n_uv_mode*n_eta_mode,)``,
+        with eta varying fastest to match the cosmological operator columns.
+
+    Notes
+    -----
+    The conversion is ``(k_x, k_y) = 2*pi*(u, v)/D_M`` and
+    ``k_z = 2*pi*eta/|dchi/df|``. Each Cartesian combination receives a
+    spherical magnitude used to assign its power-spectrum prior bin.
+    """
+    # Preserve the retained-mode ordering supplied by the Fourier geometry.
     uv = jnp.asarray(uv, dtype=jnp.float64)
     eta = jnp.asarray(eta, dtype=jnp.float64)
     if uv.ndim != 2 or uv.shape[0] != 2:
@@ -28,9 +54,11 @@ def generate_k_modes_in_physical_coordinates(
     if eta.ndim != 1:
         raise ValueError("eta must have shape (n_eta_mode,)")
 
+    # Convert angular and frequency Fourier scales into comoving wavenumbers.
     k_x = 2.0 * jnp.pi * uv[0] / transverse_distance_mpc
     k_y = 2.0 * jnp.pi * uv[1] / transverse_distance_mpc
     k_z = 2.0 * jnp.pi * eta / line_of_sight_distance_mpc_per_hz
+    # Broadcast every transverse mode against every eta mode before flattening.
     return jnp.sqrt(
         k_x[:, None] ** 2
         + k_y[:, None] ** 2

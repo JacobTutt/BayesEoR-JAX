@@ -91,10 +91,12 @@ def check_if_matrix_exists(bm, matrix_name: str) -> bool:
     if getattr(jax, "distributed", None) is None or not jax.distributed.is_initialized():
         return exists
 
+    # Publish one cache decision so processes cannot take different build paths.
     decision_path = path.with_suffix(path.suffix + ".exists")
     if jax.process_index() == 0:
         decision_path.write_text("1" if exists else "0")
 
+    # All readers must observe that decision before any process begins a rebuild.
     multihost_utils.sync_global_devices(f"{matrix_name}-exists-ready")
     _wait_for_file(decision_path)
     exists = decision_path.read_text().strip() == "1"
@@ -122,6 +124,7 @@ def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
     Used for coordination files during distributed construction. Raise
     ``TimeoutError`` if the path remains absent after the allowed interval.
     """
+    # Bound filesystem polling so a missing producer cannot hang the build forever.
     deadline = time.time() + timeout_s
     while not path.exists():
         if time.time() > deadline:

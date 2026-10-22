@@ -149,6 +149,7 @@ def _normalise_uvw_for_pairing(uvw_array_m: jnp.ndarray) -> jnp.ndarray:
     ValueError
         If input does not have a valid UVW shape with trailing axis size 3.
     """
+    # Validate either a single baseline list or a time-stacked sequence.
     uvw = jnp.asarray(uvw_array_m, dtype=jnp.float64)
     if uvw.ndim == 2:
         if uvw.shape[1] != 3:
@@ -157,6 +158,7 @@ def _normalise_uvw_for_pairing(uvw_array_m: jnp.ndarray) -> jnp.ndarray:
     if uvw.ndim == 3:
         if uvw.shape[2] != 3:
             raise ValueError(f"uvw_array_m must have trailing axis size 3, got {uvw.shape}")
+        # Pair identities are determined once from the first integration.
         return uvw[0]
     raise ValueError("uvw_array_m must have shape (n_bls, 3) or (n_t, n_bls, 3)")
 
@@ -187,11 +189,13 @@ def _normalise_redundancy(bl_red_array: jnp.ndarray, n_t: int, n_bls: int) -> jn
     ValueError
         If the input shape is incompatible with ``n_t`` and ``n_bls``.
     """
+    # A static redundancy vector is broadcast, not reweighted, across integrations.
     red = jnp.asarray(bl_red_array)
     if red.ndim == 1:
         if red.shape[0] != n_bls:
             raise ValueError(f"bl_red_array has incompatible shape {red.shape} for n_bls={n_bls}")
         return jnp.broadcast_to(red[jnp.newaxis, :], (n_t, n_bls))
+    # Accept time-dependent weights or a column vector of static weights.
     if red.ndim == 2:
         if red.shape == (n_t, n_bls):
             return red
@@ -200,6 +204,7 @@ def _normalise_redundancy(bl_red_array: jnp.ndarray, n_t: int, n_bls: int) -> jn
         if red.shape == (n_bls,):
             return jnp.broadcast_to(red[jnp.newaxis, :], (n_t, n_bls))
         raise ValueError(f"bl_red_array has incompatible shape {red.shape}")
+    # Older saved arrays may carry an otherwise redundant singleton weight axis.
     if red.ndim == 3 and red.shape == (n_t, n_bls, 1):
         return jnp.squeeze(red, axis=-1)
     raise ValueError(f"bl_red_array must be 1D/2D or (n_t, n_bls, 1), got {red.shape}")

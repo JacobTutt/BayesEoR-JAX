@@ -80,10 +80,13 @@ def _build_uv_modes(
     ``(2, n_u*n_v - 1)`` with u varying fastest within each v row and remove
     the angular monopole ``(u,v)=(0,0)``.
     """
+    # Centre both angular Fourier axes on the zero mode.
     u = (jnp.arange(n_u, dtype=jnp.float64) - n_u // 2) * du
     v = (jnp.arange(n_v, dtype=jnp.float64) - n_v // 2) * dv
+    # Row-major flattening makes u the fast axis within each v row.
     u_grid, v_grid = jnp.meshgrid(u, v, indexing="xy")
     uv = jnp.stack([u_grid.reshape(-1), v_grid.reshape(-1)])
+    # Remove only the transverse monopole, retaining the other uv pairs.
     monopole = (n_v // 2) * n_u + (n_u // 2)
     return jnp.concatenate(
         [uv[:, :monopole], uv[:, monopole + 1 :]],
@@ -111,7 +114,9 @@ def _build_eta_modes(n_eta: int, d_eta: float) -> jax.Array:
     Return ``(arange(n_eta) - n_eta//2) * d_eta`` in inverse Hz with the
     frequency-independent ``eta=0`` mode removed, giving ``n_eta - 1`` modes.
     """
+    # Use the same centred indexing as the transverse grid.
     eta = (jnp.arange(n_eta, dtype=jnp.float64) - n_eta // 2) * d_eta
+    # Exclude the frequency-independent mode from the cosmological component.
     eta0 = n_eta // 2
     return jnp.concatenate([eta[:eta0], eta[eta0 + 1 :]])
 
@@ -157,11 +162,13 @@ def build_fourier_geometry(
     and eta zero mode are excluded consistently for operators and k binning.
     No image coordinates, beam response, or transform matrices are built here.
     """
+    # Reject invalid dimensions and integration weights before building axes.
     if min(n_u, n_v, n_eta) < 1:
         raise ValueError("Fourier-grid dimensions must all be positive")
     if min(du, dv, d_eta) <= 0:
         raise ValueError("Fourier-grid spacings must all be positive")
 
+    # Share these retained coordinates between operator construction and k binning.
     return FourierGeometry(
         uv=_build_uv_modes(n_u, n_v, du, dv),
         eta=_build_eta_modes(n_eta, d_eta),
