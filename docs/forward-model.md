@@ -32,13 +32,65 @@ All transformations between Fourier, image, frequency, and visibility spaces
 are defined in `model/operators.py`; the geometry modules contain only their
 coordinate definitions.
 
-`build_sky_to_visibility_operator` forms the shared beam-weighted fringe
-response `F^-1 P`. `build_T_21_core` and `build_T_fg_core` then apply the
-component operators. The public `BuildMatrices.build_T_21`, `build_T_fg`, and `build_T`
-methods distribute time ranges across JAX processes, construct frequency-row
-blocks on CPU, and write the result directly to a shared NumPy memmap. This
-keeps the exact equation-level model while avoiding a full operator allocation
-on any GPU.
+There are two explicit interfaces to the same mathematics:
+
+- `T_21(...)` and `T_fg(...)` evaluate a supplied block and return a JAX array.
+  They compose `build_sky_to_visibility_operator` with the component factors,
+  without choosing hardware, reading files, or applying priors or KL reduction.
+- `T_21_build_save(...)` and `T_fg_build_save(...)` evaluate those functions on
+  CPU in distributed time-frequency blocks, returning paths to complete
+  disk-backed component matrices. `BuildMatrices` exposes methods with these
+  same names using its configured observation and model.
+
+The pure functions can be used directly inside compiled computations:
+
+```python
+import jax
+from bayeseor_jax.model.operators import T_21, T_fg
+
+# Inputs have already been selected for matching times, frequencies and baselines.
+# F_prime, F_z and Q contain the chosen component-mode columns.
+T21_block = jax.jit(T_21)(lmn_21, uvw_lambda, beam_21, pixel_area_sr, F_prime, F_z)
+Tfg_block = jax.jit(T_fg)(lmn_fg, uvw_lambda, beam_fg, pixel_area_sr, Q)
+```
+
+Here `lmn` is `(time, 3, pixel)`, `uvw_lambda` is `(frequency, 3, baseline)`
+and the horizon-masked beam is `(time, frequency, pixel)`. Cosmological pixel
+summation must still cover its full model field; selecting fewer pixels is not
+equivalent to selecting fewer Fourier coefficients. Array shapes determine the
+compiled block dimensions. Calling a pure function does materialise its requested
+matrix block; it does not automatically provide a matrix-free solver.
+
+For disk-backed construction, every participating process makes the same calls:
+
+```python
+from bayeseor_jax.model.construction.forward import (
+    T_21_build_save, T_fg_build_save, assemble_joint_operator,
+)
+
+path_21 = T_21_build_save(
+    lmn_21, uvw_lambda, beam_21, pixel_area_sr, F_prime, F_z,
+    output_path="arrays/T_21.npy",
+)
+path_fg = T_fg_build_save(
+    lmn_fg, uvw_lambda, beam_fg, pixel_area_sr, Q,
+    output_path="arrays/T_fg.npy",
+)
+path_joint = assemble_joint_operator(path_21, path_fg, output_path="arrays/T.npy")
+```
+
+Construction discovers the existing JAX process ranks, a local CPU device and
+the available logical CPU count, respecting affinity and Slurm's per-task count
+where supplied. It does **not** launch workers, initialise distributed JAX or
+configure XLA thread pools; CPU binding and thread budgets belong to the job
+launcher. A JAX CPU device is not a physical CPU core.
+
+Each process receives a disjoint contiguous range of flattened time-frequency
+blocks, with baseline varying fastest within each block. All processes need
+access to the same shared filesystem. Completed blocks are flushed before the
+temporary file is published under its final name. Joint assembly copies the
+saved component columns in blocks rather than rebuilding them or loading the
+full arrays onto a GPU. This stage remains independent of KL reduction.
 
 ## Code Organisation
 
@@ -59,6 +111,7 @@ model/
 ├── operators.py                # Numerical mappings between model spaces
 └── construction/
     ├── builder.py              # BuildMatrices orchestration
+    ├── forward.py              # CPU construction and saved-component assembly
     ├── storage.py              # Saved arrays and shared memory-mapped files
     └── distribution.py         # Device meshes and visibility-row partitions
 ```
@@ -74,18 +127,30 @@ should use the paths above. The old `model.instrument`, `model.noise`,
 `model.cosmology_transforms`, and `model.k_cube` implementations now live in
 `model.instrument.baselines`, `model.instrument.noise`, `model.cosmology.transforms`,
 and `model.cosmology.power_spectrum`, respectively.
+The former saving methods `BuildMatrices.build_T_21` and `build_T_fg` are now
+named `T_21_build_save` and `T_fg_build_save` to distinguish them from pure
+operator evaluation. `BuildMatrices.build_T` assembles the separate files,
+building missing components first.
 
 ## Cached Matrix Products
 
 The marginalised likelihood does not rebuild the full model at every sampler step. Setup constructs and caches matrix products that are reused during inference:
 
-- `T.npy`: dense forward-model operator.
+- `T_21.npy`: cosmological Fourier-coefficient operator.
+- `T_fg.npy`: original foreground spectral-amplitude operator.
+- `T.npy`: joint operator assembled from those saved component columns.
 - `Ninv.npy`: inverse-noise representation.
 - `T_Ninv_T.npy`: `T^H N^{-1} T`.
 - `dbar.npy`: `T^H N^{-1} d`.
 - `d_ninv_d.npy`: `d^H N^{-1} d`.
 
 These files are written under `array_save_directory`. If they already exist and `clobber` is false, the setup path can reuse them.
+Reuse assumes identical observation and model settings; a filename alone does
+not validate that configuration. Replacing a component through `BuildMatrices`
+invalidates its joint matrix, Gram matrix and data projection. The standalone
+save functions do not manage caches belonging to other analyses. Keeping the
+two component files as well as the assembled joint matrix increases disk usage
+but allows independent construction and reuse.
 
 ## Setup Flow
 
