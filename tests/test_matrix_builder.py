@@ -4,7 +4,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from bayeseor_jax.build_matricies.overall import BuildMatrices
-from bayeseor_jax.build_matricies.uv_model_space import UV_ModelSpace
 
 
 def _minimal_builder(tmp_path):
@@ -12,11 +11,6 @@ def _minimal_builder(tmp_path):
     builder.n_t = 2
     builder.n_freq = 2
     builder.nbls = 1
-    builder.n_uv_eor = 1
-    builder.n_eta = 2
-    builder.d_eta = 1.0
-    builder.du_eor = 1.0
-    builder.dv_eor = 1.0
     builder.beta_fg = [2.0, 3.0]
     builder.n_fg_components = 3
     builder.f0_mhz = 100.0
@@ -36,8 +30,11 @@ def _minimal_builder(tmp_path):
             [[0.8, 0.4], [0.6, 0.2]],
         ]
     )
-    builder.uv_model_space = SimpleNamespace(
-        uv_eor=jnp.asarray([[0.5], [0.0]])
+    builder.fourier_geometry = SimpleNamespace(
+        uv=jnp.asarray([[0.5], [0.0]]),
+        eta=jnp.asarray([-0.5]),
+        transverse_basis=jnp.asarray([[1.0], [-1.0]]),
+        spectral_basis=jnp.asarray([[-1.0], [1.0]]),
     )
     builder.image_geometry = SimpleNamespace(
         lmn_fg=jnp.asarray(
@@ -70,13 +67,6 @@ def test_component_builders_match_concatenated_operator(tmp_path):
     np.testing.assert_allclose(joint, np.concatenate([eor, foreground], axis=1))
 
 
-def test_uv_model_space_contains_only_cosmological_modes():
-    model_space = UV_ModelSpace(3, 3, du_eor=0.5, dv_eor=0.25)
-
-    assert model_space.uv_eor.shape == (2, 8)
-    assert not hasattr(model_space, "uv_fg")
-
-
 def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
     builder = BuildMatrices.__new__(BuildMatrices)
     builder.array_save_directory = tmp_path
@@ -103,10 +93,16 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
     assert not (tmp_path / "T_Ninv_T.partial.npy.ready").exists()
 
 
-def test_builder_reuses_precomputed_image_geometry(tmp_path):
-    geometry = SimpleNamespace(
+def test_builder_reuses_precomputed_geometries(tmp_path):
+    image_geometry = SimpleNamespace(
         az_za_fg=jnp.zeros((1, 2, 1)),
         n_pix_fg=1,
+    )
+    fourier_geometry = SimpleNamespace(
+        uv=jnp.zeros((2, 0)),
+        eta=jnp.zeros((0,)),
+        transverse_basis=jnp.zeros((1, 0)),
+        spectral_basis=jnp.zeros((1, 0)),
     )
 
     builder = BuildMatrices(
@@ -120,9 +116,11 @@ def test_builder_reuses_precomputed_image_geometry(tmp_path):
         n_eta=1,
         n_t=1,
         d_t=10.0,
-        image_geometry=geometry,
+        image_geometry=image_geometry,
+        fourier_geometry=fourier_geometry,
         uvw_array_m=jnp.zeros((1, 1, 3)),
         array_save_directory=tmp_path,
     )
 
-    assert builder.image_geometry is geometry
+    assert builder.image_geometry is image_geometry
+    assert builder.fourier_geometry is fourier_geometry

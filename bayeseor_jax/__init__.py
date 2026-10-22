@@ -5,15 +5,15 @@ from importlib import import_module
 from .build_matricies import (
     Beam_Model,
     BuildMatrices,
+    FourierGeometry,
     ImageGeometry,
-    UV_ModelSpace,
+    build_fourier_geometry,
     build_foreground_spectral_basis,
     build_image_geometry,
     build_nudft_matrix,
     build_sky_to_visibility_core,
     build_T_eor_core,
     build_T_fg_core,
-    inverse_udft_1d_rect,
 )
 from .analyze import DataContainer
 from .model import (
@@ -89,14 +89,14 @@ __all__ = [
     "jy_to_ksr",
     "save_numpy_dict",
     "write_log_files",
+    "FourierGeometry",
     "ImageGeometry",
     "MaximumAPosteriori",
-    "UV_ModelSpace",
+    "build_fourier_geometry",
     "build_foreground_spectral_basis",
     "build_image_geometry",
     "build_nudft_matrix",
     "build_sky_to_visibility_core",
     "build_T_eor_core",
     "build_T_fg_core",
-    "inverse_udft_1d_rect",
 ]

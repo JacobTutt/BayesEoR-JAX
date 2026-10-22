@@ -12,7 +12,11 @@ import jax.numpy as jnp
 import numpy as np
 from jax.experimental import multihost_utils
 
-from .build_matricies import BuildMatrices, build_image_geometry
+from .build_matricies import (
+    BuildMatrices,
+    build_fourier_geometry,
+    build_image_geometry,
+)
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
@@ -20,9 +24,8 @@ from .model.cosmology_transforms import Cosmology
 from .model.k_cube import (
     calc_mean_binned_k_vals,
     compress_to_nonempty_k_bins,
-    generate_k_cube_in_physical_coordinates,
+    generate_k_modes_in_physical_coordinates,
     generate_k_cube_model_spherical_binning,
-    mask_k_cube,
 )
 from .utils import (
     _resolve_uv_grid_from_extents,
@@ -323,6 +326,18 @@ def run_setup(
     n_v_eor = int(resolved_grid["n_v_eor"])
     du_eor = float(resolved_grid["du_eor"])
     dv_eor = float(resolved_grid["dv_eor"])
+    bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
+    d_eta = 1.0 / bandwidth_hz
+    fourier_geometry = build_fourier_geometry(
+        image_geometry=image_geometry,
+        n_u=n_u_eor,
+        n_v=n_v_eor,
+        n_eta=int(n_eta),
+        du=du_eor,
+        dv=dv_eor,
+        d_eta=d_eta,
+        n_frequency=n_freq,
+    )
 
     setup_args_dict = {
         "data_path": None if data_path is None else str(Path(data_path).expanduser().resolve()),
@@ -399,25 +414,18 @@ def run_setup(
     # are required for k-bin definitions and power normalization.
     cosmo = Cosmology()
     z = float(cosmo.f2z(jnp.mean(freqs_hz)))
-    bandwidth_hz = float(vis_dict["df_hz"]) * float(n_freq)
     ps_box_size_para_mpc = float(cosmo.dL_df(z) * bandwidth_hz)
     ps_box_size_ra_mpc = float(cosmo.dL_dth(z) * float(image_geometry.fov_l_angle_eor))
     ps_box_size_dec_mpc = float(cosmo.dL_dth(z) * float(image_geometry.fov_m_angle_eor))
 
-    # Build the EoR k-cube model:
-    # 1) generate physical k coordinates
-    # 2) mask LOS-DC and uv-monopole modes
-    # 3) assign spherical bins
-    # 4) drop empty bins and remap voxel->bin IDs to compact contiguous labels
-    mod_k, *_ = generate_k_cube_in_physical_coordinates(
-        int(n_u_eor),
-        int(n_v_eor),
-        int(n_eta),
-        ps_box_size_ra_mpc,
-        ps_box_size_dec_mpc,
-        ps_box_size_para_mpc,
+    # Convert the exact retained model modes to cosmological coordinates before
+    # assigning spherical bins.
+    mod_k_vo = generate_k_modes_in_physical_coordinates(
+        fourier_geometry.uv,
+        fourier_geometry.eta,
+        transverse_distance_mpc=float(cosmo.dL_dth(z)),
+        line_of_sight_distance_mpc_per_hz=float(cosmo.dL_df(z)),
     )
-    mod_k_vo = mask_k_cube(mod_k)
     bid_full, valid_full, _, _, counts = generate_k_cube_model_spherical_binning(
         mod_k_vo=mod_k_vo,
         ps_box_size_para_mpc=ps_box_size_para_mpc,
@@ -477,7 +485,7 @@ def run_setup(
         f0_mhz=float(f0_mhz),
         df_mhz=float(df_mhz),
         n_eta=int(n_eta),
-        d_eta=float(1.0 / bandwidth_hz),
+        d_eta=d_eta,
         sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
@@ -487,6 +495,7 @@ def run_setup(
         n_t=int(n_t),
         d_t=float(d_t),
         image_geometry=image_geometry,
+        fourier_geometry=fourier_geometry,
         beam_type=beam_type,
         peak_amp=float(peak_amp),
         fwhm_deg=fwhm_deg,

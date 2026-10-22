@@ -20,11 +20,7 @@ from jax.sharding import Mesh, PartitionSpec as P
 
 from astropy.constants import c
 
-from .dft_funcs import (
-    inverse_udft_1d_rect,
-    build_nudft_matrix,
-)
-from .uv_model_space import UV_ModelSpace
+from .fourier_geometry import FourierGeometry, build_fourier_geometry
 from .image_geometry import ImageGeometry, build_image_geometry
 from .beam_model import Beam_Model
 from .forward_model import (
@@ -76,6 +72,7 @@ class BuildMatrices:
         n_t: int = 1,
         d_t: Optional[float] = None,
         image_geometry: Optional[ImageGeometry] = None,
+        fourier_geometry: Optional[FourierGeometry] = None,
         beam_type: str = 'uniform',
         peak_amp: float = 1.0,
         fwhm_deg: Optional[float] = None,
@@ -95,14 +92,6 @@ class BuildMatrices:
         clobber: bool = False,
     ) -> None:
         
-        # Store EoR UV-plane parameters.
-        self.n_u_eor = n_u_eor
-        self.du_eor = du_eor
-        self.n_v_eor = n_v_eor
-        self.dv_eor = dv_eor
-        # Total EoR uv modes (monopole always excluded).
-        self.n_uv_eor = (n_u_eor * n_v_eor) - 1
-
         # Store foreground spectral-model settings.
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
@@ -117,8 +106,6 @@ class BuildMatrices:
         self.n_freq = n_freq
         self.f0_mhz = f0_mhz
         self.df_mhz = df_mhz    
-        self.n_eta = n_eta
-        self.d_eta = d_eta
         # Frequency array in Hz (from MHz).
         self.freq_hz = (f0_mhz + df_mhz * jnp.arange(n_freq, dtype=jnp.float64)) * 1e6 
         c_ms = float(c.to("m/s").value)
@@ -166,14 +153,6 @@ class BuildMatrices:
         if self.t_ninv_t_right_block_batch < 1:
             raise ValueError("t_ninv_t_right_block_batch must be >= 1")
 
-        # The cosmological model retains its rectilinear transverse grid.
-        self.uv_model_space = UV_ModelSpace(
-            n_u_eor=self.n_u_eor,
-            n_v_eor=self.n_v_eor,
-            du_eor=self.du_eor,
-            dv_eor=self.dv_eor,
-        )
-
         # Reuse setup geometry when available; direct callers may construct it here.
         self.image_geometry = image_geometry or build_image_geometry(
             fov_eor=self.fov_eor,
@@ -184,6 +163,16 @@ class BuildMatrices:
             jd_center=self.jd_center,
             n_t=self.n_t,
             d_t=self.d_t,
+        )
+        self.fourier_geometry = fourier_geometry or build_fourier_geometry(
+            image_geometry=self.image_geometry,
+            n_u=n_u_eor,
+            n_v=n_v_eor,
+            n_eta=n_eta,
+            du=du_eor,
+            dv=dv_eor,
+            d_eta=d_eta,
+            n_frequency=n_freq,
         )
         # Beam model: evaluate beam response for FG pixels across time/frequency.
         self.beam_model = Beam_Model(
@@ -202,30 +191,6 @@ class BuildMatrices:
             )  # Shape (n_freq, n_t, n_pix_fg)
 
         self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
-
-
-    # ---------------------------
-    # Construction of Finv/Fprime
-    # ---------------------------
-    def _uv_to_lm_eor(self):
-        """
-        Construct the EoR NUDFT kernel (model UV -> image LM/RaDec).
-        """
-        # 2D NUDFT for UV -> LM at the central time step (EoR pixel set).
-        lmn_center = self.image_geometry.lmn_fg[
-            self.image_geometry.time_ind_center,
-            :2,
-        ]
-        lmn_center = lmn_center[:, self.image_geometry.eor_fg_shared_axis]
-        nuidft_uv_to_lm_eor = build_nudft_matrix(
-            self.uv_model_space.uv_eor,  # (2, n_uv_eor)
-            lmn_center,  # (2, n_pix_eor)
-            sign=-1
-        )  # (n_pix_eor, n_uv_eor)
-        # Pixel area normalization in UV.
-        nuidft_uv_to_lm_eor *= (self.du_eor * self.dv_eor)
-
-        return nuidft_uv_to_lm_eor
 
     def _foreground_spectral_basis(self) -> jnp.ndarray:
         """Return the image-domain foreground basis ``Q_z``."""
@@ -287,7 +252,10 @@ class BuildMatrices:
 
     def _forward_operator_width(self, component: str) -> int:
         """Return the number of columns in a selected forward operator."""
-        eor_width = self.n_uv_eor * (self.n_eta - 1)
+        eor_width = (
+            self.fourier_geometry.uv.shape[1]
+            * self.fourier_geometry.eta.shape[0]
+        )
         foreground_width = self.n_fg_spatial_modes * self.n_fg_components
         if component == "eor":
             return int(eor_width)
@@ -331,18 +299,11 @@ class BuildMatrices:
         with jax.default_device(cpu_device):
             if component in {"all", "eor"}:
                 eor_transverse_basis = jax.device_put(
-                    np.asarray(self._uv_to_lm_eor()),
+                    np.asarray(self.fourier_geometry.transverse_basis),
                     cpu_device,
                 )
                 eor_spectral_basis = jax.device_put(
-                    np.asarray(
-                        inverse_udft_1d_rect(
-                            self.n_freq,
-                            self.n_eta,
-                            include_eta0=False,
-                        )
-                        * self.d_eta
-                    ),
+                    np.asarray(self.fourier_geometry.spectral_basis),
                     cpu_device,
                 )
             else:

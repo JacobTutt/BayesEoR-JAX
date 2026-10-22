@@ -4,8 +4,8 @@ Utilities for constructing Fourier-space `k` coordinates and assigning k-modes t
 Conventions
 -----------
 - Spatial-frequency units are `Mpc^-1`.
-- Native cube axis order is `(eta, v, u)` (parallel, Dec-like transverse, RA-like transverse).
-- Flattened masked arrays use `(uv, eta)` block ordering with `eta` varying fastest within each `uv` block.
+- Flattened arrays use `(uv, eta)` block ordering with `eta` varying fastest
+  within each transverse mode.
 """
 
 import jax
@@ -14,104 +14,28 @@ import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
 
 
-def generate_k_cube_in_physical_coordinates(
-    n_u: int,
-    n_v: int,
-    n_eta: int,
-    ps_box_size_ra_mpc: float,
-    ps_box_size_dec_mpc: float,
-    ps_box_size_para_mpc: float,
-):
-    """
-    Construct Fourier coordinates on an `(eta, v, u)` lattice and compute `|k|`.
+def generate_k_modes_in_physical_coordinates(
+    uv: jax.Array,
+    eta: jax.Array,
+    transverse_distance_mpc: float,
+    line_of_sight_distance_mpc_per_hz: float,
+) -> jax.Array:
+    """Convert retained instrumental Fourier modes directly to ``|k|``."""
+    uv = jnp.asarray(uv, dtype=jnp.float64)
+    eta = jnp.asarray(eta, dtype=jnp.float64)
+    if uv.ndim != 2 or uv.shape[0] != 2:
+        raise ValueError("uv must have shape (2, n_uv_mode)")
+    if eta.ndim != 1:
+        raise ValueError("eta must have shape (n_eta_mode,)")
 
-    Parameters
-    ----------
-    n_u, n_v, n_eta : int
-        Number of discrete Fourier modes along `(u, v, eta)` axes.
-    ps_box_size_ra_mpc : float
-        Comoving box size along RA-like transverse axis, in `Mpc`.
-    ps_box_size_dec_mpc : float
-        Comoving box size along Dec-like transverse axis, in `Mpc`.
-    ps_box_size_para_mpc : float
-        Comoving box size along line-of-sight axis, in `Mpc`.
-
-    Returns
-    -------
-    mod_k : jnp.ndarray
-        Shape `(n_eta, n_v, n_u)`, magnitude `sqrt(k_x^2 + k_y^2 + k_z^2)` in `Mpc^-1`.
-    k_x, k_y, k_z : jnp.ndarray
-        Shape `(n_eta, n_v, n_u)`, Cartesian Fourier components in `Mpc^-1`.
-    x, y, z : jnp.ndarray
-        Shape `(n_eta, n_v, n_u)`, centered integer mode indices corresponding to `(u, v, eta)`.
-
-    Notes
-    -----
-    Mode indices are centered with `arange(n) - n//2`, which gives one consistent
-    zero-mode location for both even and odd axis lengths.
-    """
-    # Construct each K-Space axis with shape `(n_axis,)` correctly centered around zero
-    # Approach is consistent for both even and odd `n_axis`
-    u_inds = jnp.arange(n_u, dtype=jnp.int32) - (n_u // 2)
-    v_inds = jnp.arange(n_v, dtype=jnp.int32) - (n_v // 2)
-    eta_inds = jnp.arange(n_eta, dtype=jnp.int32) - (n_eta // 2)
-
-    # Construct a meshgrid of mode indices with shape `(n_eta, n_v, n_u)`
-    z, y, x = jnp.meshgrid(eta_inds, v_inds, u_inds, indexing="ij")
-
-    # Convert index-based modes to physical Fourier coordinates in `Mpc^-1` using the box size.
-    # Calculate the conversion factor for each axis: `delta_k = 2*pi / L`, where `L` is the box size along that axis.
-    delta_kx = (2.0 * jnp.pi) / ps_box_size_ra_mpc
-    delta_ky = (2.0 * jnp.pi) / ps_box_size_dec_mpc
-    delta_kz = (2.0 * jnp.pi) / ps_box_size_para_mpc
-
-    # Apply the conversion to get physical Fourier coordinates of each axis
-    k_x = x.astype(jnp.float64) * delta_kx
-    k_y = y.astype(jnp.float64) * delta_ky
-    k_z = z.astype(jnp.float64) * delta_kz
-
-    # Compute the magnitude of the Fourier vector at each k-mode: `|k| = sqrt(k_x^2 + k_y^2 + k_z^2)`.
-    mod_k = jnp.sqrt(k_x**2 + k_y**2 + k_z**2)
-
-    # Return
-    return mod_k, k_x, k_y, k_z, x, y, z
-
-
-def mask_k_cube(mod_k: jnp.ndarray) -> jnp.ndarray:
-    """
-    Mask DC-like modes and flatten to 1D in a deterministic `(uv, eta)` order.
-
-    Parameters
-    ----------
-    mod_k : jnp.ndarray
-        Shape `(n_eta, n_v, n_u)`, Fourier magnitude values in `Mpc^-1`.
-
-    Returns
-    -------
-    jnp.ndarray
-        Shape `((n_u*n_v - 1) * (n_eta - 1),)`.
-        Excludes:
-        1) the `eta=0` plane (line-of-sight DC mode),
-        2) the transverse monopole `(u, v) = (0, 0)`.
-        Ordering is by transverse pixel (`uv`) first, with `eta` varying fastest.
-    """
-    n_eta, n_v, n_u = mod_k.shape
-
-    # Remove the `eta=0` slice to, removing the constant DC mode along the line of sight.
-    mod_k_no_eta0 = jnp.delete(mod_k, n_eta // 2, axis=0)
-
-    # Flatten `(v, u)` at fixed `eta`; centered zero-mode index maps to `(v//2, u//2)`.
-    mod_k_uv = mod_k_no_eta0.reshape((n_eta - 1, n_u * n_v))
-
-    # The `(u, v) = (0, 0)` flat index in `(v-major, u-minor)` ordering is:
-    # `i_uv0 = (n_v//2) * n_u + (n_u//2)`.
-    # This is valid for both even and odd `(n_u, n_v)` because centered indices
-    # are built with `arange(n) - n//2`, so zero always lives at index `n//2`.
-    uv_monopole_flat_index = (n_v // 2) * n_u + (n_u // 2)
-    mod_k_no_monopole = jnp.delete(mod_k_uv, uv_monopole_flat_index, axis=1)
-
-    # (eta, uv) -> (uv, eta), then flatten to keep eta varying fastest in each uv block.
-    return mod_k_no_monopole.T.reshape(-1)
+    k_x = 2.0 * jnp.pi * uv[0] / transverse_distance_mpc
+    k_y = 2.0 * jnp.pi * uv[1] / transverse_distance_mpc
+    k_z = 2.0 * jnp.pi * eta / line_of_sight_distance_mpc_per_hz
+    return jnp.sqrt(
+        k_x[:, None] ** 2
+        + k_y[:, None] ** 2
+        + k_z[None, :] ** 2
+    ).reshape(-1)
 
 
 def _spherical_bin_edges(
