@@ -1,9 +1,101 @@
 """Partition visibility rows and arrange JAX devices for distributed construction."""
 
+import os
+from dataclasses import dataclass
+
 import jax
 jax.config.update("jax_enable_x64", True)
 import numpy as np
 from jax.sharding import Mesh
+
+
+@dataclass(frozen=True)
+class CPUResources:
+    """Resources visible to one participating construction process.
+
+    Parameters
+    ----------
+    process_index : int
+        This process's zero-based rank in the initialised JAX job.
+    process_count : int
+        Number of participating JAX processes, not the number of CPU cores.
+    device : jax.Device
+        Local CPU device on which construction is explicitly placed.
+    cpu_count : int
+        Available logical CPU count, bounded by affinity and a Slurm
+        per-task allocation when available; this is not an XLA thread count.
+    """
+
+    process_index: int
+    process_count: int
+    device: jax.Device
+    cpu_count: int
+
+
+def discover_cpu_resources() -> CPUResources:
+    """Inspect the existing JAX job and this process's available CPU allocation.
+
+    Returns
+    -------
+    resources : CPUResources
+        Process rank, job size, local CPU device and allocated logical CPU count.
+
+    Notes
+    -----
+    This does not launch workers or initialise distributed JAX. The launcher
+    must establish participating processes and their CPU affinity beforehand.
+    JAX/XLA controls CPU threading; changing thread pools after initialisation
+    is not attempted. A CPU device can use multiple host threads and should
+    not be interpreted as one physical core.
+    """
+    # Affinity describes this process's usable CPUs more accurately than node size.
+    if hasattr(os, "sched_getaffinity"):
+        cpu_count = len(os.sched_getaffinity(0))
+    else:
+        count = getattr(os, "process_cpu_count", os.cpu_count)()
+        cpu_count = count or 1
+    if os.environ.get("SLURM_CPUS_PER_TASK"):
+        allocated = int(os.environ["SLURM_CPUS_PER_TASK"])
+        if allocated < 1:
+            raise ValueError("SLURM_CPUS_PER_TASK must be positive")
+        cpu_count = min(cpu_count, allocated)
+
+    # Select a host device even if the job's default backend is GPU.
+    devices = jax.local_devices(backend="cpu")
+    if not devices:
+        raise RuntimeError("No local JAX CPU device is available for construction")
+    return CPUResources(jax.process_index(), jax.process_count(), devices[0], cpu_count)
+
+
+def partition_blocks(n_blocks: int, process_count: int, process_index: int) -> tuple[int, int]:
+    """Assign a contiguous, non-overlapping block range to one process.
+
+    Parameters
+    ----------
+    n_blocks : int
+        Total number of blocks; zero is permitted.
+    process_count : int
+        Positive number of participating processes.
+    process_index : int
+        Zero-based process rank, smaller than process_count.
+
+    Returns
+    -------
+    start, stop : int
+        Half-open block range. Empty assignments have start equal to stop.
+
+    Notes
+    -----
+    Flattening time and frequency into a single block axis allows multiple
+    processes to share work even when there are fewer times than processes.
+    Counts differ by at most one block; no padding or overlap is required.
+    """
+    if n_blocks < 0 or process_count < 1 or not 0 <= process_index < process_count:
+        raise ValueError("Invalid block count, process count or process index")
+    # Spread remainder blocks over the first ranks, preserving global row ordering.
+    base, remainder = divmod(n_blocks, process_count)
+    start = process_index * base + min(process_index, remainder)
+    return start, start + base + int(process_index < remainder)
 
 
 def build_solver_mesh() -> Mesh:

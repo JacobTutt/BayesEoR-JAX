@@ -133,7 +133,6 @@ def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
 
 
 def _prepare_memmap_output(
-    bm,
     path: Path,
     *,
     shape: tuple[int, ...],
@@ -144,8 +143,6 @@ def _prepare_memmap_output(
 
     Parameters
     ----------
-    bm : BuildMatrices
-        Matrix builder instance coordinating the distributed write.
     path : pathlib.Path
         Output file path.
     shape : tuple of int
@@ -257,7 +254,6 @@ def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
         return
 
     mm = _prepare_memmap_output(
-        bm,
         path,
         shape=tuple(int(dim) for dim in matrix.shape),
         dtype=np.dtype(matrix.dtype),

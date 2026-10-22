@@ -3,6 +3,11 @@
 from importlib import import_module
 
 from .model import (
+    T_21,
+    T_fg,
+    T_21_build_save,
+    T_fg_build_save,
+    assemble_joint_operator,
     Beam_Model,
     BuildMatrices,
     FourierGeometry,
@@ -62,6 +67,11 @@ def __getattr__(name):
     return value
 
 __all__ = [
+    "T_21",
+    "T_fg",
+    "T_21_build_save",
+    "T_fg_build_save",
+    "assemble_joint_operator",
     "Beam_Model",
     "DataContainer",
     "BuildMatrices",

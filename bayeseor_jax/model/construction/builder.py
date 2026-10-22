@@ -26,10 +26,7 @@ from ..cosmology.fourier_geometry import FourierGeometry, build_fourier_geometry
 from ..observation.image_geometry import ImageGeometry, build_image_geometry
 from ..instrument.beam import Beam_Model
 from ..operators import (
-    build_T_21_core,
-    build_T_fg_core,
     build_foreground_spectral_operator,
-    build_sky_to_visibility_operator,
     build_spectral_fourier_operator,
     build_transverse_fourier_operator,
 )
@@ -44,6 +41,7 @@ from .storage import (
 )
 
 from .distribution import padded_visibility_partition as padded_visibility_partition_impl
+from .forward import T_21_build_save, T_fg_build_save, assemble_joint_operator
 
 
 class BuildMatrices:
@@ -150,7 +148,7 @@ class BuildMatrices:
     beam and full three-dimensional fringe response. Large operators are built
     in process-local CPU row blocks and written to shared ``.npy`` memmaps.
 
-    ``build_T_21`` and ``build_T_fg`` save the separate coefficient-to-visibility
+    ``T_21_build_save`` and ``T_fg_build_save`` save the separate coefficient-to-visibility
     mappings; ``build_T`` concatenates their columns in that order. The
     likelihood-stack methods then save ``T^H N^{-1} T``, ``T^H N^{-1} d``,
     and ``d^H N^{-1} d``. Geometry and beam values are prepared at construction;
@@ -451,335 +449,95 @@ class BuildMatrices:
             spectral_indices=tuple(-beta for beta in self.beta_fg),
         )
 
-    def _build_forward_operator_row_block(
-        self,
-        i_t: int,
-        i_f: int,
-        component: str,
-        transverse_fourier_operator: jnp.ndarray,
-        spectral_fourier_operator: jnp.ndarray,
-        foreground_spectral_operator: jnp.ndarray,
-    ) -> jnp.ndarray:
-        r"""Propagate sky coefficients to all baselines at one time and frequency.
+    def T_21_build_save(self, *, matrix_name: str = "T_21") -> Path:
+        r"""Save the cosmological operator using the configured observation and Fourier grid.
 
         Parameters
         ----------
-        i_t : int
-            Integration index selecting the pixel directions and beam weights.
-        i_f : int
-            Frequency-channel index selecting the fringe and spectral responses.
-        component : str
-            Component to construct: 'eor', 'foreground', or 'all' for the joint
-            operator.
-        transverse_fourier_operator : jax.Array
-            F-prime matrix, shape (n_cosmological_pixel, n_uv_mode), mapping
-            transverse modes to the selected image pixels.
-        spectral_fourier_operator : jax.Array
-            F_z matrix, shape (n_freq, n_eta_mode), mapping eta modes to the
-            observing channels.
-        foreground_spectral_operator : jax.Array
-            Q spectral factors, shape (n_freq, n_fg_components), shared by all
-            foreground pixels.
-
-        Returns
-        -------
-        T_block : jax.Array
-            Selected component response, shape (n_baseline, n_coefficient), at the
-            specified time and frequency.
-
-        Notes
-        -----
-        Evaluate the beam-weighted 3D fringe response for the foreground
-        HEALPix pixels. For the cosmological component, select its smaller
-        pixel set before applying the transverse and spectral Fourier factors.
-        Return ``(n_baseline, n_coefficient)``; ``component='all'`` places
-        cosmological columns before foreground columns. No file is written.
-        """
-        if component not in {"all", "eor", "foreground"}:
-            raise ValueError(
-                "component must be one of {'all', 'eor', 'foreground'}"
-            )
-
-        # Build F^-1 P for one time/frequency block over the full foreground field.
-        response = build_sky_to_visibility_operator(
-            np.asarray(self.image_geometry.lmn_fg[i_t : i_t + 1]),
-            np.asarray(self.inst_uvw_irad[i_f : i_f + 1]),
-            np.asarray(
-                self.beam_response[i_f : i_f + 1, i_t : i_t + 1]
-            ).transpose(1, 0, 2),
-            self.image_geometry.pixel_area_sr,
-        )
-
-        # Reuse the same physical response for both coefficient parameterisations.
-        components = []
-        if component in {"all", "eor"}:
-            # The cosmological field selects a subset of the shared sky-pixel axis.
-            eor_response = response[
-                ..., self.image_geometry.eor_fg_shared_axis
-            ]
-            components.append(
-                build_T_21_core(
-                    eor_response,
-                    transverse_fourier_operator,
-                    spectral_fourier_operator[i_f : i_f + 1],
-                )
-            )
-
-        if component in {"all", "foreground"}:
-            components.append(
-                build_T_fg_core(
-                    response,
-                    foreground_spectral_operator[i_f : i_f + 1],
-                )
-            )
-
-        # Joint columns always contain cosmological coefficients before foregrounds.
-        return components[0] if len(components) == 1 else jnp.concatenate(
-            components,
-            axis=1,
-        )
-
-    def _forward_operator_width(self, component: str) -> int:
-        r"""Count the coefficients mapped to visibilities by the requested component.
-
-        Parameters
-        ----------
-        component : str
-            Component to construct: 'eor', 'foreground', or 'all' for the joint
-            operator.
-
-        Returns
-        -------
-        n_coefficient : int
-            Number of columns in the requested component or joint operator.
-
-        Notes
-        -----
-        The cosmological count is ``n_uv_mode * n_eta_mode`` and the
-        foreground count is ``n_pixel * n_spectral_component``. Their sum
-        determines the column dimension of the joint operator on disk.
-        """
-        # Count Cartesian uv/eta pairs and spectral-component/pixel pairs separately.
-        eor_width = (
-            self.fourier_geometry.uv.shape[1]
-            * self.fourier_geometry.eta.shape[0]
-        )
-        foreground_width = self.n_fg_spatial_modes * self.n_fg_components
-        if component == "eor":
-            return int(eor_width)
-        if component == "foreground":
-            return int(foreground_width)
-        if component == "all":
-            return int(eor_width + foreground_width)
-        raise ValueError(
-            "component must be one of {'all', 'eor', 'foreground'}"
-        )
-
-    def _build_forward_operator(
-        self,
-        *,
-        component: str,
-        matrix_name: str,
-    ) -> Path:
-        r"""Build and save a coefficient-to-visibility matrix one row block at a time.
-
-        Parameters
-        ----------
-        component : str
-            Component to construct: 'eor', 'foreground', or 'all' for the joint
-            operator.
-        matrix_name : str
-            Output array name without the .npy suffix, relative to
-            array_save_directory.
+        matrix_name : str, optional
+            Output file stem within array_save_directory; defaults to T_21.
 
         Returns
         -------
         path : pathlib.Path
-            Path to the completed .npy coefficient-to-visibility matrix.
+            Complete complex128 operator with (uv, eta) coefficient columns.
 
         Notes
         -----
-        JAX processes receive contiguous time ranges according to
-        ``jax.process_index()`` and ``jax.process_count()``. Each process builds
-        one frequency block at a time on its local CPU and writes only its
-        disjoint rows into a shared ``.npy`` memmap.
-        Rows follow time, frequency, baseline order. The temporary output is
-        renamed to the requested matrix path after all processes finish;
-        return that path rather than loading the completed matrix into memory.
+        Select the cosmological sky pixels from the shared observation geometry,
+        then delegate CPU placement, block partitioning and saving to the
+        standalone T_21_build_save function. No prior weighting or KL is applied.
         """
-        path = _dense_matrix_path_impl(self, matrix_name)
-        # Write to a temporary name so an incomplete operator is not treated as cached.
-        partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
-        n_rows = int(self.n_t * self.n_freq * self.nbls)
-        n_cols = self._forward_operator_width(component)
-        output = _prepare_memmap_output_impl(
-            self,
-            partial_path,
-            shape=(n_rows, n_cols),
-            dtype=np.dtype(np.complex128),
-            sync_name=f"{matrix_name}-forward-operator-ready",
+        # A replaced component invalidates joint products even for direct callers.
+        if matrix_name == "T_21":
+            self._invalidate_saved_outputs(("T", "T_Ninv_T", "dbar"))
+        # The cosmological image support is a subset of the foreground selection.
+        mask = np.asarray(self.image_geometry.eor_fg_shared_axis)
+        lmn = np.asarray(self.image_geometry.lmn_fg)[:, :, mask]
+        beam = np.asarray(self.beam_response).transpose(1, 0, 2)[:, :, mask]
+        return T_21_build_save(
+            lmn, self.inst_uvw_irad, beam, self.image_geometry.pixel_area_sr,
+            self.transverse_fourier_operator, self.spectral_fourier_operator,
+            output_path=_dense_matrix_path_impl(self, matrix_name),
         )
 
-        # Dense sky-response blocks stay on CPU to avoid exhausting accelerator memory.
-        cpu_devices = jax.local_devices(backend="cpu")
-        if not cpu_devices:
-            raise RuntimeError("No local JAX CPU device is available.")
-        cpu_device = cpu_devices[0]
-        with jax.default_device(cpu_device):
-            if component in {"all", "eor"}:
-                transverse_fourier_operator = jax.device_put(
-                    np.asarray(self.transverse_fourier_operator),
-                    cpu_device,
-                )
-                spectral_fourier_operator = jax.device_put(
-                    np.asarray(self.spectral_fourier_operator),
-                    cpu_device,
-                )
-            else:
-                transverse_fourier_operator = jnp.zeros(
-                    (0, 0), dtype=jnp.complex128
-                )
-                spectral_fourier_operator = jnp.zeros(
-                    (0, 0), dtype=jnp.complex128
-                )
-            foreground_spectral_operator = (
-                jax.device_put(
-                    np.asarray(self._foreground_spectral_operator()),
-                    cpu_device,
-                )
-                if component in {"all", "foreground"}
-                else jnp.zeros((0, 0), dtype=jnp.complex128)
-            )
-
-            # Assign disjoint, contiguous time ranges, including any remainder.
-            process_index = int(jax.process_index())
-            process_count = int(jax.process_count())
-            base_times, extra_times = divmod(int(self.n_t), process_count)
-            local_n_times = base_times + int(process_index < extra_times)
-            time_start = process_index * base_times + min(
-                process_index,
-                extra_times,
-            )
-            time_stop = time_start + local_n_times
-
-            _log_build(
-                self,
-                f"{matrix_name}: process {process_index}/{process_count} "
-                f"building times [{time_start}, {time_stop}) on CPU",
-            )
-            # Stream each baseline block directly into its final visibility-row range.
-            for i_t in range(time_start, time_stop):
-                for i_f in range(self.n_freq):
-                    block = self._build_forward_operator_row_block(
-                        i_t,
-                        i_f,
-                        component,
-                        transverse_fourier_operator,
-                        spectral_fourier_operator,
-                        foreground_spectral_operator,
-                    ).block_until_ready()
-                    row_start = (i_t * self.n_freq + i_f) * self.nbls
-                    output[row_start : row_start + self.nbls] = np.asarray(
-                        block
-                    )
-            output.flush()
-
-        # Close local mappings before the collective publication of the completed file.
-        del output
-        distributed = (
-            getattr(jax, "distributed", None) is not None
-            and jax.distributed.is_initialized()
-        )
-        if distributed:
-            multihost_utils.sync_global_devices(
-                f"{matrix_name}-forward-operator-done"
-            )
-        if jax.process_index() == 0:
-            partial_path.replace(path)
-            partial_path.with_suffix(
-                partial_path.suffix + ".ready"
-            ).unlink(missing_ok=True)
-        if distributed:
-            multihost_utils.sync_global_devices(
-                f"{matrix_name}-forward-operator-published"
-            )
-        return path
-
-    def build_T_21(self, *, matrix_name: str = "T_21") -> Path:
-        r"""Save the mapping from cosmological Fourier amplitudes to visibilities.
+    def T_fg_build_save(self, *, matrix_name: str = "T_fg") -> Path:
+        r"""Save the physical foreground operator using the configured sky and spectra.
 
         Parameters
         ----------
-        matrix_name : str
-            Output array name without the .npy suffix, relative to
-            array_save_directory.
+        matrix_name : str, optional
+            Output file stem within array_save_directory; defaults to T_fg.
 
         Returns
         -------
         path : pathlib.Path
-            Saved T_21 matrix, shape (n_t*n_freq*n_baseline, n_uv_mode*n_eta_mode).
+            Complete complex128 operator with spectral-component/pixel columns.
 
         Notes
         -----
-        Construct :math:`T_{21}=F^{-1}P F'F_z` in distributed CPU blocks.
-        Return the saved ``.npy`` path. Columns follow (uv, eta) order, with
-        eta varying fastest, and rows follow time, frequency, baseline order.
+        The standalone T_fg_build_save function distributes CPU evaluation
+        and saving. The original spectral amplitude columns are retained;
+        compression and foreground-prior transformations are separate stages.
         """
-        return self._build_forward_operator(
-            component="eor",
-            matrix_name=matrix_name,
-        )
-
-    def build_T_fg(self, *, matrix_name: str = "T_fg") -> Path:
-        r"""Save the mapping from foreground HEALPix amplitudes to visibilities.
-
-        Parameters
-        ----------
-        matrix_name : str
-            Output array name without the .npy suffix, relative to
-            array_save_directory.
-
-        Returns
-        -------
-        path : pathlib.Path
-            Saved T_fg matrix, shape (n_t*n_freq*n_baseline,
-            n_fg_components*n_pix_fg).
-
-        Notes
-        -----
-        Construct :math:`T_{\rm FG}=F^{-1}P Q_z` in distributed CPU blocks.
-        Return the saved ``.npy`` path. Columns follow spectral component,
-        then pixel order; rows follow time, frequency, baseline order.
-        """
-        return self._build_forward_operator(
-            component="foreground",
-            matrix_name=matrix_name,
+        if matrix_name == "T_fg":
+            self._invalidate_saved_outputs(("T", "T_Ninv_T", "dbar"))
+        # Align beam axes with the numerical operator's time/frequency/pixel order.
+        beam = np.asarray(self.beam_response).transpose(1, 0, 2)
+        return T_fg_build_save(
+            self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
+            self.image_geometry.pixel_area_sr, self._foreground_spectral_operator(),
+            output_path=_dense_matrix_path_impl(self, matrix_name),
         )
 
     def build_T(self, *, matrix_name: str = "T") -> Path:
-        r"""Save the joint visibility mapping ``T = [T_21 T_fg]``.
+        r"""Assemble the joint operator from separately saved cosmological and foreground matrices.
 
         Parameters
         ----------
-        matrix_name : str
-            Output array name without the .npy suffix, relative to
-            array_save_directory.
+        matrix_name : str, optional
+            Output file stem within array_save_directory; defaults to T.
 
         Returns
         -------
         path : pathlib.Path
-            Saved joint matrix with cosmological columns followed by foreground
-            columns.
+            Saved T = [T_21 T_fg], with cosmological columns before foreground columns.
 
         Notes
         -----
-        A coefficient vector containing cosmological Fourier amplitudes
-        followed by foreground image amplitudes maps to model visibilities
-        through ``m = T b``. Return the completed matrix's ``.npy`` path.
+        Build missing components first, or rebuild them when clobber is set.
+        Assembly copies disk-backed row blocks without reevaluating the physical
+        operators or loading the full joint matrix onto a device. Cache reuse
+        assumes that existing files describe this observation and model.
         """
-        return self._build_forward_operator(
-            component="all",
-            matrix_name=matrix_name,
+        # Independent files allow component construction to be reused across analyses.
+        for component in ("T_21", "T_fg"):
+            self.build_matrix_if_not_here(component, invalidate_existing=self.clobber)
+        return assemble_joint_operator(
+            _dense_matrix_path_impl(self, "T_21"),
+            _dense_matrix_path_impl(self, "T_fg"),
+            output_path=_dense_matrix_path_impl(self, matrix_name),
+            block_rows=self.nbls,
         )
 
     # ------------------------
@@ -981,7 +739,6 @@ class BuildMatrices:
         # Pre-create the dense on-disk output once so every process can attach
         # to the same memmap and write only the blocks it owns.
         mm = _prepare_memmap_output_impl(
-            self,
             partial_path,
             shape=(n_params, n_params),
             dtype=np.dtype(np.complex128),
@@ -1402,7 +1159,7 @@ class BuildMatrices:
 
         Notes
         -----
-        Supports ``T``, ``Ninv``, and ``T_Ninv_T`` and builds missing
+        Supports ``T_21``, ``T_fg``, ``T``, ``Ninv``, and ``T_Ninv_T`` and builds missing
         prerequisites recursively. Existing files are reused by name unless
         invalidation is requested; their physical configuration is not checked.
         """
@@ -1412,6 +1169,8 @@ class BuildMatrices:
         if invalidate_existing:
             # Rebuilding an upstream array also invalidates every cached dependent product.
             invalidation_map = {
+                "T_21": ("T_21", "T", "T_Ninv_T", "dbar"),
+                "T_fg": ("T_fg", "T", "T_Ninv_T", "dbar"),
                 "T": ("T", "T_Ninv_T", "dbar"),
                 "Ninv": ("Ninv", "T_Ninv_T", "dbar", "d_ninv_d"),
                 "T_Ninv_T": ("T_Ninv_T",),
@@ -1425,7 +1184,11 @@ class BuildMatrices:
             return
         _log_build(self, f"building and saving {matrix_name}")
         t_start = time.perf_counter()
-        if matrix_name == "T":
+        if matrix_name == "T_21":
+            self.T_21_build_save(matrix_name=matrix_name)
+        elif matrix_name == "T_fg":
+            self.T_fg_build_save(matrix_name=matrix_name)
+        elif matrix_name == "T":
             self.build_T(matrix_name=matrix_name)
         elif matrix_name == "T_Ninv_T":
             self.build_matrix_if_not_here("T", invalidate_existing=False)
@@ -1457,7 +1220,7 @@ class BuildMatrices:
         memory longer than required.
         """
         if self.clobber:
-            self._invalidate_saved_outputs(("T", "Ninv", "T_Ninv_T", "dbar", "d_ninv_d"))
+            self._invalidate_saved_outputs(("T_21", "T_fg", "T", "Ninv", "T_Ninv_T", "dbar", "d_ninv_d"))
 
         # Ensure T exists on disk.
         self.build_matrix_if_not_here("T", invalidate_existing=False)

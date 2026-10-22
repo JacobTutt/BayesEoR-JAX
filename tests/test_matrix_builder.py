@@ -18,6 +18,7 @@ def _minimal_builder(tmp_path):
     builder.freq_hz = jnp.asarray([100.0e6, 110.0e6])
     builder.n_fg_spatial_modes = 2
     builder.array_save_directory = tmp_path
+    builder.clobber = False
     builder.inst_uvw_irad = jnp.asarray(
         [
             [[0.0], [0.0], [0.0]],
@@ -56,8 +57,8 @@ def _minimal_builder(tmp_path):
 def test_component_builders_match_concatenated_operator(tmp_path):
     builder = _minimal_builder(tmp_path)
 
-    eor_path = builder.build_T_21()
-    foreground_path = builder.build_T_fg()
+    eor_path = builder.T_21_build_save()
+    foreground_path = builder.T_fg_build_save()
     joint_path = builder.build_T()
 
     eor = np.load(eor_path)
@@ -94,6 +95,33 @@ def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
     np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"), expected)
     assert not (tmp_path / "T_Ninv_T.partial.npy").exists()
     assert not (tmp_path / "T_Ninv_T.partial.npy.ready").exists()
+
+
+def test_joint_assembly_reuses_separate_component_files(tmp_path, monkeypatch):
+    builder = _minimal_builder(tmp_path)
+    builder.T_21_build_save()
+    builder.T_fg_build_save()
+
+    def unexpected_build(**kwargs):
+        raise AssertionError("A saved component should not be rebuilt")
+
+    monkeypatch.setattr(builder, "T_21_build_save", unexpected_build)
+    monkeypatch.setattr(builder, "T_fg_build_save", unexpected_build)
+    assert builder.build_T().exists()
+
+
+def test_replacing_one_component_invalidates_joint_products_only(tmp_path):
+    builder = _minimal_builder(tmp_path)
+    builder.build_T()
+    for name in ("T_Ninv_T", "dbar", "Ninv", "d_ninv_d"):
+        np.save(tmp_path / f"{name}.npy", np.zeros(1))
+    original_21 = (tmp_path / "T_21.npy").read_bytes()
+    builder.T_fg_build_save()
+    assert (tmp_path / "T_21.npy").read_bytes() == original_21
+    for name in ("T", "T_Ninv_T", "dbar"):
+        assert not (tmp_path / f"{name}.npy").exists()
+    for name in ("Ninv", "d_ninv_d"):
+        assert (tmp_path / f"{name}.npy").exists()
 
 
 def test_builder_reuses_precomputed_geometries(tmp_path):

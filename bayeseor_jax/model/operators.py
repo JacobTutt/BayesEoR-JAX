@@ -12,8 +12,8 @@ The component models share the beam-weighted measurement operator
 ``build_spectral_fourier_operator`` constructs ``F_z`` (eta to frequency),
 and ``build_foreground_spectral_operator`` supplies the spectral part of
 ``Q_z``. ``build_sky_to_visibility_operator`` constructs ``R``, including
-the pixel solid angle and primary beam. The two ``build_T_*_core`` functions
-combine these factors for supplied blocks of visibility rows.
+the pixel solid angle and primary beam. ``T_21`` and ``T_fg`` compose the
+response and component factors for supplied blocks of visibility rows.
 
 These functions perform numerical construction only. Geometry modules define
 the coordinates; ``BuildMatrices`` in ``construction/builder.py`` chooses the blocks,
@@ -296,7 +296,7 @@ def build_T_21_core(
         \left[\sum_p R_{tfbp} F'_{pu}\right](F_z)_{fe}.
 
     ``core`` denotes the equation-level calculation for supplied arrays.
-    ``BuildMatrices.build_T_21`` handles distributed construction and saving.
+    ``T_21_build_save`` handles distributed CPU construction and saving.
     All integration weights are already included in the input operators.
     """
     sky_to_visibility = jnp.asarray(sky_to_visibility)
@@ -380,7 +380,7 @@ def build_T_fg_core(
     component. ``Q`` supplies the spectral dependence at every pixel;
     ``R`` propagates the resulting brightness through the instrument.
 
-    ``BuildMatrices.build_T_fg`` distributes and saves blocks from this core.
+    ``T_fg_build_save`` distributes and saves blocks from this core.
     The pixel identity in ``Q_z`` is applied implicitly, so no dense
     Kronecker product or additional pixel-area factor is needed.
     """
@@ -413,6 +413,100 @@ def build_T_fg_core(
         n_time * n_frequency * n_baseline,
         spectral_operator.shape[1] * n_pixel,
     )
+
+
+def T_21(
+    lmn: jax.Array,
+    uvw_lambda: jax.Array,
+    beam: jax.Array,
+    pixel_area_sr: float,
+    transverse_operator: jax.Array,
+    spectral_operator: jax.Array,
+) -> jax.Array:
+    r"""Evaluate the cosmological coefficient-to-visibility operator on supplied samples.
+
+    Parameters
+    ----------
+    lmn : jax.Array
+        Cosmological pixel directions, shape ``(n_time, 3, n_pixel)``.
+    uvw_lambda : jax.Array
+        Selected baselines in wavelengths, shape ``(n_frequency, 3, n_baseline)``.
+    beam : jax.Array
+        Horizon-masked power gains, shape ``(n_time, n_frequency, n_pixel)``.
+    pixel_area_sr : float
+        Equal-area pixel solid angle in steradians.
+    transverse_operator : jax.Array
+        Selected columns of F', shape ``(n_pixel, n_uv_mode)``, including
+        transverse Fourier integration weights.
+    spectral_operator : jax.Array
+        Selected frequency rows and eta columns of F_z, shape
+        ``(n_frequency, n_eta_mode)``, including the eta integration weight.
+
+    Returns
+    -------
+    operator : jax.Array
+        T_21 = F^-1 P F' F_z, shape
+        ``(n_time*n_frequency*n_baseline, n_uv_mode*n_eta_mode)``.
+        Rows vary fastest in baseline; columns vary fastest in eta.
+
+    Notes
+    -----
+    Pass matching subsets of observing times, frequencies, baselines and
+    Fourier modes to evaluate a block. Retain all image pixels needed for the
+    cosmological integral: dropping pixels changes the model rather than
+    merely selecting coefficient columns. This function is JAX-native and
+    can be composed inside ``jax.jit`` or automatic differentiation. It does
+    not select a device, access files, distribute work, or apply KL reduction.
+    """
+    # Form the full three-dimensional beam-weighted fringe on this sky selection.
+    response = build_sky_to_visibility_operator(lmn, uvw_lambda, beam, pixel_area_sr)
+    # Integrate over image pixels and attach the selected line-of-sight modes.
+    return build_T_21_core(response, transverse_operator, spectral_operator)
+
+
+def T_fg(
+    lmn: jax.Array,
+    uvw_lambda: jax.Array,
+    beam: jax.Array,
+    pixel_area_sr: float,
+    spectral_operator: jax.Array,
+) -> jax.Array:
+    r"""Evaluate the foreground coefficient-to-visibility operator on supplied samples.
+
+    Parameters
+    ----------
+    lmn : jax.Array
+        Selected foreground pixel directions, shape ``(n_time, 3, n_pixel)``.
+    uvw_lambda : jax.Array
+        Selected baselines in wavelengths, shape ``(n_frequency, 3, n_baseline)``.
+    beam : jax.Array
+        Horizon-masked power gains, shape ``(n_time, n_frequency, n_pixel)``.
+    pixel_area_sr : float
+        Equal-area pixel solid angle in steradians.
+    spectral_operator : jax.Array
+        Selected frequency rows and component columns of Q, shape
+        ``(n_frequency, n_spectral_component)``. Any supplied linear spectral
+        basis is accepted, not just the default constant and power laws.
+
+    Returns
+    -------
+    operator : jax.Array
+        T_fg = F^-1 P Q_z, shape
+        ``(n_time*n_frequency*n_baseline, n_spectral_component*n_pixel)``.
+        Rows vary fastest in baseline; columns vary fastest in pixel.
+
+    Notes
+    -----
+    Select matching input arrays before calling to evaluate only the required
+    visibility rows and component/pixel columns. The function is JAX-native
+    and can be used inside ``jax.jit`` or automatic differentiation without
+    saving a matrix. It performs no device selection, distributed scheduling,
+    prior weighting, or KL reduction.
+    """
+    # Pixel identities and horizon masking are supplied by the caller.
+    response = build_sky_to_visibility_operator(lmn, uvw_lambda, beam, pixel_area_sr)
+    # Apply spectral weights independently at every selected sky pixel.
+    return build_T_fg_core(response, spectral_operator)
 
 
 def build_foreground_spectral_operator(

@@ -9,6 +9,8 @@ from .instrument.beam import Beam_Model
 from .cosmology.fourier_geometry import FourierGeometry, build_fourier_geometry
 from .observation.image_geometry import ImageGeometry, build_image_geometry
 from .operators import (
+    T_21,
+    T_fg,
     build_foreground_spectral_operator,
     build_nudft_matrix,
     build_sky_to_visibility_operator,
@@ -18,11 +20,17 @@ from .operators import (
     build_transverse_fourier_operator,
 )
 from .construction.builder import BuildMatrices
+from .construction.forward import T_21_build_save, T_fg_build_save, assemble_joint_operator
 from .cosmology.transforms import Cosmology
 from .instrument.baselines import InstrumentModel
 from .instrument.noise import generate_gaussian_noise
 
 __all__ = [
+    "T_21",
+    "T_fg",
+    "T_21_build_save",
+    "T_fg_build_save",
+    "assemble_joint_operator",
     "Beam_Model",
     "BuildMatrices",
     "Cosmology",
