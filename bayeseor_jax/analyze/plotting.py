@@ -1,7 +1,19 @@
 """Diagnostic plots of weighted cosmological power-spectrum constraints."""
 
 import matplotlib.pyplot as plt
+from matplotlib import style
 import numpy as np
+
+
+_STYLE = {
+    "font.family": "serif", "font.serif": ["Times New Roman", "STIXGeneral", "DejaVu Serif"],
+    "mathtext.fontset": "stix", "font.size": 8.8, "axes.labelsize": 9.9,
+    "legend.fontsize": 8.25, "xtick.labelsize": 8.8, "ytick.labelsize": 8.8,
+    "axes.linewidth": 0.8, "xtick.direction": "out", "ytick.direction": "out",
+    "xtick.top": False, "ytick.right": False, "savefig.dpi": 300,
+}
+_COLORS = ("#153b5c", "#2b83ba", "#6f5596", "#d6604d", "#8b1e2d")
+_MARKERS = ("s", "^", "D", "v", "P")
 
 
 def _prior_bounds(data, index):
@@ -16,6 +28,7 @@ def _prior_bounds(data, index):
     return bounds
 
 
+@style.context(_STYLE)
 def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
                       plot_priors=False, colors=None, ax=None):
     """Plot Δ²(k) medians, credible intervals and selected upper limits.
@@ -32,7 +45,7 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     plot_priors : bool, optional
         Shade the prior support, requiring prior bounds and physical bin edges.
     colors : sequence of colors, optional
-        One Matplotlib color per run; defaults to the standard cycle.
+        One Matplotlib color per run; defaults to the publication palette.
     ax : matplotlib.axes.Axes, optional
         Existing axes; otherwise create a new figure.
 
@@ -40,13 +53,23 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     -------
     fig, ax : matplotlib.figure.Figure, matplotlib.axes.Axes
         Plot objects for subsequent layout and styling changes.
+
+    Notes
+    -----
+    Compared runs receive small display-only horizontal offsets to separate
+    error bars. Physical k values and calculated constraints remain unchanged.
     """
     if colors is not None and len(colors) != data.Ndirs:
         raise ValueError("colors must contain one entry per run")
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 4), layout="constrained")
+        _, ax = plt.subplots(figsize=(3.5, 2.8), layout="constrained")
+    offsets = 10.0**np.linspace(-.025, .025, data.Ndirs) if data.Ndirs > 1 else [1.]
+    shaded = []
+    reference_labelled = False
     for i, k in enumerate(data.k_vals):
-        color = colors[i] if colors is not None else f"C{i % 10}"
+        color = colors[i] if colors is not None else _COLORS[i % len(_COLORS)]
+        marker = _MARKERS[i % len(_MARKERS)]
+        plotted_k = k * offsets[i]
         upper = np.zeros(k.size, dtype=bool)
         if uplim_inds is not None:
             shared = all(np.ndim(item) == 0 for item in uplim_inds)
@@ -57,95 +80,132 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
                 raise ValueError("Upper-limit masks must match the corresponding k bins")
         interval = data.cred_intervals[i][cred_interval]
         errors = np.array([data.medians[i] - interval["lo"], interval["hi"] - data.medians[i]])
-        ax.errorbar(k[~upper], data.medians[i][~upper], yerr=errors[:, ~upper],
-                    fmt="o", capsize=3, color=color, label=data.labels[i])
+        ax.errorbar(plotted_k[~upper], data.medians[i][~upper], yerr=errors[:, ~upper],
+                    fmt=marker, markersize=3, capsize=1.5, linewidth=.9,
+                    color=color, label=data.labels[i])
         if np.any(upper):
             limits = data.uplims[i][upper]
-            ax.errorbar(k[upper], limits, yerr=limits * 0.3, uplims=True,
-                        fmt="o", capsize=3, color=color)
+            ax.errorbar(plotted_k[upper], limits, yerr=limits * 0.3, uplims=True,
+                        fmt=marker, markersize=3, capsize=1.5, linewidth=.9, color=color)
         if data.expected_spectra[i] is not None:
-            ax.plot(k, data.expected_spectra[i], "--", color=color, label=f"{data.labels[i]} reference")
+            ax.plot(k, data.expected_spectra[i], "--", color="black", linewidth=1.4,
+                    label=None if reference_labelled else "Reference")
+            reference_labelled = True
         if plot_priors:
             bounds = _prior_bounds(data, i)
             if data.k_vals_bins[i] is None:
                 raise ValueError("Power-spectrum prior shading requires k-vals-bins.txt")
-            ax.stairs(bounds[:, 1], data.k_vals_bins[i], baseline=bounds[:, 0],
-                      fill=True, color=color, alpha=0.12, zorder=0)
+            edges = data.k_vals_bins[i]
+            if not any(np.array_equal(bounds, old) and np.array_equal(edges, old_edges)
+                       for old, old_edges in shaded):
+                ax.stairs(bounds[:, 1], edges, baseline=bounds[:, 0], fill=True,
+                          color="0.85", alpha=.35, zorder=0, label="Prior" if not shaded else None)
+                shaded.append((bounds, edges))
     ax.set(xscale="log", yscale="log", xlabel=r"$k$ [Mpc$^{-1}$]",
            ylabel=r"$\Delta^2(k)$ [mK$^2$]")
-    ax.grid(alpha=0.3)
-    ax.legend()
+    ax.grid(color="0.85", linestyle=":", linewidth=.6)
+    ax.legend(loc="lower right", frameon=False, ncols=1)
     return ax.figure, ax
 
 
-def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None):
-    """Plot weighted marginal posterior densities in logarithmic power.
+@style.context(_STYLE)
+def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
+                    normalisation="peak"):
+    """Plot compact, stacked marginal posteriors on a shared logarithmic axis.
 
     Parameters
     ----------
     data : DataContainer
-        Runs with identical physical k grids, optionally including references.
+        Runs with matching grids or explicitly confirmed corresponding bins.
     bins : int, optional
         Number of equal-width log10-power histogram bins. Compared runs use the
-        same edges within each k bin. Heights are densities per dex.
+        same edges within each k bin, spanning priors when shaded and all
+        positive-weight samples. Curves are peak-normalised by default.
     plot_priors : bool, optional
         Shade each run's prior support from args.json.
     colors : sequence of colors, optional
         One Matplotlib color per run.
     axes : sequence of matplotlib.axes.Axes, optional
         One existing axis per k bin; otherwise create a vertical stack.
+    normalisation : {"peak", "density"}, optional
+        Peak normalisation compares posterior shapes, not probability heights.
+        Choose density for a unit-integral density per dex. Neither changes
+        the weighted samples or the reported constraints.
 
     Returns
     -------
     fig, axes : matplotlib.figure.Figure, numpy.ndarray
         Figure and a one-dimensional axes array, including for a single k bin.
     """
-    if not data.k_vals_identical:
-        raise ValueError("Posterior overlays require identical physical k grids")
+    if not data.bins_correspond:
+        raise ValueError("Posterior overlays require matching grids or bins_correspond=True for verified corresponding bins")
+    if normalisation not in ("peak", "density"):
+        raise ValueError("normalisation must be 'peak' or 'density'")
     if not isinstance(bins, (int, np.integer)) or bins < 1:
         raise ValueError("bins must be a positive integer")
     if colors is not None and len(colors) != data.Ndirs:
         raise ValueError("colors must contain one entry per run")
     count = data.k_vals[0].size
     if axes is None:
-        _, axes = plt.subplots(count, 1, figsize=(6, max(2, count * 1.3)),
-                               squeeze=False, layout="constrained")
+        fig, axes = plt.subplots(count, 1, figsize=(3.5, max(1.5, count * .283)),
+                                 squeeze=False, sharex=True, gridspec_kw={"hspace": 0})
+        fig.subplots_adjust(left=.17, right=.98, bottom=.18, top=.98)
     axes = np.asarray(axes, dtype=object).reshape(-1)
     if axes.size != count or any(ax.figure is not axes[0].figure for ax in axes):
         raise ValueError("Supply one axis per k bin, all in the same figure")
+    priors = [_prior_bounds(data, i) for i in range(data.Ndirs)] if plot_priors else []
+    all_edges = []
     for column, ax in enumerate(axes):
         # Shared edges make histogram heights comparable between different runs.
         support = np.concatenate([s[w > 0, column] for s, w in zip(data.samples, data.weights)])
+        if priors:
+            support = np.r_[support, np.log10([p[column] for p in priors]).ravel()]
         edges = np.histogram_bin_edges(support, bins=bins)
+        all_edges.extend([edges[0], edges[-1]])
+        shaded = []
         for i, samples in enumerate(data.samples):
-            color = colors[i] if colors is not None else f"C{i % 10}"
+            color = colors[i] if colors is not None else _COLORS[i % len(_COLORS)]
             density, _ = np.histogram(samples[:, column], bins=edges, weights=data.weights[i], density=True)
-            ax.stairs(density, 10.0**edges, color=color, label=data.labels[i])
+            height = density / density.max() if normalisation == "peak" else density
+            ax.stairs(height, 10.0**edges, color=color, linewidth=1.15, label=data.labels[i])
             reference = data.expected_spectra[i]
             if reference is not None:
-                ax.axvline(reference[column], color=color, ls="--")
+                ax.axvline(reference[column], color="black", ls="--", linewidth=1.)
             if plot_priors:
-                lo, hi = _prior_bounds(data, i)[column]
-                ax.axvspan(lo, hi, color=color, alpha=0.12, zorder=0)
+                lo, hi = priors[i][column]
+                if (lo, hi) not in shaded:
+                    ax.axvspan(lo, hi, color="0.85", alpha=.35, zorder=0)
+                    shaded.append((lo, hi))
         ax.set_xscale("log")
-        if column == count // 2:
-            ax.set_ylabel("Density / dex")
-        ax.annotate(rf"$k={data.k_vals[0][column]:.3g}\,\mathrm{{Mpc}}^{{-1}}$",
-                    (0.98, 0.92), xycoords="axes fraction", ha="right", va="top")
-        ax.grid(alpha=0.3)
-    axes[0].legend(loc="upper left", fontsize="small")
+        if normalisation == "peak":
+            ax.set(ylim=(0, 1.05), yticks=[])
+        else:
+            ax.locator_params(axis="y", nbins=2)
+            ax.tick_params(axis="y", labelsize=6)
+        ax.set_ylabel(rf"$\varphi_{{{column}}}$", rotation=0, labelpad=7)
+        relation = "=" if data.k_vals_identical else r"\simeq"
+        ax.annotate(rf"$k{relation}{data.k_vals[0][column]:.2g}\,[\mathrm{{Mpc}}^{{-1}}]$",
+                    (0.98, 0.96), xycoords="axes fraction", ha="right", va="top", fontsize=7.4)
+        ax.grid(axis="x", color="0.85", linestyle=":", linewidth=.6)
+        ax.tick_params(axis="x", labelbottom=column == count - 1)
+    for ax in axes:
+        ax.set_xlim(10.0**min(all_edges) / 1.05, 10.0**max(all_edges) * 1.1)
+    if data.Ndirs > 1:
+        axes[0].legend(loc="upper left", fontsize=6, frameon=False, ncols=1)
     axes[-1].set_xlabel(r"$\Delta^2(k)$ [mK$^2$]")
     return axes[0].figure, axes
 
 
+@style.context(_STYLE)
 def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None,
-                                    plot_priors=False, colors=None, bins=31):
+                                    plot_priors=False, colors=None, bins=31,
+                                    normalisation="peak"):
     """Place the power-spectrum constraints beside their marginal posteriors.
 
     Parameters
     ----------
     data : DataContainer
-        Runs on an identical physical k grid.
+        Runs with matching grids or explicitly confirmed corresponding bins.
     cred_interval : float, optional
         Central credible interval in percent.
     uplim_inds : sequence, optional
@@ -156,20 +216,31 @@ def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None
         One color per run, shared by both panels.
     bins : int, optional
         Number of logarithmic histogram bins per marginal posterior.
+    normalisation : {"peak", "density"}, optional
+        Histogram normalisation, as accepted by plot_posteriors.
 
     Returns
     -------
     fig, axes : matplotlib.figure.Figure, tuple
         Figure and (power-spectrum axis, posterior axes array).
     """
-    if not data.k_vals_identical:
-        raise ValueError("Combined plots require identical physical k grids")
+    if not data.bins_correspond:
+        raise ValueError("Combined plots require matching grids or bins_correspond=True for verified corresponding bins")
     count = data.k_vals[0].size
-    fig = plt.figure(figsize=(12, max(4, count * 1.1)), layout="constrained")
-    grid = fig.add_gridspec(count, 2)
-    power_ax = fig.add_subplot(grid[:, 0])
-    posterior_axes = np.array([fig.add_subplot(grid[i, 1]) for i in range(count)])
+    fig = plt.figure(figsize=(7., max(2.55, count * .283)))
+    grid = fig.add_gridspec(1, 2, width_ratios=(.95, 1.08), left=.08,
+                           right=.995, bottom=.18, top=.98, wspace=.23)
+    power_ax = fig.add_subplot(grid[0])
+    stack = grid[1].subgridspec(count, 1, hspace=0)
+    posterior_axes = [fig.add_subplot(stack[0])]
+    posterior_axes.extend(fig.add_subplot(stack[i], sharex=posterior_axes[0]) for i in range(1, count))
+    posterior_axes = np.asarray(posterior_axes)
     plot_power_spectra(data, cred_interval=cred_interval, uplim_inds=uplim_inds,
                       plot_priors=plot_priors, colors=colors, ax=power_ax)
-    plot_posteriors(data, bins=bins, plot_priors=plot_priors, colors=colors, axes=posterior_axes)
+    plot_posteriors(data, bins=bins, plot_priors=plot_priors, colors=colors,
+                    axes=posterior_axes, normalisation=normalisation)
+    if posterior_axes[0].get_legend() is not None:
+        posterior_axes[0].get_legend().remove()
+    description = "Peak-normalised marginal posterior" if normalisation == "peak" else "Marginal posterior density / dex"
+    fig.text(.51, .58, description, rotation=90, va="center", ha="center", fontsize=8.)
     return fig, (power_ax, posterior_axes)

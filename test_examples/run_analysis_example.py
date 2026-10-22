@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 from pathlib import Path
 
 import jax
@@ -33,38 +32,24 @@ def _json_ready(value):
     return value
 
 
-def _copy_run_metadata(output_dir: Path, sampler_dir: Path) -> None:
-    """Put setup metadata beside sampler output so DataContainer can read it."""
-    for filename in (
-        "args.json",
-        "version.txt",
-        "k-vals.txt",
-        "k-vals-bins.txt",
-        "k-vals-nsamples.txt",
-    ):
-        src = output_dir / filename
-        if src.exists():
-            shutil.copy2(src, sampler_dir / filename)
-
-
 def run_output_analysis(
     sampler_dir: Path | str,
     output_dir: Path | str | None = None,
     label: str = "BayesEoR-JAX",
+    metadata_dir: Path | str | None = None,
 ) -> dict:
     """
-    Read sampler output, write posterior summaries, and save diagnostic plots.
+    Read sampler output and optional separate setup metadata, then save summaries and plots.
     """
     sampler_dir = Path(sampler_dir)
     output_dir = Path(output_dir) if output_dir is not None else sampler_dir.parent
     analysis_dir = output_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    _copy_run_metadata(output_dir, sampler_dir)
-
     data = DataContainer(
         [sampler_dir],
         labels=[label],
+        metadata_dirs=metadata_dir,
     )
     summary = {
         "sampler": "multinest",
@@ -151,6 +136,7 @@ def run_example(
         sampler_dir=ns_out_dir,
         output_dir=out_dir,
         label=analysis_label,
+        metadata_dir=out_dir,
     )
     return setup_result, summary, analysis_summary
 

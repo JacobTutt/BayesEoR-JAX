@@ -69,7 +69,7 @@ def test_multiple_runs_references_and_shared_histogram_edges(tmp_path):
     a = write_run(tmp_path / "a")
     b = write_run(tmp_path / "b", chain=[[.1, 1., 1., 2.], [.9, 2., 2., 3.]])
     data = DataContainer([a, b], expected_dmps=[2., 3.])
-    fig, axes = plot_posteriors(data, bins=3)
+    fig, axes = plot_posteriors(data, bins=3, normalisation="density")
     for ax in axes:
         one, two = [patch.get_data() for patch in ax.patches]
         np.testing.assert_array_equal(one.edges, two.edges)
@@ -90,7 +90,7 @@ def test_different_grids_supported_only_for_power_spectra(tmp_path):
     fig, _ = plot_power_spectra(data, uplim_inds=[[True, False], [False]], plot_priors=True)
     fig.canvas.draw()
     for plot in (plot_posteriors, plot_power_spectra_and_posteriors):
-        with pytest.raises(ValueError, match="identical physical k grids"):
+        with pytest.raises(ValueError, match="bins_correspond"):
             plot(data)
 
 
@@ -185,3 +185,77 @@ def test_example_writes_summaries_and_figures(tmp_path):
     np.testing.assert_allclose(summary["medians"], np.sqrt(10.))
     assert (tmp_path / "analysis" / "posterior_summary.json").exists()
     assert len(list((tmp_path / "analysis").glob("*.png"))) == 3
+
+
+def test_separate_setup_metadata_and_example(tmp_path):
+    from test_examples.run_analysis_example import run_output_analysis
+    run = write_run(tmp_path / "multinest")
+    metadata = tmp_path / "setup"
+    metadata.mkdir()
+    for name in ("k-vals.txt", "k-vals-bins.txt", "args.json"):
+        (run / name).rename(metadata / name)
+    data = DataContainer([run], metadata_dirs=metadata)
+    np.testing.assert_allclose(data.k_vals[0], [.1, .2])
+    assert data.args[0]["priors"] == [[-1., 2.]] * 2
+    summary = run_output_analysis(run, output_dir=tmp_path, metadata_dir=metadata)
+    np.testing.assert_allclose(summary["medians"], data.medians[0])
+    assert not (run / "args.json").exists()
+    with pytest.raises(ValueError, match="metadata_dirs"):
+        DataContainer([run], metadata_dirs=[])
+
+
+def test_per_run_metadata_overrides_local_metadata(tmp_path):
+    a = write_run(tmp_path / "a")
+    b = write_run(tmp_path / "b", k=(.3, .4))
+    data = DataContainer([a, b], metadata_dirs=[b, a])
+    np.testing.assert_allclose(data.k_vals[0], [.3, .4])
+    np.testing.assert_allclose(data.k_vals[1], [.1, .2])
+
+
+def test_roundoff_does_not_prevent_overlay(tmp_path):
+    a = write_run(tmp_path / "a")
+    b = write_run(tmp_path / "b", k=(.1 + 6e-15, .2 + 6e-15))
+    data = DataContainer([a, b])
+    assert data.k_vals_identical and data.bins_correspond
+    fig, _ = plot_power_spectra_and_posteriors(data)
+    fig.canvas.draw()
+
+
+def test_different_mean_k_requires_explicit_correspondence(tmp_path):
+    a = write_run(tmp_path / "a")
+    b = write_run(tmp_path / "b", k=(.1003, .2002))
+    data = DataContainer([a, b])
+    assert not data.bins_correspond
+    with pytest.raises(ValueError, match="bins_correspond"):
+        plot_posteriors(data)
+    matched = DataContainer([a, b], bins_correspond=True)
+    fig, axes = plot_power_spectra_and_posteriors(matched)
+    assert r"\simeq" in axes[1][0].texts[0].get_text()
+    fig.canvas.draw()
+    np.testing.assert_array_equal(matched.medians[1], data.medians[1])
+    np.testing.assert_array_equal(matched.k_vals[1], data.k_vals[1])
+    c = write_run(tmp_path / "c", k=(.1,))
+    with pytest.raises(ValueError, match="same count"):
+        DataContainer([a, c], bins_correspond=True)
+
+
+def test_publication_layout_and_peak_normalisation(tmp_path):
+    k = np.arange(1, 10) / 10
+    data = DataContainer([write_run(tmp_path, k=k)], expected_ps=1e4)
+    before = matplotlib.rcParams.copy()
+    fig, (power, axes) = plot_power_spectra_and_posteriors(data, plot_priors=True)
+    np.testing.assert_allclose(fig.get_size_inches(), [7., 2.55])
+    assert axes.shape == (9,)
+    assert power.get_legend() is not None and axes[0].get_legend() is None
+    assert axes[0].get_shared_x_axes().joined(axes[0], axes[-1])
+    assert not axes[0].get_xticklabels()
+    for ax in axes:
+        histogram = next(p for p in ax.patches if isinstance(p, matplotlib.patches.StepPatch))
+        assert histogram.get_data().values.max() == 1.
+        np.testing.assert_allclose(ax.get_ylim(), [0., 1.05])
+        np.testing.assert_allclose(ax.get_xlim(), axes[0].get_xlim())
+    for key in ("font.family", "font.size", "mathtext.fontset", "axes.linewidth"):
+        assert matplotlib.rcParams[key] == before[key]
+    fig.canvas.draw()
+    with pytest.raises(ValueError, match="normalisation"):
+        plot_posteriors(data, normalisation="unknown")

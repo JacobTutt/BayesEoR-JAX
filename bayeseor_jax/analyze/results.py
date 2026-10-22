@@ -79,6 +79,15 @@ class DataContainer:
         Optional args.json supplies prior bounds; k-vals-bins.txt supplies edges.
     labels : sequence of str, optional
         One plotting label per run; defaults to directory names.
+    metadata_dirs : str, pathlib.Path or sequence of paths, optional
+        Separate setup directory containing k-bin files and args.json. Supply
+        one directory shared by all runs or one per run. Defaults to dirnames;
+        chains and summary.json are always read from the run directories.
+    bins_correspond : bool, optional
+        Explicitly confirm that bins in different runs describe corresponding
+        spherical shells in the same order, despite different mean k values.
+        Required for posterior overlays when differences exceed roundoff. This
+        does not rebin samples or alter the physical k values.
     cred_intervals : float or sequence of float, optional
         Central credible intervals in percent, defaulting to 68 and 95.
     uplim_quantile : float, optional
@@ -111,12 +120,21 @@ class DataContainer:
     summary.json and map_coefficients.npy directly instead.
     """
 
-    def __init__(self, dirnames, *, labels=None, cred_intervals=(68, 95),
+    def __init__(self, dirnames, *, labels=None, metadata_dirs=None,
+                 bins_correspond=False, cred_intervals=(68, 95),
                  uplim_quantile=0.95, expected_ps=None, expected_dmps=None):
         self.dirnames = [Path(path) for path in dirnames]
         self.Ndirs = len(self.dirnames)
         if not self.Ndirs:
             raise ValueError("At least one run directory is required")
+        if metadata_dirs is None:
+            self.metadata_dirs = self.dirnames
+        elif isinstance(metadata_dirs, (str, Path)):
+            self.metadata_dirs = [Path(metadata_dirs)] * self.Ndirs
+        else:
+            self.metadata_dirs = [Path(path) for path in metadata_dirs]
+        if len(self.metadata_dirs) != self.Ndirs:
+            raise ValueError("metadata_dirs must contain one entry per run")
         self.labels = list(labels) if labels is not None else [p.name for p in self.dirnames]
         if len(self.labels) != self.Ndirs:
             raise ValueError("labels must contain one entry per run")
@@ -133,22 +151,22 @@ class DataContainer:
         self.avgs, self.medians, self.uplims, self.cred_intervals = [], [], [], []
         self.expected_spectra = []
 
-        for path in self.dirnames:
+        for path, metadata in zip(self.dirnames, self.metadata_dirs):
             summary_path = path / "summary.json"
             summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
             if summary.get("sampler") == "analytic":
                 raise ValueError("Analytic foreground-only runs have no power-spectrum posterior; read summary.json directly")
             # Never label invented bin indices as physical cosmological scales.
-            k = np.loadtxt(path / "k-vals.txt", ndmin=1)
+            k = np.loadtxt(metadata / "k-vals.txt", ndmin=1)
             if k.ndim != 1 or not k.size or not np.all(np.isfinite(k) & (k > 0)) or np.any(np.diff(k) <= 0):
                 raise ValueError("k-vals.txt must contain positive, increasing physical wavenumbers")
-            edges_path = path / "k-vals-bins.txt"
+            edges_path = metadata / "k-vals-bins.txt"
             edges = np.loadtxt(edges_path, ndmin=1) if edges_path.exists() else None
             if edges is not None and (edges.shape != (k.size + 1,) or not np.all(np.isfinite(edges))
                                       or np.any(np.diff(edges) < 0) or np.any(edges < 0)
                                       or np.any(k < edges[:-1]) or np.any(k > edges[1:])):
                 raise ValueError("k-vals-bins.txt must contain ordered edges enclosing each k bin")
-            args_path = path / "args.json"
+            args_path = metadata / "args.json"
             args = json.loads(args_path.read_text()) if args_path.exists() else {}
             chain = np.loadtxt(_chain_path(path, summary), ndmin=2)
             if chain.shape[1] != k.size + 2 or not chain.shape[0] or not np.all(np.isfinite(chain)):
@@ -189,4 +207,11 @@ class DataContainer:
                     raise ValueError("Reference power must be finite and positive")
             self.expected_spectra.append(reference)
 
-        self.k_vals_identical = all(np.array_equal(self.k_vals[0], k) for k in self.k_vals[1:])
+        same_count = all(k.shape == self.k_vals[0].shape for k in self.k_vals[1:])
+        # Identical grids can acquire tiny rounding differences when saved by separate runs.
+        self.k_vals_identical = same_count and all(
+            np.allclose(self.k_vals[0], k, rtol=1e-10, atol=0.) for k in self.k_vals[1:]
+        )
+        if bins_correspond and not same_count:
+            raise ValueError("Corresponding bins must have the same count in every run")
+        self.bins_correspond = self.k_vals_identical or bool(bins_correspond)
