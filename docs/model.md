@@ -1,6 +1,7 @@
 # Model
 
-[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow.png)](assets/diagrams/joint-model-workflow.png)
+[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow.png#only-light)](assets/diagrams/joint-model-workflow.png)
+[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow-dark.png#only-dark)](assets/diagrams/joint-model-workflow-dark.png)
 
 *Both sky components contribute to the same modelled visibility vector.
 The schematic stops before noise, likelihood evaluation and inference.*

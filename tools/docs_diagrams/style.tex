@@ -10,21 +10,38 @@
 \definecolor{fgc}{HTML}{A3182F}    % foregrounds (crimson red)
 \definecolor{instc}{HTML}{4A5568}  % instrument / data
 \definecolor{infc}{HTML}{4A5568}   % inference (same neutral grey as instrument/data)
+\colorlet{cubeedge}{white}
+\colorlet{shadow}{black}
+\colorlet{panelbg}{white}
+\colorlet{ink}{black}
+\ifdefined\DarkWorkflow
+  \graphicspath{{\DarkPlots/}{plots/}}
+  % Match Material's dark canvas while retaining the scientific image colours.
+  \definecolor{canvas}{HTML}{1E2129}
+  \definecolor{panelbg}{HTML}{242833}
+  \definecolor{ink}{HTML}{E7EAF0}
+  \definecolor{eorc}{HTML}{93ADDA}
+  \definecolor{fgc}{HTML}{E55773}
+  \definecolor{instc}{HTML}{A6B0C0}
+  \colorlet{infc}{instc}
+  \pagecolor{canvas}
+  \AtBeginDocument{\color{ink}}
+\fi
 
 % ------------------------------------------------------------------ styles
 \tikzset{
-  panel/.style={draw=#1, fill=white, line width=0.8pt,
+  panel/.style={draw=#1, fill=panelbg, line width=0.8pt,
                 anchor=north west, inner sep=0pt},
-  stage/.style={draw=instc, fill=white, line width=0.6pt,
+  stage/.style={draw=instc, fill=panelbg, line width=0.6pt,
                 anchor=north west, inner sep=0pt,
                 minimum width=2.91cm, minimum height=2.45cm},
   ttl/.style={font=\footnotesize\bfseries, align=center},
   lbl/.style={font=\footnotesize, align=center},
-  small/.style={font=\scriptsize, text=black!70, align=center},
+  small/.style={font=\scriptsize, text=ink!70!panelbg, align=center},
   flow/.style={-{Stealth[length=2.4mm,width=2mm]}, line width=1.1pt, draw=#1},
   flow/.default=instc,
   op/.style={font=\small, text=#1},
-  op/.default=black,
+  op/.default=ink,
   thumb/.style={inner sep=0pt},
 }
 \newcommand{\bm}[1]{\boldsymbol{#1}}
@@ -43,7 +60,7 @@
       \node[thumb, anchor=south west, transform shape] at (0,0)
            {\includegraphics[width=\a cm,height=\a cm]{#4_side.png}};
     \end{scope}
-    \draw[white, line width=0.4pt, line join=round]
+    \draw[cubeedge, line width=0.4pt, line join=round]
          (0,0) -- (\a,0) -- (\a,\a) -- (0,\a) -- cycle
          (0,\a) -- (\dx,\a+\dy) -- (\a+\dx,\a+\dy) -- (\a,\a)
          (\a+\dx,\a+\dy) -- (\a+\dx,\dy) -- (\a,0);

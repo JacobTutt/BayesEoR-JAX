@@ -3,19 +3,19 @@
 \input{style.tex}
 \newcommand{\foregroundparameters}[1]{%
   \begin{scope}[xshift=#1cm]
-    \node[panel=fgc, fill=fgc!12, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
+    \node[panel=fgc, fill=fgc!12!panelbg, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
     \node[ttl] at (3.66,-0.28) {Image-Domain Foreground Model};
     \node[lbl] at (3.66,-0.62) {$\bm{q}(l,m,n)$};
     \foreach \f/\lab/\k in {fg_q0/q_0/0, fg_q1/q_1/1, fg_q2/q_2/2}{
       \pgfmathsetmacro{\yc}{-1.23-0.36*\k}
-      \fill[black, opacity=0.22] (3.68,\yc-0.05) ellipse (1.30 and 0.39);
+      \fill[shadow, opacity=0.22] (3.68,\yc-0.05) ellipse (1.30 and 0.39);
       \node[thumb] at (3.66,\yc) {\includegraphics[width=2.6cm,height=0.78cm]{\f.png}};
-      \node[small, text=black!80, anchor=west] at (5.08,\yc) {$\lab$};
+      \node[small, text=ink!80!panelbg, anchor=west] at (5.08,\yc) {$\lab$};
     }
   \end{scope}}
 \begin{document}
 \begin{tikzpicture}[x=1cm,y=1cm]
-\tikzset{grouplabel/.style={fill=white, draw=instc,
+\tikzset{grouplabel/.style={fill=panelbg, draw=instc,
   font=\footnotesize\bfseries, inner xsep=3pt, inner ysep=2pt, rotate=90}}
 
 \ifdefined\JointWorkflow
@@ -31,7 +31,7 @@
   \def\imagex{0.45}\def\beamx{3.96}\def\visx{7.47}\def\outx{10.98}
   \def\outlineend{10.46}\def\equationx{7.17}
 \else
-  \node[panel=eorc, fill=eorc!12, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
+  \node[panel=eorc, fill=eorc!12!panelbg, minimum width=6.42cm, minimum height=2.45cm] at (0.45,0) {};
   \node[ttl] at (3.66,-0.28) {Fourier-Domain 21-cm Model};
   \node[lbl] at (3.66,-0.62) {$\bm{a}(u,v,\eta)$};
   \eorcube{1.68}{-2.08}{0.55}{eor_k1}
@@ -44,7 +44,7 @@
   \def\outlineend{13.97}\def\equationx{8.95}
   \node[stage] (fourier) at (0.45,-3.52) {};
   \node[ttl, font=\scriptsize\bfseries] at ($(fourier.north)+(0,-0.25)$) {Sky Fourier Space};
-  \node[small, text=black] at ($(fourier.north)+(0,-0.55)$) {$S(u,v,\nu)$};
+  \node[small, text=ink] at ($(fourier.north)+(0,-0.55)$) {$S(u,v,\nu)$};
   \node[thumb] at ($(fourier.north)+(0,-1.55)$) {\includegraphics[width=1.6cm]{sky_fourier.png}};
 \fi
 
@@ -61,7 +61,7 @@
   beam/{Primary Beam}/{$P(l,m,\nu)\,I(l,m,\nu,t)$}/sky_beam,
   vis/{Sampled Visibilities}/{$V(\bm{b}_{ij},\nu,t)$}/visibilities}{
   \node[ttl, font=\scriptsize\bfseries] at ($(\b.north)+(0,-0.25)$) {\t};
-  \node[small, text=black] at ($(\b.north)+(0,-0.55)$) {\m};
+  \node[small, text=ink] at ($(\b.north)+(0,-0.55)$) {\m};
   \node[thumb] at ($(\b.north)+(0,-1.55)$) {\includegraphics[width=1.60cm]{\img.png}};
 }
 \draw[flow] (sky.east) -- node[above, op] {$\mathbf{P}$} (beam.west);
@@ -77,7 +77,7 @@
   \node[op=fgc, anchor=west, inner sep=1pt] at (5.465,-3.20) {$\mathbf{Q}_z$};
 \fi
 
-% Retain a single waterfall in place of the likelihood comparison.
+% Retain the right-hand, noiseless model waterfall from the likelihood comparison.
 \node[stage] (model) at (\outx,-3.52) {};
 \node[ttl] at ($(model.north)+(0,-0.25)$) {Modelled Data};
 \ifdefined\ForegroundWorkflow
@@ -97,7 +97,7 @@
   \fi
 \fi
 \node[thumb] at ($(model.north)+(0,-1.58)$)
-  {\includegraphics[trim=0 0 1.219cm 0,clip,width=1.65cm]{icon_likelihood.pdf}};
+  {\includegraphics[trim=1.219cm 0 0 0,clip,width=1.65cm]{icon_likelihood.pdf}};
 \draw[flow] (vis.east) -- (model.west);
 \end{tikzpicture}
 \end{document}

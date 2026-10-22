@@ -5,7 +5,8 @@ $(u,v,\eta)$ Fourier grid. This links the model coefficients naturally to
 the power spectrum while resolving the line-of-sight structure that helps
 distinguish the signal from spectrally smooth foreground emission.
 
-[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png)](assets/diagrams/eor-workflow.png)
+[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png#only-light)](assets/diagrams/eor-workflow.png)
+[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow-dark.png#only-dark)](assets/diagrams/eor-workflow-dark.png)
 
 *The component-only schematic ends at modelled visibilities; inference is a
 separate stage. The thumbnails illustrate the spaces, not a numerical evaluation

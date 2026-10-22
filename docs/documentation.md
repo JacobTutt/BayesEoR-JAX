@@ -31,10 +31,11 @@ the documentation does not require a GPU or the native MultiNest library.
 - Use Markdown mathematics for equations; MathJax renders them in the browser.
 
 The Home and Model pages use committed workflow images in `docs/assets/diagrams/`.
-Editable component-diagram sources and regeneration commands are in
+Editable diagram sources and regeneration commands are in
 [tools/docs_diagrams](https://github.com/JacobTutt/BayesEoR-JAX/tree/main/tools/docs_diagrams).
 Their generation is separate from the documentation build and does not require
-changes to the original manuscript figures.
+changes to the original manuscript figures. Light/dark pairs use Material's
+`#only-light` and `#only-dark` image fragments to follow the active site palette.
 
 The header icon and Home wordmark use transparent light/dark SVG pairs in
 `docs/assets/branding/`, taken from the supplied logo source artwork. The `-light`

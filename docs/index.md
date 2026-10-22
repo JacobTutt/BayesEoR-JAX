@@ -3,11 +3,12 @@ title: BayesEoR-JAX
 ---
 
 <h1 class="bayeseor-wordmark" id="bayeseor-jax" aria-label="BayesEoR-JAX">
-  <img class="brand-light" src="assets/branding/wordmark-light.svg" alt="" width="950" height="230">
-  <img class="brand-dark" src="assets/branding/wordmark-dark.svg" alt="" width="950" height="230">
+  <img class="brand-light" src="assets/branding/wordmark-light.svg" alt="" width="695" height="120">
+  <img class="brand-dark" src="assets/branding/wordmark-dark.svg" alt="" width="695" height="120">
 </h1>
 
-[![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow.png)](assets/diagrams/workflow.png)
+[![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow.png#only-light)](assets/diagrams/workflow.png)
+[![Complete BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.](assets/diagrams/workflow-dark.png#only-dark)](assets/diagrams/workflow-dark.png)
 
 *The component images illustrate the model spaces and inference stages.
 The cosmological cube thumbnails were derived from supplied 21cmSPACE simulations.
