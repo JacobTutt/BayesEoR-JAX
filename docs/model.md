@@ -91,5 +91,5 @@ assignment, disk-backed storage and joint assembly separately.
 Saved visibility rows are ordered by **time, frequency, baseline**, with baseline
 varying fastest.
 
-The [KL foreground basis](kl-foregrounds.md) changes the representation of
+The [KL foreground basis](foregrounds.md#kl-foreground-basis) changes the representation of
 foreground uncertainty, not the underlying measurement equation.

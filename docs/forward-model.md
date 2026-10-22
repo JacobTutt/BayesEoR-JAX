@@ -2,7 +2,7 @@
 
 For a step-by-step derivation, start with the [model overview](model.md),
 [EoR model](eor.md), [foreground model](foregrounds.md) and
-[KL foreground basis](kl-foregrounds.md). This guide describes how those
+[KL foreground basis](foregrounds.md#kl-foreground-basis). This guide describes how those
 operators are constructed, stored and assembled into inference inputs.
 
 BayesEoR-JAX models visibility data through a linear forward operator:
