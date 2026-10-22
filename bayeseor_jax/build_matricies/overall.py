@@ -1,8 +1,10 @@
 """
-High-level orchestration for constructing model matrices and associated kernels.
+Construct and save the mappings from sky coefficients to measured visibilities.
 
-This module combines the physical model spaces, beam response, and NUDFT
-kernels into the dense operators used by inference.
+Image and Fourier geometries define the coefficient coordinates; beam and
+forward operators propagate their brightness through the instrument. This
+module schedules that construction in blocks and stores both the forward
+matrix and its noise-weighted products for repeated likelihood evaluation.
 """
 import time
 
@@ -44,13 +46,19 @@ from .build_utils import (
 
 
 class BuildMatrices:
-    """Build the physical 21-cm and spherical foreground operators.
+    """Coordinate construction of the cosmological and foreground visibility models.
 
     The cosmological contribution is represented on a rectilinear
     ``(u, v, eta)`` grid, while smooth foreground brightness is represented in
     the spherical image domain. Both are propagated through the same primary
     beam and full three-dimensional fringe response. Large operators are built
     in process-local CPU row blocks and written to shared ``.npy`` memmaps.
+
+    ``build_T_21`` and ``build_T_fg`` save the separate coefficient-to-visibility
+    mappings; ``build_T`` concatenates their columns in that order. The
+    likelihood-stack methods then save ``T^H N^{-1} T``, ``T^H N^{-1} d``,
+    and ``d^H N^{-1} d``. Geometry and beam values are prepared at construction;
+    the large visibility matrices are created only when a build method runs.
     """
 
     def __init__(
@@ -93,7 +101,20 @@ class BuildMatrices:
         t_ninv_t_right_block_batch: int = 4,
         clobber: bool = False,
     ) -> None:
-        
+        """Prepare coordinates, Fourier factors, and beam weights for an observation.
+
+        Grid sizes and spacings define the cosmological (u, v, eta) model;
+        ``fov_eor`` and ``fov_fg`` select HEALPix fields with diameters in
+        degrees. Supplied geometry objects are reused. Frequencies are
+        configured in MHz, integration spacing in seconds, and baselines
+        in metres. Baselines from the first integration define the fixed
+        instrument frame; time dependence enters the sky directions and beam.
+
+        ``beta_fg`` contains positive spectral-index magnitudes, converted
+        to negative power-law exponents when constructing foreground spectra.
+        The save directory, clobber setting, and column-block sizes control
+        later persistence and distributed products; no full T is built here.
+        """
         # Store foreground spectral-model settings.
         if beta_fg is None:
             self.beta_fg = [2.63, 2.82]
@@ -136,7 +157,7 @@ class BuildMatrices:
         # Instrument data: convert uvw from meters to inverse radians for each frequency.
         uvw_array_m = jnp.array(uvw_array_m)  # (n_t, n_bls, 3)
         self.nbls = int(uvw_array_m.shape[1])
-        # Only the first time-step uvw is used; time dependence is handled by beam rotation.
+        # Baselines are fixed; sky directions and beam weights carry time dependence.
         uvw_array_m = uvw_array_m[0].T  # (3, n_bls)
         # Convert meters -> inverse radians by dividing by wavelength per frequency.
         wavelengths = c_ms / self.freq_hz
@@ -209,7 +230,13 @@ class BuildMatrices:
         self.n_fg_spatial_modes = int(self.image_geometry.n_pix_fg)
 
     def _foreground_spectral_operator(self) -> jnp.ndarray:
-        """Return the image-domain foreground operator ``Q_z``."""
+        """Evaluate the foreground spectral factors at the selected frequencies.
+
+        Return shape ``(n_freq, n_fg_components)`` with a constant column
+        followed by power laws referenced to ``f0_mhz``. The same factors
+        convert the amplitude coefficients of every foreground pixel into
+        its brightness spectrum.
+        """
         return build_foreground_spectral_operator(
             self.freq_hz / 1e6,
             self.f0_mhz,
@@ -225,7 +252,14 @@ class BuildMatrices:
         spectral_fourier_operator: jnp.ndarray,
         foreground_spectral_operator: jnp.ndarray,
     ) -> jnp.ndarray:
-        """Build one ``(time, frequency)`` row block on the active device."""
+        """Propagate sky coefficients to all baselines at one time and frequency.
+
+        Evaluate the beam-weighted 3D fringe response for the foreground
+        HEALPix pixels. For the cosmological component, select its smaller
+        pixel set before applying the transverse and spectral Fourier factors.
+        Return ``(n_baseline, n_coefficient)``; ``component='all'`` places
+        cosmological columns before foreground columns. No file is written.
+        """
         if component not in {"all", "eor", "foreground"}:
             raise ValueError(
                 "component must be one of {'all', 'eor', 'foreground'}"
@@ -267,7 +301,12 @@ class BuildMatrices:
         )
 
     def _forward_operator_width(self, component: str) -> int:
-        """Return the number of columns in a selected forward operator."""
+        """Count the coefficients mapped to visibilities by the requested component.
+
+        The cosmological count is ``n_uv_mode * n_eta_mode`` and the
+        foreground count is ``n_pixel * n_spectral_component``. Their sum
+        determines the column dimension of the joint operator on disk.
+        """
         eor_width = (
             self.fourier_geometry.uv.shape[1]
             * self.fourier_geometry.eta.shape[0]
@@ -289,12 +328,15 @@ class BuildMatrices:
         component: str,
         matrix_name: str,
     ) -> Path:
-        """Build a forward operator in distributed CPU row blocks.
+        """Build and save a coefficient-to-visibility matrix one row block at a time.
 
         JAX processes receive contiguous time ranges according to
         ``jax.process_index()`` and ``jax.process_count()``. Each process builds
         one frequency block at a time on its local CPU and writes only its
         disjoint rows into a shared ``.npy`` memmap.
+        Rows follow time, frequency, baseline order. The temporary output is
+        renamed to the requested matrix path after all processes finish;
+        return that path rather than loading the completed matrix into memory.
         """
         path = _dense_matrix_path_impl(self, matrix_name)
         partial_path = path.with_name(f"{path.stem}.partial{path.suffix}")
@@ -390,21 +432,36 @@ class BuildMatrices:
         return path
 
     def build_T_21(self, *, matrix_name: str = "T_21") -> Path:
-        """Build and save :math:`T_{21}=F^{-1}P F'F_z`."""
+        r"""Save the mapping from cosmological Fourier amplitudes to visibilities.
+
+        Construct :math:`T_{21}=F^{-1}P F'F_z` in distributed CPU blocks.
+        Return the saved ``.npy`` path. Columns follow (uv, eta) order, with
+        eta varying fastest, and rows follow time, frequency, baseline order.
+        """
         return self._build_forward_operator(
             component="eor",
             matrix_name=matrix_name,
         )
 
     def build_T_fg(self, *, matrix_name: str = "T_fg") -> Path:
-        """Build and save :math:`T_{\rm FG}=F^{-1}P Q_z`."""
+        r"""Save the mapping from foreground HEALPix amplitudes to visibilities.
+
+        Construct :math:`T_{\rm FG}=F^{-1}P Q_z` in distributed CPU blocks.
+        Return the saved ``.npy`` path. Columns follow spectral component,
+        then pixel order; rows follow time, frequency, baseline order.
+        """
         return self._build_forward_operator(
             component="foreground",
             matrix_name=matrix_name,
         )
 
     def build_T(self, *, matrix_name: str = "T") -> Path:
-        """Build and save the concatenated 21-cm and foreground operators."""
+        """Save the joint visibility mapping ``T = [T_21 T_fg]``.
+
+        A coefficient vector containing cosmological Fourier amplitudes
+        followed by foreground image amplitudes maps to model visibilities
+        through ``m = T b``. Return the completed matrix's ``.npy`` path.
+        """
         return self._build_forward_operator(
             component="all",
             matrix_name=matrix_name,
@@ -415,9 +472,12 @@ class BuildMatrices:
     # ------------------------
     def _sigma_squared_array(self) -> jnp.ndarray:
         """
-        Build the per-visibility noise variance vector for the current settings.
+        Assign a noise variance to each measured complex visibility.
 
-        Only the (include_instrumental_effects=True, drift_scan=True) path is supported.
+        With an effective-noise array, return its squared magnitudes.
+        Otherwise use ``sigma**2 / redundancy`` for each baseline and time,
+        repeated over frequency. Return a flattened vector in the same
+        time, frequency, baseline order as the rows of T.
         """
         if self.effective_noise is not None:
             return jnp.abs(self.effective_noise) ** 2
@@ -441,7 +501,11 @@ class BuildMatrices:
 
     def build_Ninv(self) -> jnp.ndarray:
         """
-        Build the inverse noise covariance diagonal (vector form).
+        Return the inverse-variance weights applied to visibility rows.
+
+        Each weight is ``1 / variance``. The independent-noise assumption
+        allows these diagonal entries to be stored as a vector and applied
+        by elementwise multiplication, without allocating a dense covariance.
 
         Returns
         -------
@@ -472,7 +536,11 @@ class BuildMatrices:
         right_width: int,
     ) -> jnp.ndarray:
         r"""
-        Build one block batch of ``T^H N^{-1} T`` from cached sharded inputs.
+        Contract visibility responses into one noise-weighted coefficient block.
+
+        Evaluate ``T_left^H @ (Ninv[:, None] * T_right)``: each entry sums
+        the overlap between two coefficient responses over measured
+        visibilities, weighted by their inverse noise variance.
 
         Parameters
         ----------
@@ -514,7 +582,13 @@ class BuildMatrices:
         right_block_batch: Optional[int] = None,
     ) -> None:
         r"""
-        Build and save ``T^H N^{-1} T`` from saved ``T`` and ``Ninv`` arrays.
+        Save the noise-weighted overlaps between all model-coefficient responses.
+
+        Read saved T and inverse-noise weights, contract their visibility
+        rows in coefficient-column blocks, and write ``T^H N^{-1} T`` to
+        disk. This data-independent matrix supplies the likelihood precision
+        together with the prior precision. The completed output is published
+        only after all blocks have been written.
 
         Parameters
         ----------
@@ -722,7 +796,11 @@ class BuildMatrices:
         vis_noisy: jnp.ndarray,
     ) -> jnp.ndarray:
         r"""
-        Build the scalar data term ``d^H N^{-1} d`` directly.
+        Sum the inverse-variance-weighted squared magnitudes of the visibilities.
+
+        Return ``d^H N^{-1} d = sum_i |d_i|**2 / variance_i``, the scalar
+        data term in the Gaussian likelihood. This function computes the
+        scalar only; ``save_d_ninv_d`` handles persistence.
 
         Parameters
         ----------
@@ -754,7 +832,12 @@ class BuildMatrices:
         ninv_matrix_name: str = "Ninv",
     ) -> None:
         r"""
-        Build and save ``dbar = T^H N^{-1} d`` from saved ``T`` and ``Ninv``.
+        Project the observed visibilities onto the noise-weighted model responses.
+
+        Save ``dbar = T^H N^{-1} d``, with one complex entry per coefficient
+        in T's column order. Together with the coefficient precision, this
+        vector determines the conditional linear fit and the quadratic term
+        in the analytically marginalised likelihood.
 
         Parameters
         ----------
@@ -829,6 +912,7 @@ class BuildMatrices:
             def _build_dbar_cached(
                 T: jnp.ndarray, ninv_d: jnp.ndarray
             ) -> jnp.ndarray:
+                """Sum distributed visibility projections into a replicated coefficient vector."""
                 return jnp.conj(T).T @ ninv_d
 
             local_T = np.asarray(T_mm[row0:row1, :], dtype=np.complex128)
@@ -862,7 +946,11 @@ class BuildMatrices:
         ninv_matrix_name: str = "Ninv",
     ) -> None:
         r"""
-        Build and save ``d^H N^{-1} d`` from saved ``Ninv`` and ``d``.
+        Save the scalar noise-weighted squared magnitude of the observed data.
+
+        Load the inverse-variance vector, evaluate ``d^H N^{-1} d``, and
+        write the scalar on process zero. It is independent of the sky-model
+        coefficients and can be reused throughout likelihood evaluation.
 
         Parameters
         ----------
@@ -896,7 +984,11 @@ class BuildMatrices:
 
     def _invalidate_saved_outputs(self, matrix_names: Sequence[str]) -> None:
         """
-        Delete saved outputs so subsequent build calls recompute them.
+        Remove named cached arrays before rebuilding their dependent products.
+
+        Process zero deletes the files and distributed processes synchronise
+        before proceeding. The caller supplies the dependency list, for example
+        invalidating ``T_Ninv_T`` and ``dbar`` when T changes.
 
         Parameters
         ----------
@@ -927,7 +1019,11 @@ class BuildMatrices:
         invalidate_existing: bool | None = None,
     ) -> None:
         r"""
-        Build and save a matrix if it does not already exist on disk.
+        Ensure a requested forward-model or noise product is available on disk.
+
+        Supports ``T``, ``Ninv``, and ``T_Ninv_T`` and builds missing
+        prerequisites recursively. Existing files are reused by name unless
+        invalidation is requested; their physical configuration is not checked.
 
         Parameters
         ----------
@@ -970,7 +1066,10 @@ class BuildMatrices:
 
     def build_minimum_matrix_stack(self) -> None:
         """
-        Build and save T, Ninv, then T_Ninv_T in that order.
+        Prepare the data-independent arrays used by the marginalised likelihood.
+
+        Save the coefficient-to-visibility operator T, inverse-variance vector
+        Ninv, and coefficient overlap matrix ``T^H N^{-1} T`` in that order.
 
         This uses a disk-first workflow to avoid keeping large matrices in
         memory longer than required.
@@ -988,13 +1087,16 @@ class BuildMatrices:
 
     def build_minimum_likelihood_stack(self, vis_noisy: jnp.ndarray) -> int:
         """
-        Build the minimum saved stack needed by the marginalized likelihood.
+        Prepare the saved model and data projections for repeated likelihood evaluation.
 
         This extends the data-independent matrix stack with the two
         data-dependent compressed terms:
 
         - ``dbar = T^H N^{-1} d``
         - ``d_ninv_d = d^H N^{-1} d``
+
+        Existing files are reused unless ``clobber`` is set. A changed dataset
+        therefore requires invalidating its saved projections or a new directory.
 
         Parameters
         ----------

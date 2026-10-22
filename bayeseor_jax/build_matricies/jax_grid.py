@@ -1,4 +1,4 @@
-"""JAX mesh helper for the row-sharded BayesEoR-JAX solver."""
+"""Arrange JAX devices for distributing rows of the inference system."""
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -8,7 +8,13 @@ from jax.sharding import Mesh
 
 def build_solver_mesh() -> Mesh:
     """
-    Build a 1D mesh for row-sharded solver backends such as ``jaxmg``.
+    Place all visible JAX devices on a single solver mesh axis.
+
+    The returned axis ``x`` is used to distribute rows of the dense
+    coefficient-space system across devices for solvers such as ``jaxmg``.
+    This defines the device layout only; the caller applies array sharding
+    and performs factorisation or solves. Distributed JAX must already be
+    initialised to include devices on other hosts.
 
     Returns
     -------

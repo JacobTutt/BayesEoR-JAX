@@ -1,4 +1,9 @@
-"""Helper utilities for dense matrix path, save, and load workflows."""
+"""Store forward-model arrays and coordinate access across JAX processes.
+
+These helpers manage paths, shared memory-mapped files, and visibility-row
+partitions. They preserve the operator ordering supplied by the builders and
+perform no transformation of the sky model or observational coordinates.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +20,10 @@ from jax.experimental import multihost_utils
 
 def _dense_matrix_path(bm, matrix_name: str) -> Path:
     """
-    Return the output path for a dense matrix saved as ``.npy``.
+    Resolve a cached model array's name to its NumPy file in the build directory.
+
+    Names such as ``T``, ``Ninv``, and ``dbar`` identify matrices, vectors,
+    or scalars. This helper returns a path without creating or loading a file.
 
     Parameters
     ----------
@@ -34,7 +42,10 @@ def _dense_matrix_path(bm, matrix_name: str) -> Path:
 
 def _log_build(bm, message: str) -> None:
     """
-    Emit a build/save progress message from process 0.
+    Report construction or saving progress once across the distributed build.
+
+    Only process zero prints the message, avoiding duplicate output when
+    multiple processes construct different portions of the same operator.
 
     Parameters
     ----------
@@ -49,7 +60,11 @@ def _log_build(bm, message: str) -> None:
 
 def check_if_matrix_exists(bm, matrix_name: str) -> bool:
     """
-    Return ``True`` when a saved dense matrix exists on disk.
+    Decide consistently across processes whether a cached array file exists.
+
+    In distributed runs, process zero publishes its decision on the shared
+    filesystem and all processes read it before building or reusing a product.
+    Only existence is checked, not array contents or physical configuration.
 
     Parameters
     ----------
@@ -76,7 +91,10 @@ def check_if_matrix_exists(bm, matrix_name: str) -> bool:
 
 def _wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
     """
-    Poll until a file becomes visible on the shared filesystem.
+    Wait for another process's file to become visible on shared storage.
+
+    Used for coordination files during distributed construction. Raise
+    ``TimeoutError`` if the path remains absent after the allowed interval.
 
     Parameters
     ----------
@@ -101,7 +119,12 @@ def _prepare_memmap_output(
     sync_name: str,
 ) -> np.memmap:
     """
-    Create or attach to a shared `.npy` memmap output.
+    Allocate a shared NumPy array on disk for processes to fill in place.
+
+    Process zero creates the file header and shape; every process then opens
+    the same array for writing its assigned slices. The caller determines
+    which slices belong to each process and when the completed output can
+    be published. An existing file at this path is overwritten.
 
     Parameters
     ----------
@@ -156,7 +179,12 @@ def _prepare_memmap_output(
 
 def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
     """
-    Convert a possibly open-ended slice into concrete local bounds.
+    Resolve the start and stop of an array shard's axis slice.
+
+    Replace missing bounds by zero and the full axis length so a shard can
+    be matched to its disk-backed array region. This helper assumes the
+    unit-stride, in-range slices supplied by the sharding layout; it does
+    not clamp arbitrary indices or interpret a slice step.
 
     Parameters
     ----------
@@ -168,7 +196,7 @@ def _slice_bounds(sl: slice, extent: int) -> tuple[int, int]:
     Returns
     -------
     tuple of int
-        Concrete ``(start, stop)`` bounds within ``[0, extent]``.
+        Explicit ``(start, stop)`` bounds, with stop exclusive.
     """
     start = 0 if sl.start is None else int(sl.start)
     stop = extent if sl.stop is None else int(sl.stop)
@@ -182,7 +210,7 @@ def padded_visibility_partition(
     process_index: int,
 ) -> tuple[int, int, int]:
     """
-    Return a process-local visibility stripe padded to shard evenly over devices.
+    Assign a contiguous range of measured visibility rows to one process.
 
     The cached distributed builders shard the visibility axis across hosts and
     then across local devices. When ``n_vis`` does not divide that layout
@@ -190,6 +218,11 @@ def padded_visibility_partition(
     can pad with trailing zero rows. That leaves ``T^H N^{-1} T`` and
     ``T^H N^{-1} d`` unchanged provided the padded rows of ``T`` and the
     corresponding ``N^{-1}`` / ``N^{-1} d`` entries are set to zero.
+
+    Return ``(row_start, row_stop, padded_row_count)``. Start and stop index
+    the original visibility vector; the count includes zero-padding required
+    for the local devices. For processes beyond the data extent, the slice
+    is empty even if the returned start exceeds stop.
     """
     n_vis = int(n_vis)
     process_count = max(1, int(process_count))
@@ -208,7 +241,11 @@ def padded_visibility_partition(
 
 def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
     """
-    Save a dense matrix to disk as `.npy`.
+    Save a model matrix, vector, or scalar without changing its axis ordering.
+
+    Ordinary arrays are written directly. For JAX arrays, each process
+    writes its addressable shards into the shared NumPy file and flushes
+    them before the final distributed barrier.
 
     Parameters
     ----------
@@ -246,7 +283,11 @@ def save_matrix(bm, matrix_name: str, matrix: jnp.ndarray) -> None:
 
 def load_matrix(bm, matrix_name: str):
     """
-    Load a saved dense matrix from disk.
+    Load a complete cached model array into a JAX array.
+
+    This reads the full NumPy file into memory; it does not stream blocks or
+    distribute the array across devices. Raise ``FileNotFoundError`` when
+    the requested product has not been saved.
 
     Parameters
     ----------

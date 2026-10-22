@@ -1,4 +1,9 @@
-"""Public exports for matrix-building components."""
+"""Expose sky geometry, beam weights, forward operators, and matrix construction.
+
+Geometry defines the image and Fourier coordinates; forward operators map
+their coefficients to visibilities. ``BuildMatrices`` coordinates distributed
+construction and saves the arrays needed for inference.
+"""
 
 from .beam_model import Beam_Model
 from .fourier_geometry import FourierGeometry, build_fourier_geometry

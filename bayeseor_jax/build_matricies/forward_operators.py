@@ -37,7 +37,7 @@ def build_nudft_matrix(
     coords_out: jnp.ndarray,
     sign: int = -1,
 ) -> jnp.ndarray:
-    r"""Construct the unnormalised non-uniform discrete Fourier kernel.
+    r"""Map amplitudes between supplied coordinate sets with a Fourier kernel.
 
     For input coordinates ``x_i`` and output coordinates ``y_j``, return
 
@@ -86,7 +86,9 @@ def build_transverse_fourier_operator(
     lm: jax.Array,
     uv_cell_area: float,
 ) -> jax.Array:
-    r"""Build :math:`F'`, mapping transverse Fourier modes to image pixels.
+    r"""Map cosmological (u, v) coefficients to brightness at HEALPix pixel centres.
+
+    This transverse Fourier operator is denoted :math:`F'`.
 
     .. math::
 
@@ -122,7 +124,9 @@ def build_spectral_fourier_operator(
     frequency_offsets_hz: jax.Array,
     d_eta: float,
 ) -> jax.Array:
-    r"""Build :math:`F_z`, mapping line-of-sight modes to frequency.
+    r"""Map cosmological eta coefficients to brightness at observing frequencies.
+
+    This line-of-sight Fourier operator is denoted :math:`F_z`.
 
     .. math::
 
@@ -173,7 +177,12 @@ def build_sky_to_visibility_operator(
     beam: jax.Array,
     pixel_area_sr: float,
 ) -> jax.Array:
-    r"""Build :math:`R=F^{-1}P` for a block of time integrations.
+    r"""Map individual HEALPix pixel brightnesses to measured visibilities.
+
+    At each observing time, propagate the pixels' topocentric (l, m, n)
+    directions through the full three-dimensional discrete Fourier response,
+    including primary-beam weighting and pixel solid angle. The combined
+    operator is :math:`R=F^{-1}P`.
 
     .. math::
 
@@ -243,7 +252,11 @@ def build_T_21_core(
     transverse_operator: jax.Array,
     spectral_operator: jax.Array,
 ) -> jax.Array:
-    r"""Build :math:`T_{21}=R F' F_z` for one visibility-row block.
+    r"""Map cosmological (u, v, eta) amplitudes to a block of visibilities.
+
+    Reconstruct their brightness on the cosmological HEALPix selection and
+    propagate it through the beam-weighted three-dimensional fringe response,
+    implementing :math:`T_{21}=R F' F_z`.
 
     .. math::
 
@@ -323,7 +336,11 @@ def build_T_fg_core(
     sky_to_visibility: jax.Array,
     spectral_operator: jax.Array,
 ) -> jax.Array:
-    r"""Build :math:`T_{\rm FG}=R Q_z` for one visibility-row block.
+    r"""Map spectral foreground amplitudes at each HEALPix pixel to visibilities.
+
+    Evaluate each pixel's brightness at the observing frequencies and apply
+    the beam-weighted three-dimensional fringe response, implementing
+    :math:`T_{\rm FG}=R Q_z`.
 
     .. math::
 
@@ -391,7 +408,10 @@ def build_foreground_spectral_operator(
     reference_frequency_mhz: float,
     spectral_indices: Sequence[float] = (-2.63, -2.82),
 ) -> jax.Array:
-    r"""Build the spectral factors of the foreground operator :math:`Q_z`.
+    r"""Map a pixel's foreground amplitudes to its brightness spectrum.
+
+    These constant and power-law factors define the spectral part of
+    :math:`Q_z`, shared by every foreground HEALPix pixel.
 
     .. math::
 
