@@ -1,13 +1,25 @@
 """
-Visibility loading and preprocessing helpers.
+Load calibrated interferometric measurements into BayesEoR visibility order.
 
-This module owns the translation from either raw interferometric datasets or
-preprocessed visibility vectors into the likelihood-ready representation used
-by the setup and inference code. In practice that means:
+``get_vis_data`` accepts the following input formats:
 
-1) loading visibilities and associated metadata via ``get_vis_data``;
-2) preprocessing raw pyuvdata inputs into the flattened complex visibility
-   vector plus matching instrument-model arrays expected downstream.
+- ``.uvh5``: UVH5 files read through pyuvdata.
+- ``.uvfits``: UVFITS files read through pyuvdata.
+- ``.ms``: Measurement Set directories, subject to pyuvdata reader availability.
+- ``.npy``: preprocessed visibility arrays, either plain arrays or BayesEoR
+  dictionary payloads containing a ``data`` entry. These require a separate
+  instrument-model directory and explicit frequency/time metadata.
+
+Raw inputs are selected by baseline, frequency and time, unprojected, reduced
+to one polarisation, and converted from Jy or K sr to mK sr. Optional redundant
+averaging precedes vectorisation. Each time/frequency block contains the selected
+baselines followed by their complex conjugates, with matching reversed baseline
+coordinates; these copies are not additional independent measurements.
+
+Preprocessed arrays must already have these units and conventions. Supplied or
+estimated noise leaves the data unchanged; otherwise synthetic noise is added.
+The module prepares data and metadata, not a sky model or forward operator.
+NumPy dictionary files use pickle and must come from a trusted source.
 """
 
 import warnings
@@ -25,9 +37,9 @@ from pyuvdata import UVData
 from pyuvdata import __version__ as pyuvdata_version
 from pyuvdata.utils import polstr2num
 
-from .model.instrument.baselines import InstrumentModel
-from .model.instrument.noise import generate_gaussian_noise
-from .utils import load_numpy_dict, save_numpy_dict
+from ..model.instrument.baselines import InstrumentModel
+from .noise import generate_gaussian_noise
+from ..utils import load_numpy_dict, save_numpy_dict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,11 +80,97 @@ def get_vis_data(
     clobber: bool = False,
 ) -> dict[str, Any]:
     """
-    Load visibilities and associated instrument/noise arrays.
+    Load a visibility vector, its noise realisation and aligned observation metadata.
 
-    Supports two input modes:
-    1. Raw pyuvdata file (`.uvh5`, `.uvfits`, `.ms`) via `preprocess_uvdata`.
-    2. Preprocessed `.npy` visibility vector plus an instrument-model directory.
+    Parameters
+    ----------
+    data_path : pathlib.Path or str
+        A calibrated ``.uvh5`` or ``.uvfits`` file, a ``.ms`` directory, or a
+        preprocessed ``.npy`` array. These lowercase suffixes select the reader.
+        Raw inputs must be in Jy or K sr; NumPy inputs must already be in mK sr,
+        flattened in time/frequency/baseline order with conjugate copies.
+    inst_model : pathlib.Path or str, optional
+        Required for NumPy inputs. Directory containing ``uvw_model.npy`` and
+        ``redundancy_model.npy`` with optional ``antpairs.npy``, or a combined
+        ``instrument_model.npy`` dictionary. See ``InstrumentModel``.
+    noise_data_path : pathlib.Path or str, optional
+        Trusted NumPy noise vector in the same units and order as the data.
+        Takes precedence over estimated noise. It is returned, not added:
+        the input visibilities are assumed to contain noise already.
+    sigma : float, optional
+        Complex noise RMS in mK sr before redundancy scaling. Required when
+        neither supplied nor estimated noise is available; the input is then
+        treated as noiseless and a synthetic realisation is added.
+    noise_seed : int, optional
+        Seed passed to ``generate_gaussian_noise``; defaults to 742123.
+    calc_noise : bool, optional
+        Request the legacy even/odd time-difference noise estimate for raw
+        inputs. Does not estimate noise from preprocessed NumPy inputs.
+    antenna_selection : str, optional
+        pyuvdata antenna-selection string for raw inputs; default ``'cross'``.
+    bl_cutoff : float or astropy.units.Quantity, optional
+        Raw-input cutoff on sqrt(u**2 + v**2), in metres if unitless.
+    freq_idx_min : int, optional
+        First raw frequency-channel index, starting from zero.
+    freq_min, freq_center : float or astropy.units.Quantity, optional
+        Raw-input frequency lower bound or window centre, in Hz if unitless.
+    n_freqs_select : int, optional
+        Raw channel-window width. Supply a starting index, lower bound or
+        centre to activate selection; a centre requires this width.
+    jd_idx_min : int, optional
+        First raw integration index, starting from zero.
+    jd_min, jd_center : float, optional
+        Time-window lower bound or centre as Julian date. For NumPy inputs,
+        one is required to construct the time axis; ``jd_min`` takes priority.
+        Raw preprocessing also accepts astropy Time values.
+    n_times_select : int, optional
+        Raw time-window width, paired with an index, lower bound or centre.
+    form_pi : bool, optional
+        Form pseudo-Stokes I from raw XX and YY, or retain existing pI.
+        Defaults to True; otherwise select ``pol``.
+    pi_norm : float, optional
+        Scale in ``pI = pi_norm * (XX + YY)``; defaults to 1, not 1/2.
+    pol : str, optional
+        Raw polarisation selected when ``form_pi=False``; defaults to ``'xx'``.
+    redundant_avg : bool, optional
+        Average redundant raw baselines; defaults to False.
+    uniform_redundancy : bool, optional
+        Use unit redundancy weights even after averaging; defaults to False.
+    n_freq, f0_mhz, df_mhz : int, float, float, optional
+        Required NumPy frequency-axis length, first frequency and spacing in
+        MHz. For a single raw channel, ``df_mhz`` supplies its spacing.
+    n_t, d_t : int, float, optional
+        Required NumPy time-axis length and cadence in seconds. ``d_t`` also
+        supplies raw single-integration cadence (otherwise returned as zero).
+    save_vis, save_model : bool, optional
+        Save raw preprocessing products: visibility/noise vectors and/or
+        baseline, redundancy and antenna-pair arrays. Defaults to False.
+        These hooks do not save subsequently generated synthetic noise.
+    save_dir : pathlib.Path or str, optional
+        Directory for requested raw preprocessing products; defaults to './'.
+    clobber : bool, optional
+        Allow replacement of those saved products; defaults to False.
+
+    Returns
+    -------
+    dict
+        ``vis`` is the loaded complex128 vector in mK sr; ``vis_noisy`` is
+        either that vector or ``vis + noise``. ``noise`` is the supplied,
+        estimated or generated vector in matching order. ``bl_conj_pairs_map``
+        records synthetic-noise baseline pairing, otherwise it is empty.
+        ``uvws`` contains metre coordinates, shape (n_t, n_baseline, 3), and
+        ``redundancy`` contains aligned baseline weights. ``antpairs`` holds
+        baseline labels if available. ``freqs_hz`` and ``jds`` are the frequency
+        and Julian-date axes; ``df_hz`` and ``dt`` are their spacings in Hz and
+        seconds. ``uvd`` is the processed raw UVData object, or None for NumPy.
+
+    Notes
+    -----
+    Raw selection and conversion are delegated to ``preprocess_uvdata``.
+    NumPy inputs bypass these steps and must already match the model's row
+    ordering and Hermitian augmentation; stored metadata are not used to infer
+    the axes. NumPy dictionary inputs are unpickled: load trusted files only.
+    This loader does not turn partial flags into per-visibility noise weights.
     """
     # Normalize and validate the input data path once at the boundary.
     if not isinstance(data_path, Path):
@@ -87,7 +185,7 @@ def get_vis_data(
 
     if data_path.suffix in {".uvh5", ".uvfits", ".ms"}:
         # Raw-file mode:
-        # - select frequencies/times/baselines in vis.preprocess_uvdata
+        # - select frequencies/times/baselines in preprocess_uvdata
         # - build Hermitian-expanded data vector + instrument arrays
         # - optionally estimate empirical noise from even/odd differencing
         out = preprocess_uvdata(
@@ -246,12 +344,11 @@ def preprocess_uvdata(
     for a set of baselines (Nbls), times (Ntimes), and frequencies (Nfreqs)
     and forms a one-dimensional data vector with shape
     (2*Nbls * Ntimes * Nfreqs,) and an accompanying instrument model of
-    sampled (u, v, w) coordinates and a redundancy model (when averaging
-    redundant baselines). The factor of 2 in the data vector shape comes from
-    the fact that the input visibility vector must be Hermitian, so we copy
-    all baselines at (u, v) to (-u, -v) and conjugate the data accordingly.
-    This is captured in the instrument model as the instrument model also
-    contains all (u, v) and conjugated (-u, -v).
+    baseline coordinates in metres and a redundancy model (when averaging
+    redundant baselines). The factor of two comes from appending conjugate
+    visibilities at reversed baselines (u, v, w) -> (-u, -v, -w). These are
+    redundant copies of the measurements, not independent observations.
+    Time is the slowest axis, frequency next, and baseline fastest.
 
     Optionally, if `calc_noise` is True, a noise vector is also produced.
     The noise is estimated by differencing visibilities at even and odd time
@@ -260,13 +357,15 @@ def preprocess_uvdata(
     Parameters
     ----------
     filepath : Path or str
-        Path to pyuvdata-compatible file containing visibilities.
+        Path read by pyuvdata (normally UVH5, UVFITS or a Measurement Set).
+        Unlike ``get_vis_data``, this lower-level function delegates format
+        detection directly to UVData.read. Input units must be Jy or K sr.
     antenna_selection : str, optional
         Antenna downselect string. This determines what baselines to keep in
         the data vector. Please see `pyuvdata.UVData.select` for more details.
         Defaults to 'cross' (cross-correlation baselines only).
     bl_cutoff : astropy.Quantity or float, optional
-        Baseline length cutoff in meters if not a Quantity. Defaults to None
+        Cutoff on sqrt(u**2 + v**2), in metres if not a Quantity. Defaults to None
         (keep all baselines).
     freq_idx_min : int, optional
         Minimum frequency channel index to keep in the data vector. Defaults
@@ -333,22 +432,30 @@ def preprocess_uvdata(
     Returns
     -------
     vis : numpy.ndarray
-        Visibility vector with shape (2*Nbls*Nfreqs*Ntimes,).
+        Complex visibility vector in mK sr, shape (2*Nbls*Nfreqs*Ntimes,).
     antpairs : list of tuple
         List of antenna pair tuples corresponding to the (u, v, w) coordinates
         in `uvws`, in identical order, with length (2*Nbls).
     uvws : numpy.ndarray
-        Sampled (u, v, w) coordinates with shape (Ntimes, 2*Nbls, 3). The
+        Baseline coordinates in metres, shape (Ntimes, 2*Nbls, 3). The
         ordering of the Nbls axis matches the ordering of the baselines in
         `vis`.
     redundancy : numpy.ndarray
         Redundancy model containing the number of baselines averaged within
-        a redundant baseline group.
+        a redundant baseline group, shape (Ntimes, 2*Nbls, 1).
     noise : numpy.ndarray or None
         Estimated noise vector with shape (2*Nbls*Nfreqs*Ntimes,). Returned
         as None when `calc_noise` is False.
     uvd : pyuvdata.UVData or None
         Preprocessed UVData object. Returned only if `return_uvd` is True.
+
+    Notes
+    -----
+    This path assumes a common set of baselines at every selected time and
+    unprojected drift-scan geometry. Fully flagged baselines are removed, but
+    individual flagged samples are not masked or assigned zero weight here.
+    The returned UVData data array has been converted to mK sr; its original
+    ``vis_units`` label is not updated. Use the returned vector for inference.
     """
     # Validate the input path before any IO.
     if not isinstance(filepath, Path):
@@ -715,6 +822,33 @@ def uvd_to_vector(
     If `calc_noise` is True, an empirical noise vector is built by differencing
     adjacent even/odd time samples per baseline and frequency, then expanded
     with the same Hermitian ordering as the visibility vector.
+
+    Parameters
+    ----------
+    uvd : pyuvdata.UVData
+        Single-polarisation data with the same ordered time/frequency grid
+        for every baseline. Units are preserved; no conversion is done here.
+    antpairs : sequence of tuple of int
+        Ordered original antenna pairs, without appended reversed copies.
+    pol : str, optional
+        Selected polarisation label; defaults to ``'xx'``.
+    calc_noise : bool, optional
+        Apply the legacy even/odd time-difference estimator; defaults to False.
+        Requires multiple integrations and does not rescale by sqrt(2).
+
+    Returns
+    -------
+    vis_vec : numpy.ndarray
+        Complex vector in time/frequency/baseline order. Within every
+        time/frequency block, the original baselines precede their conjugates.
+        For n_b original baselines, row i = (t*n_freq + f)*(2*n_b) + b.
+    noise_vec : numpy.ndarray or None
+        Difference-based noise estimate in the same order, or None.
+
+    Notes
+    -----
+    Conjugate copies are not independent noise samples. This function neither
+    filters flags nor handles baseline-dependent missing time samples.
     """
     if uvd.Npols > 1:
         raise ValueError(
@@ -785,6 +919,13 @@ def form_pI_vis(uvd, norm=1.0):
         UVData object containing XX and YY polarization visibilities.
     norm : float, optional
         Normalization, ``N``, used in ``pI = N * (XX + YY)``.
+
+    Returns
+    -------
+    pyuvdata.UVData
+        The input object, modified in place to contain pI only when formed
+        from XX and YY. If pI is already present, returns the object unchanged;
+        in that case ``norm`` is not applied and other polarisations are not removed.
     """
     assert isinstance(uvd, UVData), "uvd must be a pyuvdata.UVData object"
 
@@ -815,6 +956,14 @@ def jy_to_ksr(data, freqs, mK=False):
         Frequencies in Hertz.
     mK : bool, optional
         Convert to ``mK sr`` if True, otherwise ``K sr``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Numeric visibility values converted using the Rayleigh--Jeans factor
+        10**(-26) * c**2 / (2*k_B*freqs**2), multiplied by 1,000 for mK sr.
+        Frequency factors broadcast over the leading data axes; a one-dimensional
+        input acquires a leading singleton axis. No beam correction is applied.
     """
     # Normalize frequencies to an astropy Quantity for unit-safe conversion.
     if not isinstance(freqs, Quantity):

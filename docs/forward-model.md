@@ -251,7 +251,7 @@ column. Direct callers should use this vector instead of the former
 `foreground_prior_std_mk` and `n_fg_spatial_modes` constructor arguments.
 The cosmological power-spectrum prior and likelihood algebra are unchanged.
 
-This needs a JAXMG build exposing `gesvd` with `compute_vh=False` and
+The GPU path needs a JAXMG build exposing `gesvd` with `compute_vh=False` and
 `return_status=True`. There is no implicit CPU or approximate-SVD fallback.
 `tests/gpu/run_foreground_svd.py` provides a small native multi-GPU check using
 synthetic tall and wide complex matrices, nonuniform noise and several thresholds.
@@ -264,8 +264,7 @@ The physical model and its construction live together under `bayeseor_jax/model/
 model/
 ├── instrument/
 │   ├── beam.py                 # Analytic and interpolated primary-beam responses
-│   ├── baselines.py            # Sampled baselines, redundancy and antenna pairs
-│   └── noise.py                # Thermal-noise variances and realisations
+│   └── baselines.py            # Sampled baselines, redundancy and antenna pairs
 ├── observation/
 │   └── image_geometry.py       # HEALPix selection and time-dependent directions
 ├── cosmology/
@@ -276,10 +275,18 @@ model/
 └── construction/
     ├── model_builder.py        # Physical input preparation and component writers
     ├── operator_construction.py # CPU construction and saved-component assembly
-    ├── kl_reduction.py         # Distributed KL reduction of a weighted operator
+    ├── kl_reduction.py         # CPU/GPU KL reduction of a weighted operator
     ├── likelihood_products.py  # Noise-weighted Gram matrix and data contractions
     ├── storage.py              # Cache checks, saved arrays and publication
     └── parallel_layout.py      # CPU resources, device meshes and row partitions
+```
+
+Observed data preparation lives separately in `bayeseor_jax/data/`:
+
+```text
+data/
+├── vis.py                     # Visibility readers, preprocessing and vector order
+└── noise.py                   # Noise realisations and covariance diagonals
 ```
 
 The mathematical operators do not manage files or device allocation. The builder
@@ -296,7 +303,7 @@ and numerical behaviour are unchanged.
 The former `build_matricies` package has been removed; direct module imports
 should use the paths above. The old `model.instrument`, `model.noise`,
 `model.cosmology_transforms`, and `model.k_cube` implementations now live in
-`model.instrument.baselines`, `model.instrument.noise`, `model.cosmology.transforms`,
+`model.instrument.baselines`, `data.noise`, `model.cosmology.transforms`,
 and `model.cosmology.power_spectrum`, respectively.
 The former saving methods `BuildMatrices.build_T_21` and `build_T_fg` are now
 named `T_21_build_save` and `T_fg_build_save` to distinguish them from pure
@@ -314,7 +321,7 @@ with the cosmological operator. Neither assembly nor likelihood preparation
 rebuilds a missing component:
 
 ```python
-from bayeseor_jax.model.instrument.noise import build_noise_variance
+from bayeseor_jax.data.noise import build_noise_variance
 from bayeseor_jax.model.construction.storage import save_array
 from bayeseor_jax.model.construction.likelihood_products import (
     save_likelihood_products,

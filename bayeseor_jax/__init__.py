@@ -38,7 +38,7 @@ from .utils import (
     save_numpy_dict,
     write_log_files,
 )
-from .vis import form_pI_vis, get_vis_data, jy_to_ksr, preprocess_uvdata, uvd_to_vector
+from .data import form_pI_vis, get_vis_data, jy_to_ksr, preprocess_uvdata, uvd_to_vector
 
 
 _LAZY_EXPORTS = {

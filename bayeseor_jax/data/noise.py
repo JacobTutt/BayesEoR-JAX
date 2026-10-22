@@ -1,4 +1,16 @@
-"""Noise-model helpers for BayesEoR-JAX."""
+"""Construct thermal-noise realisations and diagonal visibility-noise variances.
+
+``generate_gaussian_noise`` adds a reproducible complex noise realisation to a
+noiseless visibility vector, with baseline redundancy scaling and conjugate
+copies in the same time/frequency/baseline order used by ``data.vis``.
+``build_noise_variance`` instead returns the diagonal covariance used to weight
+the forward model and likelihood; it does not draw noise or alter the data.
+
+Noise amplitudes use the visibility units (normally mK sr), and covariance
+entries are E[|n|**2], not the variance of either real component alone. These
+helpers accept arrays, do not read or write files, and do not construct dense
+noise covariances or instrumental beam responses.
+"""
 
 from __future__ import annotations
 

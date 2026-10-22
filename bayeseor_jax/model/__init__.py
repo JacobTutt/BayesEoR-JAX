@@ -28,7 +28,6 @@ from .construction.operator_construction import (
 from .construction.kl_reduction import T_fg_svd_build_save
 from .cosmology.transforms import Cosmology
 from .instrument.baselines import InstrumentModel
-from .instrument.noise import generate_gaussian_noise
 
 __all__ = [
     "T_21",
@@ -55,5 +54,4 @@ __all__ = [
     "build_T_21_core",
     "build_T_fg_core",
     "build_transverse_fourier_operator",
-    "generate_gaussian_noise",
 ]

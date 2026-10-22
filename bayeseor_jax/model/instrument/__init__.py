@@ -1,1 +1,1 @@
-"""Primary beams, sampled baselines, and instrumental thermal noise."""
+"""Primary-beam responses and sampled baseline geometry."""

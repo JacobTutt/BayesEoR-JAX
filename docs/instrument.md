@@ -6,10 +6,20 @@ The instrument model describes how sky emission is sampled into interferometric 
 
 ## Visibility Inputs
 
-`data_path` can point to either:
+Visibility ingestion and noise preparation live in `bayeseor_jax/data/`:
 
-- A pyuvdata-compatible visibility file, such as `.uvh5`, `.uvfits`, or `.ms`.
-- A preprocessed NumPy-compatible file produced by the BayesEoR-JAX preprocessing path.
+- `vis.py`: loading, selection, unit/polarisation conversion and vector ordering.
+- `noise.py`: simulated noise realisations and diagonal noise variances.
+
+`get_vis_data` accepts these lowercase `data_path` suffixes:
+
+- `.uvh5` or `.uvfits` files, or `.ms` Measurement Set directories, read through
+  pyuvdata with its corresponding reader dependencies installed. Raw inputs
+  must be calibrated in Jy or K sr and are converted to mK sr.
+- `.npy` visibility arrays, either plain arrays or trusted BayesEoR dictionary
+  payloads with a `data` entry. These must already be in mK sr and require
+  `inst_model`, `n_freq`, `f0_mhz`, `df_mhz`, `n_t`, `d_t` and a `jd_min` or
+  `jd_center`. Stored dictionary metadata do not replace these arguments.
 
 Raw pyuvdata ingestion supports selection and preprocessing controls including:
 
@@ -21,7 +31,18 @@ Raw pyuvdata ingestion supports selection and preprocessing controls including:
 - `redundant_avg`
 - `calc_noise`
 
-The visibility vector follows the package's internal ordering after preprocessing. When preparing external preprocessed inputs, record baseline, frequency, time, conjugation, and polarization conventions explicitly.
+Vectors are flattened with time slowest, frequency next and baseline fastest.
+Each time/frequency block contains the original baselines followed by conjugate
+copies at reversed baselines. These copies are not independent observations.
+NumPy inputs bypass preprocessing and must already follow this convention.
+Fully flagged raw baselines are removed; partial flags are not propagated into
+per-visibility likelihood weights by this loader.
+
+Use `from bayeseor_jax.data import get_vis_data, build_noise_variance` for data
+preparation. Existing top-level visibility helpers remain available. Direct
+imports from `bayeseor_jax.vis` and `bayeseor_jax.model.instrument.noise` should
+now use `bayeseor_jax.data.vis` and `bayeseor_jax.data.noise`, respectively;
+noise helpers are no longer exported from `bayeseor_jax.model`.
 
 ## Frequency And Time
 
@@ -90,6 +111,11 @@ Noise can be supplied or generated through:
 - `calc_noise`: empirical noise estimate from even/odd differencing.
 
 The marginalised likelihood uses noise weighting through `N^{-1}`. Document whether a run used simulated Gaussian noise, precomputed noise, or an empirical noise estimate.
+
+Supplied or estimated noise is returned alongside the existing data, not added
+again. Without either, `get_vis_data` treats its input as noiseless and adds a
+synthetic realisation using `sigma`. `build_noise_variance` constructs covariance
+diagonal entries separately and never generates or adds noise.
 
 ## Instrument Model Files
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bayeseor_jax.model.instrument.noise import build_noise_variance
+from bayeseor_jax.data.noise import build_noise_variance
 
 
 def test_variance_matches_time_frequency_baseline_order():

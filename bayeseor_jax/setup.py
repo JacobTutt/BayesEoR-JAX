@@ -18,7 +18,7 @@ from .model import (
 from .inference.likelihood_marg import MarginalisedLikelihood
 from .inference.phi import DEFAULT_FOREGROUND_PRIOR_STD_MK, PhiInverse
 from .inference.prior import Prior
-from .model.instrument.noise import build_noise_variance
+from .data.noise import build_noise_variance
 from .model.construction.operator_construction import assemble_joint_operator
 from .model.construction.likelihood_products import save_likelihood_products
 from .model.construction.storage import ensure_cached, save_array
@@ -35,7 +35,7 @@ from .utils import (
     write_analysis_metadata,
     write_log_files,
 )
-from .vis import get_vis_data
+from .data.vis import get_vis_data
 
 jax.config.update("jax_enable_x64", True)
 
