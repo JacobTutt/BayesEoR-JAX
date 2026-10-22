@@ -66,9 +66,39 @@ and not a joint posterior density. All are lists indexed by run.
 
 The physical `k-vals.txt` file is required; missing scales are not replaced with
 bin indices. For comparisons, pass several directories and matching `labels`.
-Power-spectrum plots can compare different k grids; posterior overlays require
-identical grids. An optional `expected_dmps` reference is given in mK², or
+Power-spectrum plots can compare different k grids. Posterior overlays accept
+grids that agree to numerical precision (`rtol=1e-10`), or explicitly confirmed
+corresponding bins as described below. An optional `expected_dmps` reference is given in mK², or
 `expected_ps` in mK² Mpc³ and converted separately on each grid.
+
+### Separate setup metadata and field-of-view sweeps
+
+Archived Isambard sweeps place chains in `model_eor_foregrounds/multinest/`
+and the corresponding priors and k metadata in `setup/`. Read them directly
+without copying or modifying either directory:
+
+```python
+dc = DataContainer(
+    ["run_10/model_eor_foregrounds/multinest", "run_25/model_eor_foregrounds/multinest"],
+    metadata_dirs=["run_10/setup", "run_25/setup"],
+    labels=["10 degrees", "25 degrees"],
+    bins_correspond=True,
+)
+```
+
+`metadata_dirs` accepts one shared directory or a directory per run. When omitted,
+metadata is read beside each chain, as before. The example's `run_output_analysis`
+also accepts `metadata_dir`; the current inference workflow supplies its setup
+directory directly, rather than duplicating metadata into the sampler directory.
+
+Set `bins_correspond=True` only after verifying that bin indices represent the
+same intended spherical shells across runs. Changing the cosmological Fourier
+grid can slightly change the mean k of each shell without changing that
+correspondence. The flag requires equal bin counts but does not itself establish
+physical equivalence, rebin samples or change the stored k values. Overlay panels
+then show approximate k labels using the first run's means; the spectrum panel
+still uses each run's own k values. Different numbers of bins remain unsupported
+in posterior overlays.
 
 Plotting lives in `analyze/plotting.py` and returns Matplotlib figures and axes:
 
@@ -85,9 +115,23 @@ fig, axes = plot_posteriors(dc, plot_priors=True)
 fig, (power_ax, posterior_axes) = plot_power_spectra_and_posteriors(dc)
 ```
 
+The defaults follow the compact publication layout: a seven-inch-wide combined
+figure, serif typography, a consistent colour/marker palette, small display-only
+offsets between power-spectrum constraints, and tightly stacked posterior panels
+with a shared logarithmic axis. The combined legend sits in the lower right of
+the spectrum panel. Styling is scoped to these plots and does not change global
+Matplotlib settings; Times New Roman falls back to installed serif fonts.
+
 Prior shading requires `args.json`; power-spectrum shading also requires
 `k-vals-bins.txt`. Posterior histograms use shared log-power edges across runs,
-with weighted densities per dex. Supply `uplim_inds` to the power-spectrum or
+spanning the displayed prior support and all positive-weight samples. By default
+each curve is **peak-normalised**, for comparing shapes as in the publication
+figures; its height is not a probability density. Pass `normalisation="density"`
+to the posterior or combined plotting function for unit-integral densities per
+dex. Neither choice changes weighted medians, intervals or upper limits. No
+run-specific manual curve scaling is applied.
+
+Supply `uplim_inds` to the power-spectrum or
 combined plot to display selected bins as upper limits: either a shared boolean
 mask or one mask per run. The reader does not automatically classify detections.
 
