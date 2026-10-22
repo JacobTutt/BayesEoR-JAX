@@ -4,6 +4,12 @@
 
 BayesEoR-JAX uses MultiNest with the analytically marginalised likelihood to infer power-spectrum parameters and evaluate Bayesian evidence.
 
+The sampler runner and conditional MAP solver live in `inference/run_ns.py` and
+`inference/maxaposteriori.py`, alongside the priors and likelihood. They are
+available from `bayeseor_jax.inference`; the existing top-level imports from
+`bayeseor_jax` remain supported. Direct imports from the former root-level modules
+must use these new paths.
+
 ## Marginalised Likelihood
 
 The latent EoR and foreground coefficients are analytically marginalised. The sampler explores power-spectrum parameters, `theta`, which define the EoR prior covariance.

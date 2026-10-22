@@ -27,8 +27,8 @@ def test_multinest_runner_needs_no_removed_dependencies(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pymultinest.solve", SimpleNamespace(solve=solve))
     monkeypatch.setitem(sys.modules, "bayeseor_jax.setup", SimpleNamespace(SetupResult=object))
     spec = importlib.util.spec_from_file_location(
-        "bayeseor_jax._multinest_under_test",
-        Path(__file__).parents[1] / "bayeseor_jax/run_ns.py",
+        "bayeseor_jax.inference._multinest_under_test",
+        Path(__file__).parents[1] / "bayeseor_jax/inference/run_ns.py",
     )
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)

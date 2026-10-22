@@ -4,6 +4,29 @@ def test_package_import_does_not_require_optional_solver_or_sampler():
     assert bayeseor_jax.BuildMatrices is not None
 
 
+def test_inference_layout_preserves_public_exports():
+    import subprocess
+    import sys
+
+    # Isolate the lazy-import caches and avoid requiring native GPU/sampler libraries.
+    subprocess.run([sys.executable, "-c", """
+import sys
+from types import SimpleNamespace
+import bayeseor_jax as api
+from bayeseor_jax import inference
+sys.modules['jaxmg'] = SimpleNamespace()
+sys.modules['pymultinest.solve'] = SimpleNamespace(solve=lambda **kwargs: None)
+sys.modules['bayeseor_jax.setup'] = SimpleNamespace(SetupResult=object)
+from bayeseor_jax.inference.run_ns import run_multinest, run_nestedsampling
+from bayeseor_jax.inference.maxaposteriori import MaximumAPosteriori
+assert run_nestedsampling is run_multinest
+for name in ('run_multinest', 'run_nestedsampling', 'MaximumAPosteriori'):
+    assert getattr(api, name) is getattr(inference, name)
+    assert getattr(inference, name) is globals()[name]
+    assert name in inference.__all__
+"""], check=True)
+
+
 def test_full_likelihood_and_hmc_are_not_exported():
     import bayeseor_jax
     from bayeseor_jax import inference

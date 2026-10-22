@@ -11,8 +11,8 @@ from typing import Any
 import numpy as np
 from pymultinest.solve import solve
 
-from .setup import SetupResult
-from .utils import (
+from ..setup import SetupResult
+from ..utils import (
     MultiNestPathManager,
     _cleanup_multinest_path,
     _prepare_multinest_path,

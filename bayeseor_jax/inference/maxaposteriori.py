@@ -12,10 +12,10 @@ import jaxmg
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
-from .model.construction.parallel_layout import build_solver_mesh
-from .inference.phi import PhiInverse
-from .inference.prior import linear_uniform_log_jacobian, theta_power_to_linear
-from .utils import load_sharded_npy
+from ..model.construction.parallel_layout import build_solver_mesh
+from .phi import PhiInverse
+from .prior import linear_uniform_log_jacobian, theta_power_to_linear
+from ..utils import load_sharded_npy
 
 
 class MaximumAPosteriori:

@@ -48,9 +48,9 @@ _LAZY_EXPORTS = {
     "build_kbin_index_per_voxel": (".inference", "build_kbin_index_per_voxel"),
     "compute_power_norm_per_bin": (".inference", "compute_power_norm_per_bin"),
     "theta_power_to_linear": (".inference", "theta_power_to_linear"),
-    "MaximumAPosteriori": (".maxaposteriori", "MaximumAPosteriori"),
-    "run_multinest": (".run_ns", "run_multinest"),
-    "run_nestedsampling": (".run_ns", "run_nestedsampling"),
+    "MaximumAPosteriori": (".inference", "MaximumAPosteriori"),
+    "run_multinest": (".inference", "run_multinest"),
+    "run_nestedsampling": (".inference", "run_nestedsampling"),
     "SetupResult": (".setup", "SetupResult"),
     "run_setup": (".setup", "run_setup"),
 }

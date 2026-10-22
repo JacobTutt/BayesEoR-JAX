@@ -136,7 +136,7 @@ def run_setup(
     """
     Build all objects required to run posterior sampling in BayesEoR-JAX.
 
-    This is the main setup entry point used by :mod:`bayeseor_jax.run_ns`. It:
+    This is the main setup entry point used by :mod:`bayeseor_jax.inference.run_ns`. It:
 
     1. Loads or preprocesses visibilities/noise metadata.
     2. Builds k-bin metadata and power-spectrum normalization inputs.
