@@ -27,8 +27,8 @@ class MarginalisedLikelihood:
 
     ``T^H N^{-1} T``, ``T^H N^{-1} d``, and ``d^H N^{-1} d``.
 
-    CPU inference uses a standard JAX Cholesky factorisation; GPU inference
-    uses JAXMG. Both evaluate the same Gaussian target. The
+    Single-device inference uses a standard JAX Cholesky factorisation on CPU
+    or GPU; multi-GPU inference uses JAXMG. Both evaluate the same Gaussian target. The
     large dense matrix is kept row-sharded over a 1D device mesh, while the
     right-hand side vector and scalar normalization term are replicated. Each
     likelihood call builds the diagonal prior precision ``Phi^{-1}``, forms
@@ -86,12 +86,12 @@ class MarginalisedLikelihood:
         - ``d_ninv_d.npy``
         and ignores the explicit array arguments.
     jaxmg_tile_size : int, optional
-        Tile size forwarded to ``jaxmg.potrs`` on GPU; ignored on CPU.
+        Tile size forwarded to ``jaxmg.potrs`` for multi-GPU inference;
+        ignored for single-device inference.
     mesh : jax.sharding.Mesh or None, optional
         Optional pre-built 1D solver mesh. When omitted, the likelihood uses
-        all visible devices via ``build_solver_mesh()``. On a single GPU this
-        still constructs a mesh of size one, so the same JAXMg solver path is
-        used on both 1-GPU and multi-GPU runs.
+        all visible devices via ``build_solver_mesh()``. A single-device mesh
+        uses native JAX on CPU or GPU; a multi-GPU mesh uses JAXMG.
     """
 
     def __init__(

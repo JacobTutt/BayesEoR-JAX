@@ -65,7 +65,7 @@ where:
 - `Phi^{-1}(theta)` is the latent prior precision.
 - `T^H N^{-1} d` and `d^H N^{-1} d` are also cached.
 
-Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. The laptop installation uses standard JAX Cholesky on CPU; the HPC installation uses the downstream JAXMG solver on GPU. Both use the same likelihood and conditional MAP expressions. GPU libraries are imported only for GPU solves.
+Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. A single CPU or GPU uses standard JAX Cholesky; a multi-GPU solver mesh uses JAXMG. Both use the same likelihood and conditional MAP expressions. JAXMG is imported by the solver only for multi-GPU inference. By default the mesh includes all visible devices; restrict GPU visibility to one device (for example, `CUDA_VISIBLE_DEVICES=0`) to run native JAX inference on one GPU.
 
 ### Complex storage and the factors of one half
 

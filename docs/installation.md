@@ -39,8 +39,8 @@ conda activate bayeseor-hpc
 This adds CUDA 12 JAX and the architecture-matched JAXMG wheel: the CSD3 build
 for Linux x86_64 or the Isambard build for Linux aarch64. These are **Python 3.11,
 site-built wheels**, not universal cluster binaries. The matching NVIDIA driver
-and native runtime libraries must be available. JAXMG is used for both
-single-GPU and distributed GPU inference.
+and native runtime libraries must be available. Likelihood and MAP solves use
+native JAX on a single CPU or GPU and JAXMG for distributed GPU inference.
 
 The existing `[csd3]` and `[isambard]` extras remain supported; `[hpc]`
 selects between them by architecture. GPU extras are not for macOS or Windows.
@@ -53,8 +53,10 @@ then install BayesEoR-JAX and CUDA JAX without a wheel extra:
 python -m pip install -e . "jax[cuda12]"
 ```
 
-JAXMG must expose `potrs(..., return_logdet=True)` for inference and `gesvd`
-for distributed KL reduction. A package with the same name is not necessarily
+Single-GPU likelihood and MAP solves need only CUDA JAX, not JAXMG. GPU KL
+construction still uses JAXMG, independently of this inference solver choice.
+JAXMG must expose `potrs(..., return_logdet=True)` for multi-GPU inference and `gesvd`
+for GPU KL reduction. A package with the same name is not necessarily
 API-compatible. See [CSD3](csd3.md) for site/job examples.
 
 ## Verify the installation

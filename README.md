@@ -4,14 +4,14 @@
 
 BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
 
-The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. Standard JAX supports local CPU inference; the optional HPC installation uses JAXMG for GPU linear algebra.
+The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. Standard JAX supports single-device CPU or GPU inference; the optional HPC installation uses JAXMG for distributed inference and GPU KL reduction.
 
 ## What This Version Adds
 
 BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is a downstream implementation focused on:
 
 - JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
-- A marginalised likelihood with CPU Cholesky and optional JAXMG GPU solves and log determinants.
+- A marginalised likelihood with native JAX Cholesky on one CPU or GPU and JAXMG solves and log determinants across GPUs.
 - MultiNest for nested sampling, posterior recovery and Bayesian-evidence evaluation.
 - A spherical image-domain foreground model propagated through the full beam and fringe response.
 - A configuration-first workflow using YAML files and `jsonargparse`.

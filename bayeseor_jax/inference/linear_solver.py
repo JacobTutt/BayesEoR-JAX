@@ -1,4 +1,4 @@
-"""Choose CPU or GPU factorisation without changing the Gaussian target."""
+"""Choose native JAX or distributed GPU solves without changing the Gaussian target."""
 
 import jax.numpy as jnp
 from jax.scipy.linalg import cho_solve
@@ -11,9 +11,9 @@ def build_gaussian_solver(mesh, tile_size=256):
     Parameters
     ----------
     mesh : jax.sharding.Mesh
-        Single CPU device for local inference, or the existing GPU solver mesh.
+        One CPU or GPU device for native JAX, or multiple GPUs for JAXMG.
     tile_size : int, optional
-        JAXMG factorisation tile width; ignored on CPU.
+        JAXMG factorisation tile width; ignored for single-device inference.
 
     Returns
     -------
@@ -23,9 +23,11 @@ def build_gaussian_solver(mesh, tile_size=256):
         The callable can be used inside the JIT-compiled likelihood and MAP.
     """
     platforms = {device.platform for device in mesh.devices.flat}
-    if platforms == {"cpu"}:
-        if mesh.size != 1:
-            raise ValueError("CPU inference requires a single-device solver mesh")
+    if platforms not in ({"cpu"}, {"gpu"}):
+        raise ValueError("Inference supports a CPU device or a GPU solver mesh")
+    if platforms == {"cpu"} and mesh.size != 1:
+        raise ValueError("CPU inference requires a single-device solver mesh")
+    if mesh.size == 1:
 
         def solve(matrix, rhs):
             # Reuse one Cholesky factor for both the solve and determinant.
@@ -36,14 +38,12 @@ def build_gaussian_solver(mesh, tile_size=256):
 
         return solve
 
-    if platforms != {"gpu"}:
-        raise ValueError("Inference supports a CPU device or a GPU solver mesh")
     try:
         import jaxmg
     except ImportError as exc:
         raise ImportError(
-            "GPU inference requires JAXMG. Use the HPC installation described "
-            "in docs/installation.md, or set JAX_PLATFORMS=cpu for local inference."
+            "Multi-GPU inference requires JAXMG. Use the HPC installation described "
+            "in docs/installation.md, or select a single device for native JAX inference."
         ) from exc
 
     def solve(matrix, rhs):

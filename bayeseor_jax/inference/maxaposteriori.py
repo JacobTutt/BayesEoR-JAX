@@ -38,7 +38,7 @@ class MaximumAPosteriori:
     stored normal matrix is row-sharded over a 1D solver mesh, while the
     right-hand side and scalar normalization term are replicated. Each call
     builds the diagonal prior precision implied by ``theta`` and uses
-    a JAX Cholesky factorisation on CPU or ``jaxmg.potrs`` on GPU to solve
+    a JAX Cholesky factorisation on one CPU or GPU, or ``jaxmg.potrs`` across GPUs, to solve
     the system and return the MAP coefficient vector.
 
     Parameters
@@ -69,7 +69,8 @@ class MaximumAPosteriori:
     n_power_params : int
         Number of power-spectrum parameters in ``theta``.
     jaxmg_tile_size : int, optional
-        Tile size forwarded to ``jaxmg.potrs`` on GPU; ignored on CPU.
+        Tile size forwarded to ``jaxmg.potrs`` for multi-GPU inference;
+        ignored for single-device inference.
     mesh : jax.sharding.Mesh or None, optional
         Optional pre-built 1D solver mesh. When omitted, all visible devices
         are used via ``build_solver_mesh()``.
