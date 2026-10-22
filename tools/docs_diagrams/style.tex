@@ -1,0 +1,50 @@
+\documentclass[tikz,border=1pt]{standalone}
+\usepackage{newtxtext,newtxmath}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usetikzlibrary{arrows.meta,calc}
+\graphicspath{{plots/}}
+
+% ---------------------------------------------------------------- colours
+\definecolor{eorc}{HTML}{1E3A6E}   % 21-cm signal (dark blue)
+\definecolor{fgc}{HTML}{A3182F}    % foregrounds (crimson red)
+\definecolor{instc}{HTML}{4A5568}  % instrument / data
+\definecolor{infc}{HTML}{4A5568}   % inference (same neutral grey as instrument/data)
+
+% ------------------------------------------------------------------ styles
+\tikzset{
+  panel/.style={draw=#1, fill=white, line width=0.8pt,
+                anchor=north west, inner sep=0pt},
+  stage/.style={draw=instc, fill=white, line width=0.6pt,
+                anchor=north west, inner sep=0pt,
+                minimum width=2.91cm, minimum height=2.45cm},
+  ttl/.style={font=\footnotesize\bfseries, align=center},
+  lbl/.style={font=\footnotesize, align=center},
+  small/.style={font=\scriptsize, text=black!70, align=center},
+  flow/.style={-{Stealth[length=2.4mm,width=2mm]}, line width=1.1pt, draw=#1},
+  flow/.default=instc,
+  op/.style={font=\small, text=#1},
+  op/.default=black,
+  thumb/.style={inner sep=0pt},
+}
+\newcommand{\bm}[1]{\boldsymbol{#1}}
+% \eorcube{x}{y}{size}{file prefix}: cube with front/top/side face images,
+% lower-left corner of the front face at (x,y)
+\newcommand{\eorcube}[4]{%
+  \pgfmathsetmacro{\a}{#3}\pgfmathsetmacro{\dx}{0.38*#3}\pgfmathsetmacro{\dy}{0.265*#3}%
+  \begin{scope}[shift={(#1,#2)}]
+    \node[thumb, anchor=south west] at (0,0)
+         {\includegraphics[width=\a cm,height=\a cm]{#4_front.png}};
+    \begin{scope}[cm={1,0,\dx/\a,\dy/\a,(0,\a)}]
+      \node[thumb, anchor=south west, transform shape] at (0,0)
+           {\includegraphics[width=\a cm,height=\a cm]{#4_top.png}};
+    \end{scope}
+    \begin{scope}[cm={\dx/\a,\dy/\a,0,1,(\a,0)}]
+      \node[thumb, anchor=south west, transform shape] at (0,0)
+           {\includegraphics[width=\a cm,height=\a cm]{#4_side.png}};
+    \end{scope}
+    \draw[white, line width=0.4pt, line join=round]
+         (0,0) -- (\a,0) -- (\a,\a) -- (0,\a) -- cycle
+         (0,\a) -- (\dx,\a+\dy) -- (\a+\dx,\a+\dy) -- (\a,\a)
+         (\a+\dx,\a+\dy) -- (\a+\dx,\dy) -- (\a,0);
+  \end{scope}}
