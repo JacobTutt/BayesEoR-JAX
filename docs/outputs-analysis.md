@@ -102,6 +102,10 @@ in posterior overlays.
 
 Plotting lives in `analyze/plotting.py` and returns Matplotlib figures and axes:
 
+Fonts, tick styling, colours and markers are defined in the packaged
+`analyze/bayeseor.mplstyle` file. The plotting helpers apply it locally without
+changing Matplotlib's global defaults.
+
 ```python
 from bayeseor_jax.analyze import (
     plot_power_spectra, plot_posteriors, plot_power_spectra_and_posteriors,

@@ -1,0 +1,17 @@
+# Shared appearance for BayesEoR diagnostic plots.
+font.family: serif
+font.serif: Times New Roman, STIXGeneral, DejaVu Serif
+mathtext.fontset: stix
+font.size: 8.8
+axes.labelsize: 9.9
+legend.fontsize: 8.25
+xtick.labelsize: 8.8
+ytick.labelsize: 8.8
+axes.linewidth: 0.8
+xtick.direction: out
+ytick.direction: out
+xtick.top: False
+ytick.right: False
+savefig.dpi: 300
+# Hex colours omit the hash because it starts a comment in style files.
+axes.prop_cycle: cycler('color', ['153b5c', '2b83ba', '6f5596', 'd6604d', '8b1e2d']) + cycler('marker', ['s', '^', 'D', 'v', 'P'])

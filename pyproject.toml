@@ -39,3 +39,6 @@ isambard = [
 
 [tool.setuptools.packages.find]
 include = ["bayeseor_jax*"]
+
+[tool.setuptools.package-data]
+"bayeseor_jax.analyze" = ["*.mplstyle"]

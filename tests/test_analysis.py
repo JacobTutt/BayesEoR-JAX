@@ -254,8 +254,24 @@ def test_publication_layout_and_peak_normalisation(tmp_path):
         assert histogram.get_data().values.max() == 1.
         np.testing.assert_allclose(ax.get_ylim(), [0., 1.05])
         np.testing.assert_allclose(ax.get_xlim(), axes[0].get_xlim())
-    for key in ("font.family", "font.size", "mathtext.fontset", "axes.linewidth"):
+    for key in ("font.family", "font.size", "mathtext.fontset", "axes.linewidth", "axes.prop_cycle"):
         assert matplotlib.rcParams[key] == before[key]
     fig.canvas.draw()
     with pytest.raises(ValueError, match="normalisation"):
         plot_posteriors(data, normalisation="unknown")
+
+
+def test_packaged_style_preserves_run_colours_and_markers(tmp_path):
+    data = DataContainer([write_run(tmp_path / str(i)) for i in range(6)])
+    fig, (power, axes) = plot_power_spectra_and_posteriors(data)
+    colours = ["#153b5c", "#2b83ba", "#6f5596", "#d6604d", "#8b1e2d", "#153b5c"]
+    markers = ["s", "^", "D", "v", "P", "s"]
+    for container, colour, marker in zip(power.containers, colours, markers):
+        line = container.lines[0]
+        assert matplotlib.colors.to_hex(line.get_color()) == colour
+        assert line.get_marker() == marker
+    for patch, colour in zip(axes[0].patches, colours):
+        assert matplotlib.colors.to_hex(patch.get_edgecolor()) == colour
+    assert power.xaxis.label.get_fontsize() == 9.9
+    assert power.xaxis.label.get_fontfamily() == ["serif"]
+    fig.canvas.draw()

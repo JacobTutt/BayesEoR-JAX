@@ -1,19 +1,13 @@
 """Diagnostic plots of weighted cosmological power-spectrum constraints."""
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 from matplotlib import style
 import numpy as np
 
 
-_STYLE = {
-    "font.family": "serif", "font.serif": ["Times New Roman", "STIXGeneral", "DejaVu Serif"],
-    "mathtext.fontset": "stix", "font.size": 8.8, "axes.labelsize": 9.9,
-    "legend.fontsize": 8.25, "xtick.labelsize": 8.8, "ytick.labelsize": 8.8,
-    "axes.linewidth": 0.8, "xtick.direction": "out", "ytick.direction": "out",
-    "xtick.top": False, "ytick.right": False, "savefig.dpi": 300,
-}
-_COLORS = ("#153b5c", "#2b83ba", "#6f5596", "#d6604d", "#8b1e2d")
-_MARKERS = ("s", "^", "D", "v", "P")
+_STYLE_PATH = Path(__file__).with_name("bayeseor.mplstyle")
 
 
 def _prior_bounds(data, index):
@@ -28,7 +22,7 @@ def _prior_bounds(data, index):
     return bounds
 
 
-@style.context(_STYLE)
+@style.context(_STYLE_PATH)
 def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
                       plot_priors=False, colors=None, ax=None):
     """Plot Δ²(k) medians, credible intervals and selected upper limits.
@@ -66,9 +60,11 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     offsets = 10.0**np.linspace(-.025, .025, data.Ndirs) if data.Ndirs > 1 else [1.]
     shaded = []
     reference_labelled = False
+    cycle = list(plt.rcParams["axes.prop_cycle"])
     for i, k in enumerate(data.k_vals):
-        color = colors[i] if colors is not None else _COLORS[i % len(_COLORS)]
-        marker = _MARKERS[i % len(_MARKERS)]
+        properties = cycle[i % len(cycle)]
+        color = colors[i] if colors is not None else properties["color"]
+        marker = properties["marker"]
         plotted_k = k * offsets[i]
         upper = np.zeros(k.size, dtype=bool)
         if uplim_inds is not None:
@@ -108,7 +104,7 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     return ax.figure, ax
 
 
-@style.context(_STYLE)
+@style.context(_STYLE_PATH)
 def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
                     normalisation="peak"):
     """Plot compact, stacked marginal posteriors on a shared logarithmic axis.
@@ -155,6 +151,7 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
         raise ValueError("Supply one axis per k bin, all in the same figure")
     priors = [_prior_bounds(data, i) for i in range(data.Ndirs)] if plot_priors else []
     all_edges = []
+    cycle = list(plt.rcParams["axes.prop_cycle"])
     for column, ax in enumerate(axes):
         # Shared edges make histogram heights comparable between different runs.
         support = np.concatenate([s[w > 0, column] for s, w in zip(data.samples, data.weights)])
@@ -164,7 +161,7 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
         all_edges.extend([edges[0], edges[-1]])
         shaded = []
         for i, samples in enumerate(data.samples):
-            color = colors[i] if colors is not None else _COLORS[i % len(_COLORS)]
+            color = colors[i] if colors is not None else cycle[i % len(cycle)]["color"]
             density, _ = np.histogram(samples[:, column], bins=edges, weights=data.weights[i], density=True)
             height = density / density.max() if normalisation == "peak" else density
             ax.stairs(height, 10.0**edges, color=color, linewidth=1.15, label=data.labels[i])
@@ -196,7 +193,7 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
     return axes[0].figure, axes
 
 
-@style.context(_STYLE)
+@style.context(_STYLE_PATH)
 def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None,
                                     plot_priors=False, colors=None, bins=31,
                                     normalisation="peak"):
