@@ -12,11 +12,10 @@ from bayeseor_jax.utils import save_numpy_dict
 def test_data_exports_preserve_top_level_visibility_helpers():
     import bayeseor_jax as api
     from bayeseor_jax import data
-    from bayeseor_jax.data.noise import build_noise_variance, generate_gaussian_noise
+    from bayeseor_jax.data.noise import generate_gaussian_noise
 
     for name in ("get_vis_data", "preprocess_uvdata", "uvd_to_vector", "form_pI_vis", "jy_to_ksr"):
         assert getattr(api, name) is getattr(data, name) is getattr(vis, name)
-    assert data.build_noise_variance is build_noise_variance
     assert data.generate_gaussian_noise is generate_gaussian_noise
 
 

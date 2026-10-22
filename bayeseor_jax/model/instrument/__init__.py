@@ -1,1 +1,1 @@
-"""Primary-beam responses and sampled baseline geometry."""
+"""Primary-beam responses, sampled baseline geometry, and noise covariance."""

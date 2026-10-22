@@ -9,7 +9,10 @@ The instrument model describes how sky emission is sampled into interferometric 
 Visibility ingestion and noise preparation live in `bayeseor_jax/data/`:
 
 - `vis.py`: loading, selection, unit/polarisation conversion and vector ordering.
-- `noise.py`: simulated noise realisations and diagonal noise variances.
+- `noise.py`: simulated noise realisations.
+
+The diagonal noise covariance used by the model and likelihood is defined
+separately in `bayeseor_jax/model/instrument/noise.py`.
 
 `get_vis_data` accepts these lowercase `data_path` suffixes:
 
@@ -38,11 +41,10 @@ NumPy inputs bypass preprocessing and must already follow this convention.
 Fully flagged raw baselines are removed; partial flags are not propagated into
 per-visibility likelihood weights by this loader.
 
-Use `from bayeseor_jax.data import get_vis_data, build_noise_variance` for data
-preparation. Existing top-level visibility helpers remain available. Direct
-imports from `bayeseor_jax.vis` and `bayeseor_jax.model.instrument.noise` should
-now use `bayeseor_jax.data.vis` and `bayeseor_jax.data.noise`, respectively;
-noise helpers are no longer exported from `bayeseor_jax.model`.
+Use `from bayeseor_jax.data import get_vis_data, generate_gaussian_noise` for data
+preparation and `from bayeseor_jax.model.instrument.noise import build_noise_variance`
+for likelihood weights. Existing top-level visibility helpers remain available;
+direct imports from `bayeseor_jax.vis` should now use `bayeseor_jax.data.vis`.
 
 ## Frequency And Time
 

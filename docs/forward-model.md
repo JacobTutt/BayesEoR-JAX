@@ -264,7 +264,8 @@ The physical model and its construction live together under `bayeseor_jax/model/
 model/
 ├── instrument/
 │   ├── beam.py                 # Analytic and interpolated primary-beam responses
-│   └── baselines.py            # Sampled baselines, redundancy and antenna pairs
+│   ├── baselines.py            # Sampled baselines, redundancy and antenna pairs
+│   └── noise.py                # Diagonal visibility-noise covariance
 ├── observation/
 │   └── image_geometry.py       # HEALPix selection and time-dependent directions
 ├── cosmology/
@@ -286,7 +287,7 @@ Observed data preparation lives separately in `bayeseor_jax/data/`:
 ```text
 data/
 ├── vis.py                     # Visibility readers, preprocessing and vector order
-└── noise.py                   # Noise realisations and covariance diagonals
+└── noise.py                   # Simulated noise realisations
 ```
 
 The mathematical operators do not manage files or device allocation. The builder
@@ -305,6 +306,8 @@ should use the paths above. The old `model.instrument`, `model.noise`,
 `model.cosmology_transforms`, and `model.k_cube` implementations now live in
 `model.instrument.baselines`, `data.noise`, `model.cosmology.transforms`,
 and `model.cosmology.power_spectrum`, respectively.
+Noise generation belongs to `data.noise`; the deterministic covariance diagonal
+used by the likelihood is prepared by `model.instrument.noise.build_noise_variance`.
 The former saving methods `BuildMatrices.build_T_21` and `build_T_fg` are now
 named `T_21_build_save` and `T_fg_build_save` to distinguish them from pure
 operator evaluation. `BuildMatrices` now prepares physical inputs and exposes
@@ -321,7 +324,7 @@ with the cosmological operator. Neither assembly nor likelihood preparation
 rebuilds a missing component:
 
 ```python
-from bayeseor_jax.data.noise import build_noise_variance
+from bayeseor_jax.model.instrument.noise import build_noise_variance
 from bayeseor_jax.model.construction.storage import save_array
 from bayeseor_jax.model.construction.likelihood_products import (
     save_likelihood_products,
