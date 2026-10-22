@@ -22,6 +22,73 @@ where:
 
 Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. BayesEoR-JAX uses JAX and the downstream JAXMg branch for this path.
 
+### Complex storage and the factors of one half
+
+The visibility loader appends the conjugate of each measured visibility, together
+with its reversed baseline. Thus `d = (v, v.conj())`, up to row ordering, has
+`N_d = 2*m` complex entries but only `m` independent complex measurements.
+Noise variance means `E[abs(n)**2]`; each independent real or imaginary component
+has half that variance. Conjugate rows carry the same noise variance.
+
+Consequently, `d^H N^{-1} d` counts each independent measurement twice. The
+correct Gaussian exponent is `-0.5*d^H N^{-1} d`, not `-d^H N^{-1} d`.
+Complex storage does not make the conjugate entries independent.
+
+The foreground brightness coefficients are real; cosmological Fourier partners
+obey `a(-k) = a(k).conj()` with equal prior variances. Writing the calculation in
+independent real coordinates gives the same marginalised target:
+
+```text
+log L = -0.5 * (log|Sigma| + log|Phi|
+               + d^H N^{-1} d - dbar^H Sigma^{-1} dbar)
+        -0.5 * (log|N| + N_d*log(pi))
+```
+
+Here the density is with respect to the real and imaginary components of the
+`m` independent visibilities. KL reduction preserves this result through the
+induced visibility covariance; it does not turn the latent sky into an
+independent proper-complex field. Supplying independent complex observations
+without their conjugate counterparts requires a different formulation, not
+simply the same cached products. Saved `.npy` data bypass raw-data preprocessing,
+so their convention must already match their operators and noise weights.
+
+### Evidence normalisation
+
+For fixed noise, `log_likelihood` returns the expression above without
+
+```text
+c_fixed = -0.5 * (d^H N^{-1} d + log|N| + N_d*log(pi)).
+```
+
+Add `c_fixed` to the reported log evidence to recover its absolute normalisation.
+It cancels when comparing foreground-only and joint models of the same dataset
+with the same noise covariance and prior convention, even if their coefficient
+counts differ. It does not generally cancel between different datasets.
+
+When fitting a noise amplitude `alpha`, the code retains the varying data and
+noise-determinant terms. Its omitted constant is instead
+`c_noise = -0.5*(log|N| + N_d*log(pi))`, where `N` is the reference covariance
+before multiplication by `alpha**2`. Restore the appropriate constant before
+comparing fixed-noise and fitted-noise models. These statements assume the
+normalised log-uniform power priors; the legacy `uniform_priors` Jacobian option
+also requires its prior-normalisation constants for absolute evidence.
+
+The regression tests compare the original and KL coefficient-space targets
+against a normalised Gaussian density on independent real/imaginary data,
+including truncated bases, foreground-only models and fitted noise amplitudes.
+
+### Residual-noise checks
+
+For independent Gaussian noise before any fitting or sample rescaling, the
+augmented statistic `Q = n^H N^{-1} n` follows
+`2*Gamma(N_d/2, 1)`, equivalently `chi2(N_d)`, not `Gamma(N_d, 1)`.
+Both expressions have mean `N_d`, but their variances differ by a factor of two.
+The existing noise generator also rescales each draw by its measured standard
+deviation before enforcing conjugacy, so its finite-sample distribution is not
+exactly this Gaussian reference. A calibrated residual test must account for
+that generation procedure and the subsequent fitting; likelihood algebra alone
+does not validate a residual-tail probability.
+
 ## MultiNest
 
 MultiNest is the supported nested sampler. It is available directly through:

@@ -6,10 +6,28 @@ from bayeseor_jax import (
     build_T_21_core,
     build_T_fg_core,
     build_foreground_spectral_operator,
+    build_fourier_geometry,
     build_sky_to_visibility_operator,
     build_spectral_fourier_operator,
     build_transverse_fourier_operator,
 )
+
+
+def test_forward_operators_preserve_real_sky_conjugacy():
+    geometry = build_fourier_geometry(n_u=3, n_v=3, n_eta=3, du=.5, dv=.4, d_eta=.1)
+    lmn = jnp.array([[[0., .3], [0., .4], [1., np.sqrt(.75)]]])
+    uvw = jnp.array([[[1., -1.], [.2, -.2], [.1, -.1]]])
+    uvw = uvw * jnp.array([.9, 1., 1.1])[:, None, None]
+    response = build_sky_to_visibility_operator(lmn, uvw, jnp.ones((1, 3, 2)), .1)
+    transverse = build_transverse_fourier_operator(geometry.uv, lmn[0, :2], uv_cell_area=.2)
+    spectral = build_spectral_fourier_operator(
+        eta=geometry.eta, frequency_offsets_hz=jnp.array([-1., 0., 1.]), d_eta=.1,
+    )
+    t21 = np.asarray(build_T_21_core(response, transverse, spectral)).reshape(3, 2, -1)
+    tfg = np.asarray(build_T_fg_core(response, jnp.array([[1., 2.], [1., 3.], [1., 4.]]))).reshape(3, 2, -1)
+    # Reversing a baseline conjugates real-pixel responses and swaps Fourier partners.
+    np.testing.assert_allclose(tfg[:, 1], tfg[:, 0].conj(), atol=1e-13)
+    np.testing.assert_allclose(t21[:, 1], t21[:, 0, ::-1].conj(), atol=1e-13)
 
 
 def test_sky_to_visibility_matches_explicit_measurement_equation():

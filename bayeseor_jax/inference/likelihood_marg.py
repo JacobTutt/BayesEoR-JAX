@@ -1,4 +1,4 @@
-"""JAXMg-backed marginalized Gaussian likelihood for BayesEoR-JAX."""
+"""Marginalised Gaussian likelihood for Hermitian-augmented visibilities."""
 
 from __future__ import annotations
 
@@ -38,6 +38,18 @@ class MarginalisedLikelihood:
     return_logdet=True)`` to obtain both ``Sigma^{-1} dbar`` and
     ``log|Sigma|``.
 
+    Visibilities contain both each measured value and its conjugate, as
+    produced by ``uvd_to_vector``. They are not independent complex samples:
+    the Gaussian exponent and log determinants therefore carry factors of
+    one half. Foreground image coefficients are real, and cosmological
+    Fourier coefficients obey the real-sky conjugacy constraint. A reduced
+    operator must preserve this covariance structure, not introduce independent
+    complex sky amplitudes.
+
+    The returned target omits fixed data/noise normalisation terms. These
+    cancel in Bayes factors only when both models use the same dataset,
+    noise covariance and omitted constants; see ``docs/inference.md``.
+
     Parameters
     ----------
     t_ninv_t : jax.Array
@@ -47,7 +59,8 @@ class MarginalisedLikelihood:
     d_ninv_d : float
         Scalar ``d^H N^{-1} d``.
     n_data : int
-        Number of data samples contributing to the noise normalization term.
+        Number of entries including conjugate copies, equal to the number of
+        independent real data components, used in the noise normalisation.
     phi_inv_class : PhiInverse
         Prior-precision construction settings.
     prior_class : Prior
@@ -265,9 +278,9 @@ class MarginalisedLikelihood:
             """
             Evaluate the marginalized log-likelihood through the JAXMg solver.
 
-            The algebra matches the old BayesEoR marginalized target:
+            The Hermitian-augmented Gaussian target is:
 
-            ``-0.5 log|Sigma| - 0.5 log|Phi^{-1}| + 0.5 dbar^H Sigma^{-1} dbar``
+            ``-0.5 log|Sigma| - 0.5 log|Phi| + 0.5 dbar^H Sigma^{-1} dbar``
 
             plus the optional intrinsic-noise normalization term and the
             sampler-to-physical Jacobian correction for bins flagged by
@@ -283,12 +296,8 @@ class MarginalisedLikelihood:
             # If intrinsic noise is being fitted, the leading sampled
             # parameter is the noise amplitude ``alpha``. The compressed terms
             # involving ``N^{-1}`` then pick up factors of ``alpha^{-2}``.
-            alpha = jax.lax.cond(
-                self.intrinsic_noise_fitting,
-                lambda t: t[0],
-                lambda t: jnp.array(1.0, dtype=t.dtype),
-                theta,
-            )
+            # This setting is static; avoid tracing theta[0] for parameter-free models.
+            alpha = theta[0] if self.intrinsic_noise_fitting else jnp.array(1.0, dtype=theta.dtype)
             alpha2 = alpha * alpha
             inv_alpha2 = 1.0 / alpha2
 
@@ -327,6 +336,7 @@ class MarginalisedLikelihood:
             log_phi_det = -jnp.sum(jnp.log(phi_i))
             quadratic = jnp.real(jnp.vdot(dbar_scaled, sigma_inv_dbar))
 
+            # Conjugated rows encode the same measurement, not a second observation.
             base = -0.5 * log_sigma_det - 0.5 * log_phi_det + 0.5 * quadratic
             noise_term = jax.lax.cond(
                 self.intrinsic_noise_fitting,
@@ -345,8 +355,9 @@ class MarginalisedLikelihood:
 
         This integrates out the latent linear coefficient vector analytically,
         evaluates the resulting dense system with ``jaxmg.potrs`` on the stored
-        row-sharded solver mesh, and returns the old BayesEoR-style objective
-        with optional intrinsic-noise and Jacobian corrections.
+        row-sharded solver mesh, and returns the Hermitian-augmented Gaussian
+        target with fixed normalisation terms omitted and optional intrinsic-noise
+        and Jacobian corrections.
         """
         theta = jnp.asarray(theta, dtype=jnp.float64)
         with self.mesh:
