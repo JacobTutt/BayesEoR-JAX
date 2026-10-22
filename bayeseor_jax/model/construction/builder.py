@@ -20,7 +20,7 @@ from ..operators import (
     build_spectral_fourier_operator,
     build_transverse_fourier_operator,
 )
-from .forward import T_21_build_save, T_fg_build_save
+from .forward import T_21_build_save, T_fg_build_save, T_fg_weighted_build_save
 
 jax.config.update("jax_enable_x64", True)
 
@@ -323,5 +323,41 @@ class BuildMatrices:
         return T_fg_build_save(
             self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
             self.image_geometry.pixel_area_sr, self.foreground_spectral_operator,
+            output_path=self.array_save_directory / f"{matrix_name}.npy",
+        )
+
+    def T_fg_weighted_build_save(
+        self, *, prior_sqrt, noise_whitener, matrix_name: str = "A_fg",
+    ) -> Path:
+        r"""Save the prior- and noise-weighted foreground operator directly on CPU.
+
+        Parameters
+        ----------
+        prior_sqrt : array-like
+            Nonnegative prior standard deviations in spectral-component/pixel
+            order, one per foreground coefficient.
+        noise_whitener : array-like
+            Positive inverse noise RMS in time/frequency/baseline order,
+            one per visibility. Both weights must be finite real vectors.
+        matrix_name : str, optional
+            Output file stem within array_save_directory; defaults to A_fg.
+
+        Returns
+        -------
+        path : pathlib.Path
+            Complete complex128 A = N^-1/2 T_fg Sigma_q^1/2 operator for KL
+            decomposition. No unweighted foreground file is required or saved.
+
+        Notes
+        -----
+        Weights are explicit inputs, separate from physical model configuration.
+        The shared CPU writer applies them within each time-frequency block;
+        decomposition and truncation are not performed here.
+        """
+        beam = np.asarray(self.beam_response).transpose(1, 0, 2)
+        return T_fg_weighted_build_save(
+            self.image_geometry.lmn_fg, self.inst_uvw_irad, beam,
+            self.image_geometry.pixel_area_sr, self.foreground_spectral_operator,
+            prior_sqrt=prior_sqrt, noise_whitener=noise_whitener,
             output_path=self.array_save_directory / f"{matrix_name}.npy",
         )

@@ -22,7 +22,9 @@ from .operators import (
     build_transverse_fourier_operator,
 )
 from .construction.builder import BuildMatrices
-from .construction.forward import T_21_build_save, T_fg_build_save, assemble_joint_operator
+from .construction.forward import (
+    T_21_build_save, T_fg_build_save, T_fg_weighted_build_save, assemble_joint_operator,
+)
 from .construction.reduce_kl_construction import T_fg_svd_build_save
 from .cosmology.transforms import Cosmology
 from .instrument.baselines import InstrumentModel
@@ -35,6 +37,7 @@ __all__ = [
     "weight_foreground_operator",
     "T_21_build_save",
     "T_fg_build_save",
+    "T_fg_weighted_build_save",
     "T_fg_svd_build_save",
     "assemble_joint_operator",
     "Beam_Model",

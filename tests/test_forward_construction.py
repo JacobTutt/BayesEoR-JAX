@@ -5,8 +5,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from bayeseor_jax import T_21, T_fg, T_21_build_save, T_fg_build_save, assemble_joint_operator
-from bayeseor_jax.model.construction import distribution
+from bayeseor_jax import (
+    T_21, T_fg, T_21_build_save, T_fg_build_save,
+    T_fg_weighted_build_save, assemble_joint_operator,
+)
+from bayeseor_jax.model.construction import distribution, forward
 from bayeseor_jax.model.operators import (
     build_sky_to_visibility_operator, build_T_21_core, build_T_fg_core,
 )
@@ -84,6 +87,78 @@ def test_empty_cosmological_coefficient_axis_can_be_saved(tmp_path, inputs):
     path = T_21_build_save(lmn, uvw, beam, area, transverse[:, :0], spectral,
                            output_path=tmp_path / 'empty.npy')
     assert np.load(path).shape == (12, 0)
+
+
+@pytest.mark.parametrize('uniform', [False, True])
+def test_weighted_writer_matches_full_operator_without_unweighted_file(tmp_path, inputs, uniform):
+    lmn, uvw, beam, area, _, _, foreground = inputs
+    prior = np.ones(9) if uniform else np.linspace(0, 2, 9)
+    noise = np.ones(12) if uniform else np.linspace(.2, 3, 12)
+    path = T_fg_weighted_build_save(
+        lmn, uvw, beam, area, foreground,
+        prior_sqrt=prior, noise_whitener=noise, output_path=tmp_path / 'A_fg.npy',
+    )
+    expected = np.asarray(T_fg(lmn, uvw, beam, area, foreground)) * prior[None, :] * noise[:, None]
+    saved = np.load(path)
+    assert saved.dtype == np.complex128
+    np.testing.assert_allclose(saved, expected, atol=1e-13)
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize('name,value', [
+    ('prior_sqrt', np.eye(9)),
+    ('noise_whitener', np.eye(12)),
+    ('prior_sqrt', np.ones(8)),
+    ('noise_whitener', np.ones(11)),
+    ('prior_sqrt', -np.ones(9)),
+    ('noise_whitener', np.zeros(12)),
+    ('noise_whitener', -np.ones(12)),
+    ('prior_sqrt', np.full(9, np.nan)),
+    ('noise_whitener', np.full(12, np.inf)),
+    ('prior_sqrt', np.ones(9) * 1j),
+])
+def test_invalid_weights_preserve_existing_output(tmp_path, inputs, name, value):
+    lmn, uvw, beam, area, _, _, foreground = inputs
+    path = tmp_path / 'A_fg.npy'
+    np.save(path, np.array([[3j]]))
+    weights = dict(prior_sqrt=np.ones(9), noise_whitener=np.ones(12))
+    weights[name] = value
+    with pytest.raises(ValueError, match=name):
+        T_fg_weighted_build_save(lmn, uvw, beam, area, foreground, **weights, output_path=path)
+    np.testing.assert_array_equal(np.load(path), [[3j]])
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize('process_count', [4, 8])
+def test_weighted_writer_partitions_rows_with_global_noise_indices(
+    tmp_path, inputs, monkeypatch, process_count,
+):
+    lmn, uvw, beam, area, _, _, foreground = inputs
+    prior, noise = np.arange(1., 10.), np.arange(1., 13.)
+    path = tmp_path / 'A_fg.npy'
+    partial = tmp_path / 'A_fg.partial.npy'
+    shared = np.lib.format.open_memmap(partial, mode='w+', shape=(12, 9), dtype=np.complex128)
+    shared[:] = np.nan
+    shared.flush()
+    del shared
+
+    # Emulate ranks sequentially while keeping the real partitioning and CPU block evaluation.
+    monkeypatch.setattr(forward, '_prepare_memmap_output', lambda path, **kwargs: np.load(path, mmap_mode='r+'))
+    monkeypatch.setattr(forward, 'publish_output', lambda *args: None)
+    for rank in range(process_count):
+        resources = distribution.CPUResources(rank, process_count, jax.local_devices(backend='cpu')[0], 1)
+        monkeypatch.setattr(forward, 'discover_cpu_resources', lambda: resources)
+        before = np.load(partial).copy()
+        T_fg_weighted_build_save(
+            lmn, uvw, beam, area, foreground,
+            prior_sqrt=prior, noise_whitener=noise, output_path=path,
+        )
+        start, stop = distribution.partition_blocks(6, process_count, rank)
+        outside = np.ones(12, dtype=bool)
+        outside[start * 2:stop * 2] = False
+        np.testing.assert_array_equal(np.load(partial)[outside], before[outside])
+    expected = np.asarray(T_fg(lmn, uvw, beam, area, foreground)) * prior[None, :] * noise[:, None]
+    np.testing.assert_allclose(np.load(partial), expected, atol=1e-13)
 
 
 def test_invalid_inputs_do_not_replace_existing_operator(tmp_path, inputs):

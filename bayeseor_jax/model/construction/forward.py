@@ -2,7 +2,8 @@
 
 Each process writes disjoint visibility-row blocks to shared storage. Numerical
 evaluation stays in model.operators; this module owns CPU placement and file
-publication. No prior weighting or KL reduction is performed here.
+publication. Optional diagonal weights are applied by the pure weighted operator;
+KL decomposition and truncation remain separate stages.
 """
 
 from pathlib import Path
@@ -10,18 +11,21 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from ..operators import T_21, T_fg
+from ..operators import T_21, T_fg, T_fg_weighted
 from .distribution import discover_cpu_resources, partition_blocks
 from .storage import _prepare_memmap_output, publish_output
 
 
-def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_path) -> Path:
+def _build_save(
+    operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_path,
+    *, prior_sqrt=None, noise_whitener=None,
+) -> Path:
     """Evaluate one component in CPU time-frequency blocks and save it to shared storage.
 
     Parameters
     ----------
     operator : callable
-        Pure JAX component function, either T_21 or T_fg.
+        Pure JAX component function: T_21, T_fg or T_fg_weighted.
     lmn : array-like
         Pixel directions, shape ``(n_time, 3, n_pixel)``.
     uvw_lambda : array-like
@@ -35,6 +39,9 @@ def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_
         first axis always indexes frequency; preceding factors are reused.
     output_path : str or pathlib.Path
         Output NumPy file, accessible at the same path from every process.
+    prior_sqrt, noise_whitener : numpy.ndarray, optional
+        Validated diagonal weight vectors for T_fg_weighted. Both are supplied
+        together; coefficient weights are reused and visibility weights sliced.
 
     Returns
     -------
@@ -59,7 +66,10 @@ def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_
     if pixel_area_sr <= 0:
         raise ValueError("pixel_area_sr must be positive")
     # Trace shapes and validate matching axes without constructing the full operator.
-    shape = jax.eval_shape(operator, lmn, uvw_lambda, beam, pixel_area_sr, *factors).shape
+    weights = {} if prior_sqrt is None else dict(
+        prior_sqrt=prior_sqrt, noise_whitener=noise_whitener,
+    )
+    shape = jax.eval_shape(operator, lmn, uvw_lambda, beam, pixel_area_sr, *factors, **weights).shape
     n_time, n_frequency, n_baseline = lmn.shape[0], uvw_lambda.shape[0], uvw_lambda.shape[2]
     if n_time < 1 or n_frequency < 1 or n_baseline < 1:
         raise ValueError("Construction requires nonempty time, frequency and baseline axes")
@@ -78,6 +88,8 @@ def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_
     evaluate = jax.jit(operator)
     with jax.default_device(resources.device):
         fixed_factors = tuple(jax.device_put(value, resources.device) for value in factors[:-1])
+        if weights:
+            weights["prior_sqrt"] = jax.device_put(prior_sqrt, resources.device)
         for block_index in range(start, stop):
             i_t, i_f = divmod(block_index, n_frequency)
             block_inputs = (
@@ -86,9 +98,13 @@ def _build_save(operator, lmn, uvw_lambda, beam, pixel_area_sr, factors, output_
             )
             block_inputs = tuple(jax.device_put(value, resources.device) for value in block_inputs)
             spectral = jax.device_put(factors[-1][i_f:i_f + 1], resources.device)
-            block = evaluate(*block_inputs, *fixed_factors, spectral)
-            # Converting to NumPy waits for CPU completion before the shared-file write.
             row_start = block_index * n_baseline
+            if weights:
+                weights["noise_whitener"] = jax.device_put(
+                    noise_whitener[row_start:row_start + n_baseline], resources.device,
+                )
+            block = evaluate(*block_inputs, *fixed_factors, spectral, **weights)
+            # Converting to NumPy waits for CPU completion before the shared-file write.
             output[row_start:row_start + n_baseline] = np.asarray(block)
         output.flush()
     del output
@@ -169,6 +185,63 @@ def T_fg_build_save(
     """
     return _build_save(T_fg, lmn, uvw_lambda, beam, pixel_area_sr,
                        (spectral_operator,), output_path)
+
+
+def T_fg_weighted_build_save(
+    lmn, uvw_lambda, beam, pixel_area_sr, spectral_operator,
+    *, prior_sqrt, noise_whitener, output_path,
+) -> Path:
+    r"""Construct and save A = N^-1/2 T_fg Sigma_q^1/2 in distributed CPU blocks.
+
+    Parameters
+    ----------
+    lmn : array-like
+        Foreground pixel directions, shape ``(n_time, 3, n_pixel)``.
+    uvw_lambda : array-like
+        Baselines in wavelengths, shape ``(n_frequency, 3, n_baseline)``.
+    beam : array-like
+        Horizon-masked power gains, shape ``(n_time, n_frequency, n_pixel)``.
+    pixel_area_sr : float
+        Positive pixel solid angle in steradians.
+    spectral_operator : array-like
+        Q_z on the same frequencies, shape ``(n_frequency, n_spectral_component)``.
+    prior_sqrt : array-like
+        Finite, nonnegative prior standard deviations, shape
+        ``(n_spectral_component*n_pixel,)``, ordered by component then pixel.
+    noise_whitener : array-like
+        Finite, positive inverse noise RMS values, shape
+        ``(n_time*n_frequency*n_baseline,)``, ordered by time, frequency, baseline.
+        Supply sqrt(Ninv), not inverse variances.
+    output_path : str or pathlib.Path
+        Shared output file, conventionally ``A_fg.npy``.
+
+    Returns
+    -------
+    path : pathlib.Path
+        Complete complex128 weighted operator with visibility rows and
+        prior-standardised foreground coefficient columns.
+
+    Notes
+    -----
+    All participating JAX processes call this function together. Each CPU block
+    evaluates T_fg_weighted and writes disjoint rows directly; no unweighted
+    T_fg file is built or reread. This writer supports diagonal priors and noise
+    only. For dense covariance factors, use the pure T_fg_weighted function.
+    The saved matrix is ready for decomposition, but no KL reduction is applied.
+    """
+    prior_sqrt, noise_whitener = np.asarray(prior_sqrt), np.asarray(noise_whitener)
+    for name, value in (("prior_sqrt", prior_sqrt), ("noise_whitener", noise_whitener)):
+        if value.ndim != 1 or not np.isrealobj(value) or not np.all(np.isfinite(value)):
+            raise ValueError(f"{name} must be a finite real diagonal weight vector")
+    if np.any(prior_sqrt < 0):
+        raise ValueError("prior_sqrt must be nonnegative")
+    if np.any(noise_whitener <= 0):
+        raise ValueError("noise_whitener must be positive")
+    return _build_save(
+        T_fg_weighted, lmn, uvw_lambda, beam, pixel_area_sr,
+        (spectral_operator,), output_path,
+        prior_sqrt=prior_sqrt, noise_whitener=noise_whitener,
+    )
 
 
 def assemble_joint_operator(T_21_path, T_fg_path, *, output_path, block_rows=1024) -> Path:

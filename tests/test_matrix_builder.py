@@ -6,6 +6,7 @@ import numpy as np
 from bayeseor_jax.model.construction.builder import BuildMatrices
 from bayeseor_jax.model.construction.forward import assemble_joint_operator
 from bayeseor_jax.model.construction.likelihood import save_gram_matrix
+from bayeseor_jax.model.operators import T_fg
 
 
 def _minimal_builder(tmp_path):
@@ -83,6 +84,20 @@ def test_foreground_builder_uses_prepared_spectral_operator(tmp_path):
     rebuilt = np.load(builder.T_fg_build_save())
 
     np.testing.assert_allclose(rebuilt, 2 * original)
+
+
+def test_weighted_builder_uses_explicit_weights_and_prepared_geometry(tmp_path):
+    builder = _minimal_builder(tmp_path)
+    prior, noise = np.arange(1., 7.), np.arange(1., 5.)
+    path = builder.T_fg_weighted_build_save(prior_sqrt=prior, noise_whitener=noise)
+    physical = T_fg(
+        builder.image_geometry.lmn_fg, builder.inst_uvw_irad,
+        builder.beam_response.transpose(1, 0, 2), builder.image_geometry.pixel_area_sr,
+        builder.foreground_spectral_operator,
+    )
+    np.testing.assert_allclose(np.load(path), np.asarray(physical) * prior[None, :] * noise[:, None])
+    assert path == tmp_path / 'A_fg.npy'
+    assert not (tmp_path / 'T_fg.npy').exists()
 
 
 def test_blockwise_gram_matrix_is_published_only_when_complete(tmp_path):
