@@ -28,7 +28,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 - [EoR Model](docs/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
 - [Foregrounds](docs/foregrounds.md): spherical image-domain foreground modelling and distributed operator construction.
 - [Instrument Model](docs/instrument.md): visibility inputs, beam models, time/frequency selection, and noise.
-- [Inference](docs/inference.md): marginalised likelihood, MultiNest, BlackJAX, HMC/NUTS, and MAP helpers.
+- [Inference](docs/inference.md): marginalised likelihood, MultiNest, BlackJAX nested sampling, and MAP helpers.
 - [Configuration](docs/configuration.md): grouped reference for YAML and CLI parameters.
 - [Outputs and Analysis](docs/outputs-analysis.md): cached matrices, sampler outputs, metadata, and plotting helpers.
 - [HPC and Scaling](docs/hpc-scaling.md): JAX devices, precision, memory scaling, and cluster notes.

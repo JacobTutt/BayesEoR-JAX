@@ -12,7 +12,6 @@ from .prior import Prior, theta_power_to_linear
 
 _LAZY_EXPORTS = {
     "MarginalisedLikelihood": (".likelihood_marg", "MarginalisedLikelihood"),
-    "FullLikelihood": (".likelihood_full", "FullLikelihood"),
 }
 
 
@@ -28,7 +27,6 @@ def __getattr__(name):
 
 __all__ = [
     "MarginalisedLikelihood",
-    "FullLikelihood",
     "PhiInverse",
     "Prior",
     "build_kbin_index_per_voxel",

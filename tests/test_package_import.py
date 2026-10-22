@@ -4,6 +4,19 @@ def test_package_import_does_not_require_optional_solver_or_sampler():
     assert bayeseor_jax.BuildMatrices is not None
 
 
+def test_full_likelihood_and_hmc_are_not_exported():
+    import bayeseor_jax
+    from bayeseor_jax import inference
+
+    for module in (bayeseor_jax, inference):
+        for name in ("FullLikelihood", "run_full_nuts", "run_marginalised_nuts"):
+            assert name not in module.__all__
+            assert not hasattr(module, name)
+        assert "MarginalisedLikelihood" in module.__all__
+    for name in ("run_multinest", "run_blackjaxns", "run_nestedsampling"):
+        assert name in bayeseor_jax.__all__
+
+
 def test_model_layout_preserves_public_exports():
     import bayeseor_jax as api
     from bayeseor_jax import model

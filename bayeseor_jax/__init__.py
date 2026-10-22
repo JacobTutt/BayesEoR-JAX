@@ -42,7 +42,6 @@ from .vis import form_pI_vis, get_vis_data, jy_to_ksr, preprocess_uvdata, uvd_to
 
 
 _LAZY_EXPORTS = {
-    "FullLikelihood": (".inference", "FullLikelihood"),
     "MarginalisedLikelihood": (".inference", "MarginalisedLikelihood"),
     "PhiInverse": (".inference", "PhiInverse"),
     "Prior": (".inference", "Prior"),
@@ -53,8 +52,6 @@ _LAZY_EXPORTS = {
     "run_blackjaxns": (".run_ns", "run_blackjaxns"),
     "run_multinest": (".run_ns", "run_multinest"),
     "run_nestedsampling": (".run_ns", "run_nestedsampling"),
-    "run_full_nuts": (".run_hmc", "run_full_nuts"),
-    "run_marginalised_nuts": (".run_hmc", "run_marginalised_nuts"),
     "SetupResult": (".setup", "SetupResult"),
     "run_setup": (".setup", "run_setup"),
 }
@@ -87,7 +84,6 @@ __all__ = [
     "Cosmology",
     "InstrumentModel",
     "MarginalisedLikelihood",
-    "FullLikelihood",
     "PhiInverse",
     "Prior",
     "build_kbin_index_per_voxel",
@@ -103,8 +99,6 @@ __all__ = [
     "run_blackjaxns",
     "run_multinest",
     "run_nestedsampling",
-    "run_full_nuts",
-    "run_marginalised_nuts",
     "form_pI_vis",
     "jy_to_ksr",
     "save_numpy_dict",

@@ -2,7 +2,7 @@
 
 **Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
 
-BayesEoR-JAX currently exposes several inference paths. The main production path is the marginalised likelihood for power-spectrum parameters, with MultiNest used by default to estimate posterior distributions and Bayesian evidence.
+BayesEoR-JAX uses the analytically marginalised likelihood for power-spectrum inference, with MultiNest as the default sampler for posterior distributions and Bayesian evidence. BlackJAX nested sampling remains available as an experimental backend.
 
 ## Marginalised Likelihood
 
@@ -72,15 +72,6 @@ Important controls are:
 - `random_key`
 
 BlackJAX outputs are written in an Anesthetic-style CSV file named `nested_sampling_results.csv`, together with `summary.json`.
-
-## HMC And NUTS
-
-The package also exposes:
-
-- `run_full_nuts`
-- `run_marginalised_nuts`
-
-These are useful for development and high-dimensional posterior experiments. They should be documented as advanced workflows until their recommended configuration and outputs are standardised.
 
 ## MAP Helper
 
