@@ -7,13 +7,13 @@ name = "bayeseor-jax"
 version = "0.1.0"
 description = "JAX-accelerated BayesEoR pipeline"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "numpy>=2.0,<2.4",
   "scipy",
   "astropy",
   "h5py",
-  "jax>=0.6.0",
+  "jax>=0.11.1",
   "distrax",
   "jax-healpy",
   "pyuvdata",

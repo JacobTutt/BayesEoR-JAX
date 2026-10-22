@@ -38,6 +38,7 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 
 Clone the repository and choose one installation. Use Miniforge/Conda so the
 native MultiNest library is installed alongside its Python interface.
+Both installations use Python 3.12+ and JAX 0.11.1+.
 
 ```bash
 git clone https://github.com/JacobTutt/BayesEoR-JAX.git

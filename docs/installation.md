@@ -4,6 +4,8 @@ BayesEoR-JAX offers **laptop/CPU** and **HPC/NVIDIA GPU** installations. Both
 use the same physical models, priors, marginalised likelihood and MultiNest
 sampler; only the numerical solver and accelerator dependencies differ.
 
+Both installations require Python 3.12 or newer and JAX 0.11.1 or newer.
+
 Use Miniforge (Conda with conda-forge) and work from a clone:
 
 ```bash
@@ -36,8 +38,9 @@ conda env create -f environment-hpc.yml
 conda activate bayeseor-hpc
 ```
 
-This uses Python 3.12 and installs `jaxmg[cuda12]` from PyPI, which supplies
-compatible JAX/CUDA dependencies and the cuSOLVERMp runtime. Pip selects the
+This uses Python 3.12 and installs `jaxmg[cuda12]` from PyPI, which installs
+`jax[cuda12]` and the cuSOLVERMp runtime transitively. JAXMG constrains JAX to
+the versions supported by its distributed backend. Pip selects the
 Linux x86_64 or aarch64 wheel automatically; no cluster-specific extra or
 GitHub wheel URL is required. A compatible NVIDIA driver is still required.
 See the [JAXMG installation guide](https://flatironinstitute.github.io/jaxmg/latest/install/)
@@ -87,7 +90,7 @@ If Miniconda's default-channel terms plugin blocks environment creation despite
 `nodefaults`, use Miniforge or this explicit conda-forge-only route:
 
 ```bash
-conda create -n bayeseor --override-channels -c conda-forge python=3.11 pip "numpy>=2.0,<2.4" multinest pymultinest
+conda create -n bayeseor --override-channels -c conda-forge python=3.12 pip "numpy>=2.0,<2.4" multinest pymultinest
 conda activate bayeseor
 python -m pip install -e .
 ```
