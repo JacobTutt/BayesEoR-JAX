@@ -82,9 +82,8 @@ nav:
   - Model:
       - Overview: model.md
       - EoR model: eor.md
-      - Foreground model:
-          - Physical model: foregrounds.md
-          - KL foreground basis: kl-foregrounds.md
+      - Foreground model: foregrounds.md
+      - KL foreground basis: kl-foregrounds.md
       - Construction and execution: forward-model.md
   - User guide:
       - Configuration: configuration.md
