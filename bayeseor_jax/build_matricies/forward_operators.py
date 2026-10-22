@@ -1,4 +1,4 @@
-r"""Linear mappings used in the paper's interferometric forward model.
+r"""Linear operators used in BayesEoR's interferometric forward model.
 
 The component models share the beam-weighted measurement operator
 :math:`R = F^{-1}P` and differ in how their coefficients define sky brightness:
@@ -18,7 +18,7 @@ combine these factors for supplied blocks of visibility rows.
 These functions perform numerical construction only. Geometry modules define
 the coordinates; ``BuildMatrices`` in ``overall.py`` chooses the blocks,
 distributes their construction, and saves the assembled matrices. The compact
-factors below implement the paper's products without forming full Kronecker
+factors below implement these products without forming full Kronecker
 matrices. No unit conversion, prior weighting, or KL compression is applied.
 """
 
@@ -182,8 +182,8 @@ def build_sky_to_visibility_operator(
 
     Summing ``R[t, f, b, p] * brightness[f, p]`` over pixels gives a model
     visibility. Both sky components use this response, restricted to their
-    respective pixel selections. ``F^{-1}`` denotes the measurement operator
-    in the paper; it does not imply a numerical matrix inversion here.
+    respective pixel selections. ``F^{-1}`` denotes the sky-to-visibility
+    Fourier operator; it does not imply a numerical matrix inversion here.
 
     Parameters
     ----------
@@ -195,8 +195,8 @@ def build_sky_to_visibility_operator(
         Baselines in observing wavelengths with shape
         ``(n_frequency, 3, n_baseline)``. BayesEoR follows the PyUVData
         ``ant2 - ant1`` baseline convention, hence the positive phase used
-        below is equivalent to the negative phase in the paper's
-        ``r_i - r_j`` convention.
+        below is equivalent to a negative phase with the opposite
+        ``ant1 - ant2`` baseline convention.
         Baselines are fixed in the instrument frame; sky rotation is already
         represented by ``lmn``.
     beam
@@ -349,7 +349,7 @@ def build_T_fg_core(
         Matrix of shape ``(n_time * n_frequency * n_baseline,
         n_spectral_component * n_pixel)``. Rows are ordered by time,
         frequency, then baseline. Columns are ordered by spectral component,
-        then pixel, matching ``q = (q_0.T, q_1.T, ...).T`` in the paper.
+        then pixel, matching ``q = (q_0.T, q_1.T, ...).T``.
 
     Notes
     -----
