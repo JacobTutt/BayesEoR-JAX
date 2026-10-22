@@ -56,6 +56,10 @@ T21_block = jax.jit(T_21)(lmn_21, uvw_lambda, beam_21, pixel_area_sr, F_prime, F
 Tfg_block = jax.jit(T_fg)(lmn_fg, uvw_lambda, beam_fg, pixel_area_sr, Q)
 ```
 
+Both model fields include the union of HEALPix pixels entering their angular
+extent at any integration. This fixed celestial pixel set is followed throughout
+the drift scan; mask selection has no separate time-mode setting.
+
 Here `lmn` is `(time, 3, pixel)`, `uvw_lambda` is `(frequency, 3, baseline)`
 and the horizon-masked beam is `(time, frequency, pixel)`. Cosmological pixel
 summation must still cover its full model field; selecting fewer pixels is not

@@ -167,8 +167,6 @@ def _query_disc_union(
     radius_rad: float,
     *,
     nside: int,
-    sky_mask_time_mode: str,
-    time_ind_center: int,
 ) -> np.ndarray:
     r"""Find HEALPix pixel centres inside the observed spherical field.
 
@@ -181,11 +179,6 @@ def _query_disc_union(
         Angular radius of the spherical selection in radians.
     nside : int
         HEALPix resolution of the equal-area celestial pixel grid.
-    sky_mask_time_mode : str
-        Pixel selection: 'union' across integrations or 'center' at the
-        reference time.
-    time_ind_center : int
-        Index of the reference integration within the observing-time axis.
 
     Returns
     -------
@@ -196,14 +189,9 @@ def _query_disc_union(
     -----
     ``field_centers`` contains ICRS (RA, Dec) pairs in degrees and
     ``radius_rad`` is the angular field radius. Return sorted, unique RING
-    pixel indices at resolution ``nside``. The ``union`` selection includes
-    pixels inside the field at any integration; ``center`` uses only the
-    reference integration. Pixel overlap with the boundary is not included.
+    pixel indices at resolution ``nside``, including pixels inside the field
+    at any integration. Pixel overlap with the boundary is not included.
     """
-    # The default union follows the drift scan; centre mode selects one snapshot.
-    if sky_mask_time_mode == "center":
-        field_centers = [field_centers[time_ind_center]]
-
     npix = 12 * nside**2
     indices = []
     # Query a spherical disc around each pointing using a Cartesian unit vector.
@@ -238,10 +226,8 @@ def _select_image_pixels(
     fov_eor: float,
     fov_fg: float,
     nside: int,
-    sky_mask_time_mode: str,
-    time_ind_center: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    r"""Select the sky pixels covered by the two model fields of view.
+    r"""Select sky pixels entering either model field during the observation.
 
     Parameters
     ----------
@@ -255,11 +241,6 @@ def _select_image_pixels(
         uses fov_eor.
     nside : int
         HEALPix resolution of the equal-area celestial pixel grid.
-    sky_mask_time_mode : str
-        Pixel selection: 'union' across integrations or 'center' at the
-        reference time.
-    time_ind_center : int
-        Index of the reference integration within the observing-time axis.
 
     Returns
     -------
@@ -284,8 +265,6 @@ def _select_image_pixels(
         field_centers,
         float(np.deg2rad(fov_eor / 2)),
         nside=nside,
-        sky_mask_time_mode=sky_mask_time_mode,
-        time_ind_center=time_ind_center,
     )
     # Reuse an identical selection instead of querying the same field twice.
     if fov_fg == fov_eor:
@@ -295,8 +274,6 @@ def _select_image_pixels(
             field_centers,
             float(np.deg2rad(fov_fg / 2)),
             nside=nside,
-            sky_mask_time_mode=sky_mask_time_mode,
-            time_ind_center=time_ind_center,
         )
     # The membership mask selects cosmological columns from the wider sky response.
     pix_indices_eor = jnp.asarray(pix_indices_eor_np, dtype=jnp.int64)
@@ -440,7 +417,6 @@ def build_image_geometry(
     fov_eor: float,
     fov_fg: float | None = None,
     nside: int = 128,
-    sky_mask_time_mode: str = "union",
     telescope_latlonalt: tuple[float, float, float] = HERA_LOCATION,
     jd_center: float = 2461040.5,
     n_t: int = 1,
@@ -456,9 +432,6 @@ def build_image_geometry(
         must be contained in the foreground field for the shared response.
     nside : int
         HEALPix resolution; all selected pixels have area ``4*pi/(12*nside**2)``.
-    sky_mask_time_mode : str
-        ``union`` selects pixels entering the field at any integration;
-        ``center`` selects the reference-time field only.
     telescope_latlonalt : tuple of float
         Geodetic latitude and longitude in degrees, followed by altitude in metres.
     jd_center : float
@@ -476,18 +449,12 @@ def build_image_geometry(
 
     Notes
     -----
-    Select HEALPix pixels within the zenith drift-scan fields, follow their
-    topocentric directions at every integration, and measure their angular
-    extents at the reference time. Return an ``ImageGeometry`` for beam
+    Select the union of HEALPix pixels entering each zenith drift-scan field
+    across all integrations, follow their topocentric directions, and measure
+    their angular extents at the reference time. Return an ``ImageGeometry`` for beam
     evaluation and the mapping from image brightness to visibilities.
     """
     fov_fg = fov_eor if fov_fg is None else fov_fg
-    sky_mask_time_mode = str(sky_mask_time_mode).lower()
-    if sky_mask_time_mode not in {"union", "center"}:
-        raise ValueError(
-            "sky_mask_time_mode must be one of {'union', 'center'}, "
-            f"got {sky_mask_time_mode!r}."
-        )
 
     # Establish the observing times and terrestrial location before selecting sky pixels.
     times_jd, time_ind_center = _construct_time_array(jd_center, n_t, d_t)
@@ -508,8 +475,6 @@ def build_image_geometry(
             fov_eor=fov_eor,
             fov_fg=fov_fg,
             nside=nside,
-            sky_mask_time_mode=sky_mask_time_mode,
-            time_ind_center=time_ind_center,
         )
     )
     # Keep one celestial pixel set and evaluate its moving instrumental coordinates.

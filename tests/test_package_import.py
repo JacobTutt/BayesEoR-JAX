@@ -33,6 +33,7 @@ def test_foreground_example_uses_spherical_model_options_only():
     assert args.beta_fg == [2.63, 2.82]
     assert len(args.foreground_prior_std_mk) == 3
     assert not hasattr(args, "fg_model_domain")
+    assert not hasattr(args, "sky_mask_time_mode")
 
 
 def test_parser_accepts_preconstructed_kl_operator():

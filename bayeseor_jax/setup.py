@@ -79,7 +79,6 @@ def run_setup(
     n_v_eor: int | None = None,
     du_eor: float | None = None,
     dv_eor: float | None = None,
-    sky_mask_time_mode: str = "union",
     beta_fg: list[float] = [2.63, 2.82],
     # Frequency / time
     n_freq: int | None = None,
@@ -165,11 +164,6 @@ def run_setup(
     n_u_eor, n_v_eor, du_eor, dv_eor : int/float, optional
         EoR model UV grid shape and spacing. When omitted, these are
         auto-resolved from the configured sky-mask FoV widths and instrument support.
-    sky_mask_time_mode : {"union", "center"}, optional
-        How the fixed EoR/FG HEALPix masks are selected across time.
-        ``"union"`` uses the drift-scan union over all configured timesteps.
-        ``"center"`` uses only the central timestep FoV when defining the
-        fixed sky mask.
     beta_fg : sequence of float, optional
         Brightness-temperature power-law indices for the spherical foreground
         coefficient fields.
@@ -323,7 +317,6 @@ def run_setup(
         fov_eor=float(fov_eor),
         fov_fg=float(fov_fg),
         nside=int(nside),
-        sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         n_t=int(n_t),
@@ -367,7 +360,6 @@ def run_setup(
         "n_v_eor": int(n_v_eor),
         "du_eor": float(du_eor),
         "dv_eor": float(dv_eor),
-        "sky_mask_time_mode": str(sky_mask_time_mode),
         "beta_fg": None if beta_fg is None else list(beta_fg),
         "n_freq": int(n_freq),
         "f0_mhz": float(f0_mhz),
@@ -502,7 +494,6 @@ def run_setup(
         df_mhz=float(df_mhz),
         n_eta=int(n_eta),
         d_eta=d_eta,
-        sky_mask_time_mode=str(sky_mask_time_mode),
         telescope_latlonalt=tuple(float(x) for x in telescope_latlonalt),
         jd_center=float(jd_center),
         nside=int(nside),

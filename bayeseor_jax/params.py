@@ -270,16 +270,6 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--n-t", type=int, default=1, help="Number of time integrations.")
         self.add_argument("--d-t", type=float, help="Integration time in seconds.")
         self.add_argument("--jd-center", type=float, default=None, help="Central Julian date for centered time-window selection (raw mode) or centered time-axis anchor (.npy mode).")
-        self.add_argument(
-            "--sky-mask-time-mode",
-            type=str,
-            default="union",
-            choices=("union", "center"),
-            help=(
-                "How to define the fixed EoR/FG HEALPix mask across time: "
-                "'union' uses all timesteps, 'center' uses only the middle timestep."
-            ),
-        )
         self.add_argument("--nside", type=int, required=True, help="HEALPix nside.")
         self.add_argument("--fov-eor", type=float, required=True, help="Circular EoR FoV in degrees.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")

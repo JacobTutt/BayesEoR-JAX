@@ -51,9 +51,6 @@ class BuildMatrices:
         Number of line-of-sight Fourier modes before excluding eta=0.
     d_eta : float
         Positive eta spacing and integration weight in inverse Hz (seconds).
-    sky_mask_time_mode : str
-        Pixel selection: 'union' across integrations or 'center' at the
-        reference time.
     telescope_latlonalt : tuple of float
         Geodetic latitude and longitude in degrees, followed by altitude in
         metres.
@@ -130,7 +127,6 @@ class BuildMatrices:
         df_mhz: Optional[float] = None,
         n_eta: int = 0,
         d_eta: float = 0.0,
-        sky_mask_time_mode: str = "union",
         telescope_latlonalt: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         jd_center: float = 2461040.5,
         nside: Optional[int] = None,
@@ -166,7 +162,6 @@ class BuildMatrices:
         else:
             self.beta_fg = list(beta_fg)
         self.n_fg_components = 1 + len(self.beta_fg)
-        self.sky_mask_time_mode = str(sky_mask_time_mode)
 
         # Store frequency/eta grid parameters.
         self.n_freq = n_freq
@@ -214,7 +209,6 @@ class BuildMatrices:
             fov_eor=self.fov_eor,
             fov_fg=self.fov_fg,
             nside=self.nside,
-            sky_mask_time_mode=self.sky_mask_time_mode,
             telescope_latlonalt=self.telescope_latlonalt,
             jd_center=self.jd_center,
             n_t=self.n_t,
