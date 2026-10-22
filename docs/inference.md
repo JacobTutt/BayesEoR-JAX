@@ -65,7 +65,7 @@ where:
 - `Phi^{-1}(theta)` is the latent prior precision.
 - `T^H N^{-1} d` and `d^H N^{-1} d` are also cached.
 
-Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. BayesEoR-JAX uses JAX and the downstream JAXMg branch for this path.
+Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. The laptop installation uses standard JAX Cholesky on CPU; the HPC installation uses the downstream JAXMG solver on GPU. Both use the same likelihood and conditional MAP expressions. GPU libraries are imported only for GPU solves.
 
 ### Complex storage and the factors of one half
 

@@ -13,7 +13,7 @@ dependencies = [
   "scipy",
   "astropy",
   "h5py",
-  "jax[cuda12]",
+  "jax>=0.6.0",
   "distrax",
   "jax-healpy",
   "pyuvdata",
@@ -23,10 +23,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hpc = [
+  "jax[cuda12]>=0.6.0",
+  "jaxmg[csd3] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/csd3/jaxmg-0.0.7-cp311-cp311-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "jaxmg[isambard] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/isambard/jaxmg-0.0.7-cp311-cp311-linux_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
 csd3 = [
+  "jax[cuda12]>=0.6.0",
   "jaxmg[csd3] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/csd3/jaxmg-0.0.7-cp311-cp311-linux_x86_64.whl",
 ]
 isambard = [
+  "jax[cuda12]>=0.6.0",
   "jaxmg[isambard] @ https://github.com/JacobTutt/jaxmg/raw/main/wheels/isambard/jaxmg-0.0.7-cp311-cp311-linux_aarch64.whl",
 ]
 

@@ -1,143 +1,117 @@
 # Installation
 
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)
+BayesEoR-JAX offers **laptop/CPU** and **HPC/NVIDIA GPU** installations. Both
+use the same physical models, priors, marginalised likelihood and MultiNest
+sampler; only the numerical solver and accelerator dependencies differ.
 
-BayesEoR-JAX is installed as a Python package named `bayeseor-jax` and imported as `bayeseor_jax`. The package uses JAX for accelerated numerical work. The current marginalised likelihood path also uses Jacob's downstream JAXMg branch, which adds the log-determinant support needed by BayesEoR-JAX.
-
-The original BayesEoR package used a MAGMA/PyCUDA backend. This implementation does not use that installation path. Install and debug it as a JAX CUDA package plus JAXMg.
-
-## Requirements
-
-The recommended runtime is:
-
-- Python 3.11 for the prebuilt JAXMg wheels.
-- A CUDA 12 compatible NVIDIA GPU environment.
-- JAX with CUDA support.
-- JAXMg, either from one of the hosted wheels or from a local source build.
-- MultiNest native libraries for the default `multinest` sampler through `pymultinest`.
-
-The package pins NumPy to `>=2.0,<2.4` because runtime dependencies that use Numba currently reject NumPy 2.4.
-
-## Option 1: Supported Hardware Wheels
-
-Use this path when your system matches one of the provided JAXMg wheels. These extras install BayesEoR-JAX plus the corresponding JAXMg wheel.
-
-For CSD3-like Linux x86_64 CUDA systems:
+Use Miniforge (Conda with conda-forge) and work from a clone:
 
 ```bash
-pip install "bayeseor-jax[csd3] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
+git clone https://github.com/JacobTutt/BayesEoR-JAX.git
+cd BayesEoR-JAX
 ```
 
-For a complete CSD3 workflow with conda, MultiNest, and Slurm examples, see [CSD3 Getting Started](csd3.md).
-
-For Isambard-like Linux ARM64 CUDA systems:
+## 1. Normal installation: laptop or CPU workstation
 
 ```bash
-pip install "bayeseor-jax[isambard] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
+conda env create -f environment.yml
+conda activate bayeseor
 ```
 
-These names describe the hardware/software environment used to build the JAXMg wheel. They are not intended to mean the package only works on those named machines.
+This installs CPU JAX, BayesEoR-JAX, native MultiNest and PyMultiNest.
+It does **not** install CUDA or JAXMG. Likelihood and MAP calculations use a
+standard JAX Cholesky factorisation on a single CPU device, which can use
+multiple CPU threads.
 
-For development from a local clone:
+This path is for small analyses, development and plotting. Original foreground
+bases and already reduced KL operators are supported. The distributed KL
+construction routine, `T_fg_svd_build_save`, remains an HPC operation.
+
+## 2. HPC installation: supported Linux NVIDIA systems
 
 ```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
-cd BayesEoR-v2
-pip install -e ".[csd3]"
+conda env create -f environment-hpc.yml
+conda activate bayeseor-hpc
 ```
 
-or:
+This adds CUDA 12 JAX and the architecture-matched JAXMG wheel: the CSD3 build
+for Linux x86_64 or the Isambard build for Linux aarch64. These are **Python 3.11,
+site-built wheels**, not universal cluster binaries. The matching NVIDIA driver
+and native runtime libraries must be available. JAXMG is used for both
+single-GPU and distributed GPU inference.
+
+The existing `[csd3]` and `[isambard]` extras remain supported; `[hpc]`
+selects between them by architecture. GPU extras are not for macOS or Windows.
+
+If your cluster does not match a wheel, build the downstream
+[JAXMG library](https://github.com/JacobTutt/jaxmg) against the cluster's runtime,
+then install BayesEoR-JAX and CUDA JAX without a wheel extra:
 
 ```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
-cd BayesEoR-v2
-pip install -e ".[isambard]"
+python -m pip install -e . "jax[cuda12]"
 ```
 
-## Option 2: Build JAXMg From Source
+JAXMG must expose `potrs(..., return_logdet=True)` for inference and `gesvd`
+for distributed KL reduction. A package with the same name is not necessarily
+API-compatible. See [CSD3](csd3.md) for site/job examples.
 
-Use this path on unsupported systems where no prebuilt JAXMg wheel is available. The Python editable install and the native CUDA build are separate steps.
+## Verify the installation
 
 ```bash
-git clone https://github.com/JacobTutt/jaxmg.git
-cd jaxmg
-
-pip install "jax[cuda12]"
-pip install --no-deps -e .
-
-cmake -S . -B build
-cmake --build build --target install
+python -c "import jax, bayeseor_jax, pymultinest; print(jax.devices())"
 ```
 
-Then install BayesEoR-JAX without a JAXMg wheel extra:
+The normal environment should report CPU. Check the HPC environment inside a
+GPU allocation, where it should report GPU devices. On HPC also run:
 
 ```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
-cd BayesEoR-v2
-pip install -e .
+python -c "from jaxmg import potrs, gesvd; print('JAXMG available')"
 ```
 
-On managed clusters you may need to load compiler, CUDA, and cuDNN modules before configuring JAXMg. On CSD3, previous successful source builds used a CUDA 12.1 stack with `gcc/11`, `cuda/12.1`, and `cudnn/8.9_cuda-12.1`. CSD3's cuDNN module also exposed versioned header names, so a local cuDNN compatibility directory was needed during that source build. Treat those as site-specific JAXMg build notes, not BayesEoR-JAX package changes.
+The likelihood selects its solver from the device mesh. A missing GPU library
+raises an error, rather than silently moving the solve to CPU. To deliberately
+use CPU in an HPC environment, set `JAX_PLATFORMS=cpu` before starting Python.
 
-## Verify JAX
+## Existing environments and MultiNest
 
-Check that JAX sees the expected accelerator:
+The Conda files install both native MultiNest and its Python interface.
+`pip install pymultinest` alone installs only the wrapper. In an existing
+Conda environment use:
 
 ```bash
-python - <<'PY'
-import jax
-jax.config.update("jax_enable_x64", True)
-print(jax.devices())
-print(jax.default_backend())
-PY
+conda install --override-channels -c conda-forge "numpy>=2.0,<2.4" multinest pymultinest
+python -m pip install -e .
 ```
 
-For a GPU run, the backend should be `gpu`, and the device list should contain CUDA devices. If JAX reports only CPU devices, fix the JAX/CUDA environment before running BayesEoR-JAX.
+Use `-e ".[hpc]"` for a supported GPU system. NumPy is constrained to
+`>=2.0,<2.4` for the Numba-dependent dependencies.
 
-## Verify JAXMg
-
-The BayesEoR-JAX marginalised likelihood imports JAXMg through `jaxmg`. A minimal import check is:
+If Miniconda's default-channel terms plugin blocks environment creation despite
+`nodefaults`, use Miniforge or this explicit conda-forge-only route:
 
 ```bash
-python - <<'PY'
-import jaxmg
-from jaxmg import potrs
-print("jaxmg import ok")
-PY
+conda create -n bayeseor --override-channels -c conda-forge python=3.11 pip "numpy>=2.0,<2.4" multinest pymultinest
+conda activate bayeseor
+python -m pip install -e .
 ```
 
-The JAXMg fork used here includes log-determinant support required by the BayesEoR-JAX likelihood. Installing upstream JAXMg from PyPI will not provide downstream branch-specific changes unless the upstream package has since incorporated them.
+This does not require accepting unrelated channel terms. For manually compiled
+MultiNest, make its library directory visible through `LD_LIBRARY_PATH` on
+Linux or `DYLD_LIBRARY_PATH` on macOS. Keep MultiNest output paths short.
 
-## MultiNest
-
-`pymultinest` is a Python wrapper around the native MultiNest library. Installing the Python package is not always enough; the dynamic linker must also be able to find `libmultinest`.
-
-If `import pymultinest` fails with a missing library error, set `LD_LIBRARY_PATH` to the directory containing the MultiNest shared library before running BayesEoR-JAX:
-
-```bash
-export LD_LIBRARY_PATH=/path/to/MultiNest/lib:$LD_LIBRARY_PATH
-python -c "from pymultinest.solve import solve; print('pymultinest ok')"
-```
-
-MultiNest output paths should also be kept short. Very long output paths can fail in the underlying MultiNest library.
-
-## Quick Functional Check
-
-From a BayesEoR-JAX clone:
+## Run an analysis
 
 ```bash
 python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
-python test_examples/run_analysis_example.py --config test_examples/eor_fgs/config.yaml
 ```
 
-These commands run setup only by default. Add `--sample` to run nested sampling with the default MultiNest backend and then run the example analysis step:
+This constructs example matrices without sampling. Add `--sample` to run
+MultiNest and produce posterior summaries and plots. The scientific examples
+can still be expensive on a laptop: CPU support does not reduce matrix sizes.
+
+For regression tests:
 
 ```bash
-python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
+python -m pip install pytest
+python -m pytest -q
 ```
-
-Sampling is substantially more expensive than setup and should normally be run on a suitable GPU node. After sampling, the example writes posterior summaries and diagnostic plots under the output directory's `analysis/` subdirectory.
-
----
-
-**Navigation:** [README](../README.md) · [Installation](installation.md) · [CSD3](csd3.md) · [Basics](basics.md) · [Forward Model](forward-model.md) · [Inference](inference.md) · [References](references.md)

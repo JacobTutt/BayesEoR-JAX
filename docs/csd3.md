@@ -4,7 +4,10 @@
 
 This is a step-by-step CSD3 setup guide for running the BayesEoR-JAX test examples. It uses a Python 3.11 conda environment, a prebuilt JAXMg wheel for a supported CUDA system, and MultiNest as the default sampler.
 
-The Python package install provides the `pymultinest` wrapper. The native MultiNest shared library, `libmultinest.so`, still has to be built and made visible through `LD_LIBRARY_PATH`.
+The recommended [HPC installation](installation.md) now installs native MultiNest
+through Conda as well as the Python wrapper. The manual instructions below are
+an alternative for site-managed environments; skip the MultiNest build and
+library-path steps when using the supplied Conda environment.
 
 ## 1. Choose A Working Directory
 
@@ -20,7 +23,7 @@ All commands below assume you are inside this working directory.
 ## 2. Clone The Repository
 
 ```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
+git clone https://github.com/JacobTutt/BayesEoR-JAX.git BayesEoR-v2
 ```
 
 The CSD3 examples use this layout:

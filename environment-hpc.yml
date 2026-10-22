@@ -1,0 +1,12 @@
+name: bayeseor-hpc
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=2.0,<2.4
+  - multinest
+  - pymultinest
+  - pip:
+      - -e .[hpc]

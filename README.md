@@ -4,14 +4,14 @@
 
 BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
 
-The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. The JAX implementation targets hardware-accelerated, differentiable, and multi-device execution, with native JAXMg linear algebra used by the marginalised likelihood path.
+The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. Standard JAX supports local CPU inference; the optional HPC installation uses JAXMG for GPU linear algebra.
 
 ## What This Version Adds
 
 BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is a downstream implementation focused on:
 
 - JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
-- A JAXMg-backed marginalised likelihood using GPU-native dense solves and log determinants.
+- A marginalised likelihood with CPU Cholesky and optional JAXMG GPU solves and log determinants.
 - MultiNest for nested sampling, posterior recovery and Bayesian-evidence evaluation.
 - A spherical image-domain foreground model propagated through the full beam and fringe response.
 - A configuration-first workflow using YAML files and `jsonargparse`.
@@ -36,34 +36,39 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 
 ## Quick Start
 
-For a supported CUDA system with a prebuilt JAXMg wheel:
+Clone the repository and choose one installation. Use Miniforge/Conda so the
+native MultiNest library is installed alongside its Python interface.
 
 ```bash
-pip install "bayeseor-jax[csd3] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
+git clone https://github.com/JacobTutt/BayesEoR-JAX.git
+cd BayesEoR-JAX
 ```
 
-or, on an ARM64 CUDA system matching the Isambard wheel:
+**Laptop / CPU:** no CUDA or JAXMG dependencies.
 
 ```bash
-pip install "bayeseor-jax[isambard] @ git+https://github.com/PSims/BayesEoR-v2.git@main"
+conda env create -f environment.yml
+conda activate bayeseor
 ```
 
-Then check the package and JAX backend:
+**HPC / NVIDIA GPU:** CUDA 12 JAX and the matching Linux JAXMG wheel.
 
 ```bash
-python -c "import jax, bayeseor_jax; print(jax.devices())"
+conda env create -f environment-hpc.yml
+conda activate bayeseor-hpc
 ```
 
-For local development from a clone:
+Check the installation:
 
 ```bash
-git clone https://github.com/PSims/BayesEoR-v2.git
-cd BayesEoR-v2
-pip install -e ".[csd3]"
-python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
+python -c "import jax, bayeseor_jax, pymultinest; print(jax.devices())"
 ```
 
-Use `[isambard]` instead of `[csd3]` on systems matching the Isambard wheel. Unsupported systems should build JAXMg from source first; see [Installation](docs/installation.md).
+The HPC wheels require Python 3.11 and compatible site runtimes; they are not
+universal GPU binaries. See [Installation](docs/installation.md) for requirements,
+existing environments, source builds and running the examples. Large distributed
+KL construction remains HPC-only; CPU inference supports original or precomputed
+reduced bases.
 
 For a CSD3 Slurm workflow, including example one-GPU nested-sampling jobs, see [CSD3 Getting Started](docs/csd3.md).
 
