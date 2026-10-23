@@ -20,7 +20,7 @@ model realisation. The cosmological cube thumbnails originate from supplied
 With TeX (TikZ and newtx), Poppler and CairoSVG available, run from the repository:
 
 ```bash
-uv run --no-project --with cairosvg python tools/docs_diagrams/build.py
+uv run --no-project --with cairosvg python docs/tools/diagrams/build.py
 ```
 
 On macOS with Homebrew Cairo, set `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib`

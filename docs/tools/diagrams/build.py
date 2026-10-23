@@ -14,7 +14,7 @@ from dark_svg import convert
 
 
 SOURCE = Path(__file__).resolve().parent
-OUTPUT = SOURCE.parents[1] / 'docs/assets/diagrams'
+OUTPUT = SOURCE.parents[1] / 'assets/diagrams'
 VARIANTS = {
     'workflow': ('workflow.tex', ''),
     'eor-workflow': ('component_workflow.tex', ''),
