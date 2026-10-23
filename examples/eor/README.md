@@ -63,7 +63,10 @@ Each bin currently has the **same** independent prior,
 uniform density in linear power. These are not the manuscript's bin-dependent priors.
 
 Outputs go to `outputs/laptop_eor_nside128/`: the noisy data and noise draw,
-matrices, posterior samples, evidence summary and three analysis plots.
+matrices, posterior samples and evidence summary. The pipeline's
+`bayeseor_jax.analyze.save_analysis` runs automatically after sampling and writes
+the posterior summary and three titled figures (PNG and PDF) to this example's
+`plots/` folder. No separate plotting script is required.
 Existing sampler outputs are protected; use `--resume` for the same run or
 fresh output and matrix paths for changed settings.
 
@@ -71,4 +74,6 @@ This uses the central 15 times and channels of the manuscript's 47-time,
 39-channel setup, not its full observation or full-sky foreground analysis.
 The small live-point budget is for demonstrating the workflow, not establishing
 validated scientific constraints. See the [examples guide](../../docs/examples.md)
-for output conventions and optional comparisons of completed runs.
+for output conventions.
+
+![Pipeline power-spectrum and posterior plots](plots/power_spectrum_and_posteriors.png)

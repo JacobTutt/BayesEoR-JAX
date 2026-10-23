@@ -106,9 +106,10 @@ uses the same physical prior widths and noise covariance as inference.
 The joint model marginalises 1,859 coefficients while sampling the six
 power-spectrum amplitudes.
 
-The joint entry point includes KL preparation automatically; no separate run of
-the signal-only example is needed. Preparation and inference read the same
-configuration, including the shared image resolution and footprint.
+The joint entry point calls `run_setup(config, build_foreground_kl=True)`;
+no separate preparation script or signal-only run is needed. Setup builds and
+reduces the weighted operator using the resolved observation, physical prior
+and the same noise covariance as the likelihood.
 
 ## Power-spectrum priors
 
@@ -141,7 +142,11 @@ Each run writes:
 - `data/`: the actual noisy visibility vector and added noise realisation.
 - `matrices/`: forward operators and marginal-likelihood products.
 - `nested_sampling/`: posterior samples, evidence and run summary.
-- `analysis/`: posterior summaries and power-spectrum/posterior figures.
+
+The pipeline's `save_analysis` runs automatically after sampling, saving
+`posterior_summary.json` and three titled PNG/PDF figures in
+`examples/eor/plots/` or `examples/eor_fgs/plots/`, next to the corresponding
+configuration and input data. Plotting is not reimplemented in the examples.
 
 The joint example additionally writes the weighted foreground operator, KL
 spectrum and truncation diagnostics. Each entry point produces its own figures.
@@ -152,13 +157,22 @@ is recorded in `nested_sampling/likelihood_offset.json` and `summary.json`.
 The summary's `logZ` and the analysis loader restore the offset; native
 MultiNest text files retain centred values. Fixed data/noise normalisation
 constants remain omitted, as in the underlying likelihood.
-To compare both completed posteriors with the injected ensemble spectrum:
+To regenerate figures from completed samples, use the same pipeline function:
 
-```bash
-python examples/plot_recoveries.py --output outputs/recovery_plots
+```python
+from bayeseor_jax.analyze import save_analysis
+
+save_analysis(
+    "outputs/laptop_eor_nside128/nested_sampling",
+    output_dir="examples/eor/plots",
+    metadata_dir="outputs/laptop_eor_nside128",
+    label="Cosmological signal only",
+)
 ```
 
-This writes individual and overlaid PNG/PDF figures without rerunning inference.
+This reads existing samples without rerunning inference. Pass `expected_ps`
+to include a known reference spectrum. The plot functions also accept a
+multi-run `DataContainer` for posterior comparisons.
 See [posterior analysis](outputs-analysis.md) for comparing results.
 The `outputs/` directory is ignored by Git.
 

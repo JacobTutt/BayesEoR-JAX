@@ -163,13 +163,30 @@ the reduced operator.
     saves the singular values, `T_fg_reduced.singular_values.npy`, and the truncation
     diagnostics, `T_fg_reduced.svd.json`.
 
+## Building through setup
+
+To construct the basis and likelihood in one pipeline call, set
+`foreground_kl_path` in the configuration and run:
+
+```python
+from bayeseor_jax import run_setup
+
+setup = run_setup(config, build_foreground_kl=True, kl_f=0.1)
+```
+
+Setup resolves the observation once, saves the prior- and noise-weighted
+`A_fg.npy`, and calls `T_fg_svd_build_save` to save the reduced operator and
+its diagnostics. Joint assembly then uses its standard-normal latent prior.
+This explicitly rebuilds the KL basis; omit `build_foreground_kl` to reuse an
+existing basis for the same observation, noise and foreground prior.
+
 ## Configuration
 
 `foreground_kl_path`
 :   A saved reduced operator, used in place of the physical foreground model.
 
-    - **Effect:** its columns are used with a unit prior; setup does not repeat the
-      decomposition, and `foreground_prior_std_mk` is not applied again.
+    - **Effect:** its columns are used with a unit prior. By default setup loads
+      the saved basis unchanged; `foreground_prior_std_mk` is not applied again.
     - **Requires:** `model: fg` or `model: eor+fg`.
     - **Note:** the operator must match the observation, visibility ordering and
       foreground prior it was built from. Shape checks alone cannot confirm this.

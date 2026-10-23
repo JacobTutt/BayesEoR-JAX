@@ -23,6 +23,7 @@ from .inference.prior import Prior
 from .model.instrument.noise import build_noise_variance
 from .model.construction.operator_construction import assemble_joint_operator
 from .model.construction.likelihood_products import save_likelihood_products
+from .model.construction.kl_reduction import T_fg_svd_build_save, select_foreground_rank
 from .model.construction.storage import ensure_cached, save_array
 from .model.cosmology.transforms import Cosmology
 from .model.cosmology.power_spectrum import (
@@ -77,7 +78,8 @@ class SetupResult:
         self.model = model
 
 
-def run_setup(config: RunConfig) -> SetupResult:
+def run_setup(config: RunConfig, *, build_foreground_kl: bool = False,
+              kl_f: float = 0.1) -> SetupResult:
     """Prepare the physical operators, priors and marginalised likelihood.
 
     Parameters
@@ -85,6 +87,13 @@ def run_setup(config: RunConfig) -> SetupResult:
     config : RunConfig
         Requested data/model/inference settings. Actual observation axes and
         model coordinates are resolved locally without modifying this object.
+    build_foreground_kl : bool, optional
+        Construct the weighted foreground operator and reduce it into
+        config.foreground_kl_path before joint assembly. Rebuilds the basis
+        when explicitly requested; otherwise loads the supplied basis unchanged.
+    kl_f : float, optional
+        Maximum discarded foreground RMS relative to the noise when building
+        the KL basis. Defaults to 0.1; ignored when loading an existing basis.
 
     Returns
     -------
@@ -95,8 +104,10 @@ def run_setup(config: RunConfig) -> SetupResult:
     Notes
     -----
     This coordinates loading, geometry, component construction, joint assembly
-    and likelihood products; it does not run nested sampling. A supplied KL
-    operator is loaded with a standard-normal prior, not recomputed.
+    and likelihood products; it does not run nested sampling. KL construction
+    uses the resolved observation, physical prior and inference noise weights.
+    A supplied KL operator is loaded with a standard-normal prior, and is only
+    recomputed when build_foreground_kl is explicitly enabled.
     Omitted image and transverse Fourier resolutions are inferred from the
     selected observation. Explicit values below the estimates trigger warnings
     but are retained; these checks do not replace convergence studies.
@@ -125,6 +136,10 @@ def run_setup(config: RunConfig) -> SetupResult:
     if config.model not in ("eor", "fg", "eor+fg"):
         raise ValueError("model must be 'eor', 'fg' or 'eor+fg'")
     include_eor, include_fg = config.model != "fg", config.model != "eor"
+    if build_foreground_kl:
+        if not include_fg or foreground_kl_path is None:
+            raise ValueError("KL construction requires a foreground model and foreground_kl_path")
+        select_foreground_rank([], 1, kl_f)
     if not include_fg and foreground_kl_path is not None:
         raise ValueError("foreground_kl_path cannot be used with model='eor'")
     if not include_eor and config.use_intrinsic_noise_fitting:
@@ -143,7 +158,7 @@ def run_setup(config: RunConfig) -> SetupResult:
 
     if include_fg and not config.beta_fg:
         raise ValueError("beta_fg must contain at least one spectral index")
-    if include_fg and foreground_kl_path is None and len(config.foreground_prior_std_mk) != 1 + len(config.beta_fg):
+    if include_fg and (foreground_kl_path is None or build_foreground_kl) and len(config.foreground_prior_std_mk) != 1 + len(config.beta_fg):
         raise ValueError(
             "foreground_prior_std_mk must contain one width for the constant "
             "field and one for each beta_fg power law"
@@ -153,15 +168,21 @@ def run_setup(config: RunConfig) -> SetupResult:
     array_save_directory = Path(array_save_directory).expanduser().resolve()
     if foreground_kl_path is not None:
         foreground_kl_path = Path(foreground_kl_path).expanduser().resolve()
-        # A supplied operator is an input, never a target of setup's output writers.
+        # Keep the KL operator separate from all other setup products.
         output_names = ("T_21.npy", "T.npy", "Ninv.npy", "T_Ninv_T.npy", "dbar.npy", "d_ninv_d.npy")
+        if build_foreground_kl:
+            output_names += ("T_fg.npy", "A_fg.npy")
+            for source in (config.data_path, config.noise_data_path, config.effective_noise_path):
+                if source is not None and foreground_kl_path == Path(source).expanduser().resolve():
+                    raise ValueError("KL output must not overwrite an input data or noise file")
         if foreground_kl_path in {(array_save_directory / name).resolve() for name in output_names}:
             raise ValueError("foreground_kl_path must not be a setup output path")
-        reduced = np.load(foreground_kl_path, mmap_mode="r")
-        if reduced.ndim != 2 or reduced.dtype != np.complex128:
-            raise ValueError("The KL foreground operator must be a complex128 matrix")
-        if not include_eor and reduced.shape[1] == 0:
-            raise ValueError("Foreground-only inference requires at least one retained foreground mode")
+        if not build_foreground_kl:
+            reduced = np.load(foreground_kl_path, mmap_mode="r")
+            if reduced.ndim != 2 or reduced.dtype != np.complex128:
+                raise ValueError("The KL foreground operator must be a complex128 matrix")
+            if not include_eor and reduced.shape[1] == 0:
+                raise ValueError("Foreground-only inference requires at least one retained foreground mode")
     save_dir = Path(save_dir).expanduser().resolve()
 
     vis_dict = get_vis_data(
@@ -325,8 +346,10 @@ def run_setup(config: RunConfig) -> SetupResult:
         "effective_noise_path": None if config.effective_noise_path is None else str(Path(config.effective_noise_path).expanduser().resolve()),
         "priors": None if config.priors is None else np.asarray(config.priors, dtype=float).tolist(),
         "uniform_priors": None if config.uniform_priors is None else np.asarray(config.uniform_priors, dtype=bool).astype(int).tolist(),
-        "foreground_prior_std_mk": list(config.foreground_prior_std_mk) if include_fg and foreground_kl_path is None else None,
+        "foreground_prior_std_mk": list(config.foreground_prior_std_mk) if include_fg and (foreground_kl_path is None or build_foreground_kl) else None,
         "foreground_kl_path": str(foreground_kl_path) if foreground_kl_path is not None else None,
+        "foreground_kl_built": bool(build_foreground_kl),
+        "foreground_kl_f": float(kl_f) if build_foreground_kl else None,
         "use_intrinsic_noise_fitting": bool(config.use_intrinsic_noise_fitting),
     }
 
@@ -426,6 +449,30 @@ def run_setup(config: RunConfig) -> SetupResult:
         uvw_array_m=vis_dict["uvws"],
     )
 
+    # One noise covariance supplies both KL whitening and likelihood products.
+    variance = build_noise_variance(
+        int(n_t), int(n_freq), bm.nbls, sigma=config.sigma,
+        redundancy=vis_dict["redundancy"], effective_noise=effective_noise,
+    )
+    ninv_path = array_save_directory / "Ninv.npy"
+    noise_changed = not ninv_path.exists() or not np.array_equal(np.load(ninv_path), np.asarray(1.0 / variance))
+    ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=config.clobber or noise_changed)
+
+    physical_fg_std = np.empty(0)
+    if include_fg and (foreground_kl_path is None or build_foreground_kl):
+        physical_fg_std = np.repeat(config.foreground_prior_std_mk, bm.n_fg_spatial_modes)
+        if (not np.isrealobj(physical_fg_std) or not np.all(np.isfinite(physical_fg_std))
+                or np.any(physical_fg_std <= 0)):
+            raise ValueError("foreground prior widths must be finite, real and positive")
+    if build_foreground_kl:
+        weighted_path = bm.T_fg_weighted_build_save(
+            prior_sqrt=physical_fg_std, noise_whitener=1.0 / np.sqrt(variance),
+        )
+        T_fg_svd_build_save(weighted_path, ninv_path, output_path=foreground_kl_path, f=kl_f)
+        reduced = np.load(foreground_kl_path, mmap_mode="r")
+        if not include_eor and reduced.shape[1] == 0:
+            raise ValueError("Foreground-only inference requires at least one retained foreground mode")
+
     # Select the foreground response and its matching prior together. Everything
     # downstream uses the same joint operator and likelihood-product functions.
     t21_path = None
@@ -434,10 +481,7 @@ def run_setup(config: RunConfig) -> SetupResult:
     foreground_path = None
     foreground_std = np.empty(0)
     if include_fg and foreground_kl_path is None:
-        foreground_std = np.repeat(config.foreground_prior_std_mk, bm.n_fg_spatial_modes)
-        if (not np.isrealobj(foreground_std) or not np.all(np.isfinite(foreground_std))
-                or np.any(foreground_std <= 0)):
-            raise ValueError("foreground prior widths must be finite, real and positive")
+        foreground_std = physical_fg_std
         foreground_path = ensure_cached(array_save_directory / "T_fg.npy", bm.T_fg_build_save, clobber=config.clobber)
     elif include_fg:
         foreground_path = foreground_kl_path
@@ -451,16 +495,6 @@ def run_setup(config: RunConfig) -> SetupResult:
         dependencies=tuple(path for path in (t21_path, foreground_path) if path is not None),
         clobber=config.clobber,
     )
-
-    # Noise belongs to the observation, not to either coefficient representation.
-    variance = build_noise_variance(
-        int(n_t), int(n_freq), bm.nbls, sigma=config.sigma,
-        redundancy=vis_dict["redundancy"], effective_noise=effective_noise,
-    )
-    ninv_path = array_save_directory / "Ninv.npy"
-    # This small vector can be compared exactly, so changed noise cannot reuse G.
-    noise_changed = not ninv_path.exists() or not np.array_equal(np.load(ninv_path), np.asarray(1.0 / variance))
-    ensure_cached(ninv_path, lambda: save_array(ninv_path, 1.0 / variance), clobber=config.clobber or noise_changed)
 
     # Only now prepare the likelihood products from the selected joint matrix.
     vis_noisy = jnp.asarray(vis_dict["vis_noisy"], dtype=jnp.complex128)

@@ -29,6 +29,27 @@ Setup and sampling write the following to the run's output directories.
 `map_coefficients.npy`
 :   The MAP foreground coefficients, written instead of a chain for `model: fg`.
 
+## Saving the standard analysis
+
+The example pipeline calls `save_analysis` automatically after sampling. It
+uses the same weighted statistics and plotting functions described below,
+writing a JSON summary and titled PNG/PDF versions of the power spectrum,
+marginal posteriors and combined figure.
+
+```python
+from bayeseor_jax.analyze import save_analysis
+
+save_analysis(
+    "outputs/run_a/nested_sampling",
+    metadata_dir="outputs/run_a",
+    output_dir="outputs/run_a/plots",
+    label="Cosmological signal + foregrounds",
+)
+```
+
+This can also regenerate figures from completed runs without resampling.
+Existing analysis files are replaced; the chains remain unchanged.
+
 ## Reading results
 
 === "Code"

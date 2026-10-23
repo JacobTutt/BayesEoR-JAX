@@ -13,6 +13,12 @@ dc = DataContainer(["outputs/multinest"])
 fig, (power_ax, posterior_axes) = plot_power_spectra_and_posteriors(dc)
 ```
 
+## Saving the standard analysis
+
+::: bayeseor_jax.analyze.plotting.save_analysis
+    options:
+      heading_level: 3
+
 ## Results
 
 ::: bayeseor_jax.analyze.results.DataContainer

@@ -15,13 +15,14 @@ python -m examples.eor_fgs.run --sample
 
 Omit `--sample` to stop after KL preparation, data loading, noise generation
 and matrix construction. The entry point defaults to CPU JAX and performs KL
-preparation automatically, using the same configuration as inference.
+preparation automatically through `run_setup(config, build_foreground_kl=True)`,
+using the same resolved observation, physical prior and noise model as inference.
+The example contains no separate matrix-construction or decomposition logic.
 
 ```text
 eor_fgs/
 ├── config.yaml
 ├── run.py
-├── prepare_kl.py
 └── data/
     ├── visibilities.npy
     ├── uvw_model.npy
@@ -75,7 +76,12 @@ prior, `log10(Δ² / mK²) ~ Uniform(-1, 6)`. Grey boxes show these actual bound
 not a uniform density in linear power or the manuscript's bin-dependent priors.
 
 Outputs go to `outputs/laptop_eor_fgs_nside128/`: noisy data, noise draw, KL
-diagnostics, matrices, posterior samples, evidence and three analysis plots.
+diagnostics, matrices, posterior samples and evidence. The weighted operator
+`A_fg.npy` is saved with the likelihood matrices; the reduced operator and SVD
+diagnostics are saved under `kl/`. The pipeline's
+`bayeseor_jax.analyze.save_analysis` runs automatically after sampling and writes
+the posterior summary and three titled figures (PNG and PDF) to this example's
+`plots/` folder. No separate plotting script is required.
 Use `--resume` only for the same run; changed settings require fresh output,
 matrix and KL paths to avoid stale results.
 
@@ -85,4 +91,6 @@ this is not a full-sky validation or a demonstration of horizon recovery.
 The shared footprint does not guarantee exact representation of point-source
 subpixel structure. The small live-point budget illustrates the workflow,
 not validated scientific constraints. See the [examples guide](../../docs/examples.md)
-for output conventions and optional comparisons of completed runs.
+for output conventions.
+
+![Pipeline power-spectrum and posterior plots](plots/power_spectrum_and_posteriors.png)

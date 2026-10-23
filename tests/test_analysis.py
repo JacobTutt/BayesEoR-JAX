@@ -194,17 +194,33 @@ def test_prior_boxes_use_each_bins_saved_bounds(tmp_path):
     fig.canvas.draw()
 
 
-def test_example_writes_summaries_and_figures(tmp_path):
-    from examples.run_analysis_example import run_output_analysis
+def test_pipeline_writes_summaries_and_titled_figures(tmp_path, monkeypatch):
+    from bayeseor_jax.analyze import save_analysis
+    from matplotlib.figure import Figure
+
+    titles = []
+    original_savefig = Figure.savefig
+    def capture_savefig(fig, *args, **kwargs):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        title_box = fig._suptitle.get_window_extent(renderer)
+        assert all(title_box.y0 > ax.get_window_extent(renderer).y1 for ax in fig.axes)
+        titles.append(fig._suptitle.get_text())
+        return original_savefig(fig, *args, **kwargs)
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
     sampler = write_run(tmp_path / "nested_sampling")
-    summary = run_output_analysis(sampler, output_dir=tmp_path)
+    before = (sampler / 'data-.txt').read_bytes()
+    summary = save_analysis(sampler, output_dir=tmp_path / "plots", label="21-cm only")
     np.testing.assert_allclose(summary["medians"], np.sqrt(10.))
-    assert (tmp_path / "analysis" / "posterior_summary.json").exists()
-    assert len(list((tmp_path / "analysis").glob("*.png"))) == 3
+    assert (tmp_path / "plots" / "posterior_summary.json").exists()
+    assert len(list((tmp_path / "plots").glob("*.png"))) == 3
+    assert len(list((tmp_path / "plots").glob("*.pdf"))) == 3
+    assert len(titles) == 6 and all("21-cm only" in title for title in titles)
+    assert (sampler / 'data-.txt').read_bytes() == before
 
 
 def test_separate_setup_metadata_and_example(tmp_path):
-    from examples.run_analysis_example import run_output_analysis
+    from bayeseor_jax.analyze import save_analysis
     run = write_run(tmp_path / "multinest")
     metadata = tmp_path / "setup"
     metadata.mkdir()
@@ -213,7 +229,7 @@ def test_separate_setup_metadata_and_example(tmp_path):
     data = DataContainer([run], metadata_dirs=metadata)
     np.testing.assert_allclose(data.k_vals[0], [.1, .2])
     assert data.args[0]["priors"] == [[-1., 2.]] * 2
-    summary = run_output_analysis(run, output_dir=tmp_path, metadata_dir=metadata)
+    summary = save_analysis(run, output_dir=tmp_path / "plots", metadata_dir=metadata)
     np.testing.assert_allclose(summary["medians"], data.medians[0])
     assert not (run / "args.json").exists()
     with pytest.raises(ValueError, match="metadata_dirs"):

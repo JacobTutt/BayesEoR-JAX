@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from dataclasses import asdict, FrozenInstanceError
+from dataclasses import asdict, FrozenInstanceError, replace
 import warnings
 
 import jax.numpy as jnp
@@ -210,6 +210,64 @@ def test_kl_setup_does_not_need_original_foreground_file(tmp_path, setup_case, m
     monkeypatch.setattr(setup.BuildMatrices, 'T_fg_build_save', lambda **kwargs: pytest.fail('Unexpected build'))
     setup.run_setup(RunConfig(**arguments, sigma=.5, foreground_kl_path=path))
     assert not (tmp_path / 'T_fg.npy').exists()
+
+
+@pytest.mark.parametrize("model", ["fg", "eor+fg"])
+@pytest.mark.parametrize("effective_noise", [False, True])
+def test_setup_builds_kl_with_the_same_resolved_model_prior_and_noise(
+    tmp_path, setup_case, model, effective_noise,
+):
+    setup, arguments, vis = setup_case
+    widths = [1., 2., 4.]
+    if effective_noise:
+        noise_path = tmp_path / "effective_noise.npy"
+        np.save(noise_path, np.linspace(.3, .8, 6))
+        arguments["effective_noise_path"] = noise_path
+    config = RunConfig(**arguments, model=model, sigma=.5, foreground_prior_std_mk=widths)
+    original = setup.run_setup(config)
+    physical = np.load(tmp_path / "T_fg.npy")
+    inverse_noise = np.load(tmp_path / "Ninv.npy")
+    prior_std = np.repeat(widths, original.bm.n_fg_spatial_modes)
+    path = tmp_path / "kl/T_fg_reduced.npy"
+    result = setup.run_setup(replace(config, foreground_kl_path=path),
+                             build_foreground_kl=True, kl_f=0.)
+    weighted = np.load(tmp_path / "A_fg.npy")
+    np.testing.assert_allclose(weighted, np.sqrt(inverse_noise)[:, None] * physical * prior_std)
+    reduced = np.load(path)
+    expected_covariance = (physical * prior_std) @ (physical * prior_std).conj().T
+    np.testing.assert_allclose(reduced @ reduced.conj().T, expected_covariance, atol=1e-12)
+    np.testing.assert_array_equal(result.phi_inverse_class.foreground_precision, np.ones(reduced.shape[1]))
+    joint = np.load(tmp_path / "T.npy")
+    np.testing.assert_array_equal(joint[:, -reduced.shape[1]:], reduced)
+    np.testing.assert_allclose(np.load(tmp_path / "T_Ninv_T.npy"),
+                               joint.conj().T @ (inverse_noise[:, None] * joint), atol=1e-12)
+    np.testing.assert_allclose(np.load(tmp_path / "dbar.npy"),
+                               joint.conj().T @ (inverse_noise * vis["vis_noisy"]), atol=1e-12)
+
+
+@pytest.mark.parametrize("options", [dict(model="eor"), dict(kl_f=-1.),
+                                    dict(foreground_prior_std_mk=[1., 2.])])
+def test_kl_construction_rejects_invalid_settings(tmp_path, setup_case, options):
+    setup, arguments, _ = setup_case
+    options = dict(options)
+    kl_f = options.pop("kl_f", .1)
+    path = tmp_path / "kl/T_fg_reduced.npy"
+    config = RunConfig(**arguments, foreground_kl_path=path, sigma=.5, **options)
+    with pytest.raises(ValueError):
+        setup.run_setup(config, build_foreground_kl=True, kl_f=kl_f)
+    assert not path.exists()
+
+
+def test_kl_construction_requires_destination_and_protects_inputs(tmp_path, setup_case):
+    setup, arguments, _ = setup_case
+    config = RunConfig(**arguments, sigma=.5)
+    with pytest.raises(ValueError, match="requires.*foreground_kl_path"):
+        setup.run_setup(config, build_foreground_kl=True)
+    np.save(config.data_path, np.ones(6))
+    before = Path(config.data_path).read_bytes()
+    with pytest.raises(ValueError, match="overwrite an input"):
+        setup.run_setup(replace(config, foreground_kl_path=config.data_path), build_foreground_kl=True)
+    assert Path(config.data_path).read_bytes() == before
 
 
 @pytest.mark.parametrize('matrix', [np.ones((5, 2), dtype=np.complex128), np.ones((6, 2)), np.ones(6)])

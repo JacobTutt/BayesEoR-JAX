@@ -1,12 +1,15 @@
 """Diagnostic plots of weighted cosmological power-spectrum constraints."""
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib import style
 from matplotlib.patches import Rectangle
+from matplotlib.ticker import LogLocator, FuncFormatter, NullFormatter
 import numpy as np
 
+from .results import DataContainer
 
 _STYLE_PATH = Path(__file__).with_name("bayeseor.mplstyle")
 
@@ -105,6 +108,9 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
                 shaded.append((bounds, edges))
     ax.set(xscale="log", yscale="log", xlabel=r"$k$ [Mpc$^{-1}$]",
            ylabel=r"$\Delta^2(k)$ [mK$^2$]")
+    ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1., 2., 5.)))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
+    ax.xaxis.set_minor_formatter(NullFormatter())
     ax.grid(color="0.85", linestyle=":", linewidth=.6)
     ax.legend(loc="lower right", frameon=False, ncols=1)
     return ax.figure, ax
@@ -247,3 +253,60 @@ def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None
     description = "Peak-normalised marginal posterior" if normalisation == "peak" else "Marginal posterior density / dex"
     fig.text(.51, .58, description, rotation=90, va="center", ha="center", fontsize=8.)
     return fig, (power_ax, posterior_axes)
+
+
+@style.context(_STYLE_PATH)
+def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=None,
+                  expected_ps=None):
+    """Save weighted posterior summaries and the three standard analysis figures.
+
+    Parameters
+    ----------
+    sampler_dir : pathlib.Path or str
+        Completed MultiNest output directory. Samples and weights are read only.
+    output_dir : pathlib.Path or str
+        Destination for posterior_summary.json and PNG/PDF figures. Existing
+        analysis products with these names are replaced, not sampler outputs.
+    label : str, optional
+        Model description included in every figure title and legend.
+    metadata_dir : pathlib.Path or str, optional
+        Setup directory containing args.json and k-bin metadata, if separate
+        from the sampler products. Prior shading uses these saved bounds.
+    expected_ps : float or array-like, optional
+        Reference dimensional spectrum in mK² Mpc³, displayed without changing
+        posterior constraints. Omit for observations without a known reference.
+
+    Returns
+    -------
+    dict
+        Weighted means, medians, credible intervals and upper limits in mK²,
+        together with the representative wavenumbers and sampler path.
+    """
+    data = DataContainer([sampler_dir], labels=[label], metadata_dirs=metadata_dir,
+                         expected_ps=expected_ps)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "sampler": "multinest", "sampler_dir": str(sampler_dir),
+        "k_vals": data.k_vals[0].tolist(),
+        "averages": data.avgs[0].tolist(), "medians": data.medians[0].tolist(),
+        "credible_intervals": {
+            str(level): {side: values.tolist() for side, values in interval.items()}
+            for level, interval in data.cred_intervals[0].items()
+        },
+        "upper_limits": data.uplims[0].tolist(),
+    }
+    (output_dir / "posterior_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    for plot, stem, title in (
+        (plot_power_spectra, "power_spectrum", "21-cm power spectrum"),
+        (plot_posteriors, "posteriors", "Marginal power-spectrum posteriors"),
+        (plot_power_spectra_and_posteriors, "power_spectrum_and_posteriors", "21-cm power-spectrum inference"),
+    ):
+        fig, _ = plot(data, plot_priors=True)
+        try:
+            fig.suptitle(f"{title}\n{label}", fontsize=10, y=1.03, va="bottom")
+            for extension in ("png", "pdf"):
+                fig.savefig(output_dir / f"{stem}.{extension}", dpi=300, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+    return summary

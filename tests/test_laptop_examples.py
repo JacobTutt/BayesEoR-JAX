@@ -74,7 +74,7 @@ def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
     assert refined.pixel_area_sr == pytest.approx(4*np.pi/(12*fine_nside**2))
 
 def test_injected_spectrum_uses_simulation_resolution():
-    from examples.plot_recoveries import injected_power_spectrum
+    from examples.run_analysis_example import injected_power_spectrum
 
     metadata = json.loads(Path("examples/eor/data/simulation.json").read_text())
     power = injected_power_spectrum(metadata)
@@ -101,15 +101,13 @@ def test_independent_entrypoint_selects_own_inputs(name, monkeypatch):
 def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import bayeseor_jax
-    from examples.eor_fgs import prepare_kl as preparation
     from examples import run_analysis_example as example
 
     steps = []
     data = np.array([1+2j, 1-2j])
     noise = np.array([.1+.2j, .1-.2j])
-    def prepare(config):
-        steps.append(('kl', config))
-    def setup(config):
+    def setup(config, *, build_foreground_kl):
+        assert build_foreground_kl is True
         steps.append(('setup', config))
         return SimpleNamespace(vis_dict={'vis_noisy':data+noise, 'noise':noise})
     def sample(**kwargs):
@@ -117,18 +115,19 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, mon
         kwargs['out_dir'].mkdir()
         (kwargs['out_dir']/'summary.json').write_text('{"sampler":"multinest"}')
         return {'sampler':'multinest'}
-    monkeypatch.setattr(preparation, 'prepare_kl', prepare)
     monkeypatch.setattr(bayeseor_jax, 'run_setup', setup)
     monkeypatch.setattr(bayeseor_jax, 'run_nestedsampling', sample)
-    monkeypatch.setattr(example, 'run_output_analysis', lambda **kwargs:steps.append(('analysis', kwargs)))
+    from bayeseor_jax.analyze import save_analysis
+    assert example.save_analysis is save_analysis
+    monkeypatch.setattr(example, 'save_analysis', lambda **kwargs:steps.append(('analysis', kwargs)))
     overrides = ['--output-dir', str(tmp_path), '--array-save-directory', str(tmp_path/'matrices'),
                  '--foreground-kl-path', str(tmp_path/'kl/T_fg_reduced.npy')]
     example.run_example('examples/eor_fgs/config.yaml', do_sampling=True,
                         prepare_foreground=True, extra_bayeseor_args=overrides)
-    assert [name for name, _ in steps] == ['kl','setup','sample','analysis']
-    assert steps[0][1] is steps[1][1]
+    assert [name for name, _ in steps] == ['setup','sample','analysis']
     assert steps[0][1].nside == 128 and steps[0][1].footprint_nside == 64
-    assert steps[2][1]['center_likelihood'] is True
+    assert steps[1][1]['center_likelihood'] is True
+    assert steps[2][1]['output_dir'] == Path('examples/eor_fgs/plots').resolve()
     np.testing.assert_array_equal(np.load(tmp_path/'data/visibilities_noisy.npy'), data+noise)
     np.testing.assert_array_equal(np.load(tmp_path/'data/noise.npy'), noise)
     with pytest.raises(FileExistsError, match='Sampler output already exists'):
@@ -137,4 +136,4 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, mon
     with pytest.raises(ValueError, match='configuration changed'):
         example.run_example('examples/eor_fgs/config.yaml',
                             extra_bayeseor_args=overrides+['--nside','64'])
-    assert len(steps) == 4
+    assert len(steps) == 3

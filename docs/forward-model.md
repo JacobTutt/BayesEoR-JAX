@@ -8,7 +8,10 @@ configuration.
 
 ## Setup flow
 
-`run_setup(config)` performs the following steps without modifying `config`:
+`run_setup(config)` performs the following steps without modifying `config`.
+Pass `build_foreground_kl=True` to construct a KL basis at the configured
+`foreground_kl_path` using the resolved physical model and noise; otherwise
+an existing basis is loaded unchanged:
 
 1. Load and prepare the [visibility data](data.md).
 2. Resolve the model geometry: the image pixels, the Fourier grid and, when the
