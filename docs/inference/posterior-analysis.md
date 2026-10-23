@@ -36,6 +36,11 @@ uses the same weighted statistics and plotting functions described below,
 writing a JSON summary and a single titled PNG combining the power spectrum
 and marginal posteriors.
 
+Colours default to blue for 21-cm-only models and red for joint 21-cm +
+foreground models, using the saved model configuration. Pass `uplim_inds`
+to `save_analysis` to display selected bins as 95% upper limits instead of
+central credible intervals.
+
 ```python
 from bayeseor_jax.analyze import save_analysis
 

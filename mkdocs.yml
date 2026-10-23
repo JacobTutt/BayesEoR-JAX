@@ -113,8 +113,9 @@ nav:
       - Running inference: inference/running.md
       - Posterior analysis: inference/posterior-analysis.md
   - Examples:
-      - Running the example scripts: examples/index.md
-      - Configuration reference: examples/configuration.md
+      - Overview: examples/index.md
+      - 21-cm only: examples/eor.md
+      - 21-cm and foregrounds: examples/eor-fgs.md
   - API:
       - Overview: api/index.md
       - Setup: api/setup.md
