@@ -15,6 +15,13 @@
   \end{scope}}
 \begin{document}
 \begin{tikzpicture}[x=1cm,y=1cm]
+% Keep every two-row workflow at the same displayed scale and height.
+\path[use as bounding box] (0,0.18) rectangle (17.65,-6.70);
+\ifdefined\ForegroundWorkflow
+  \begin{scope}[xshift=1.78cm]
+\else
+  \begin{scope}
+\fi
 \tikzset{grouplabel/.style={fill=panelbg, draw=instc,
   font=\footnotesize\bfseries, inner xsep=3pt, inner ysep=2pt, rotate=90}}
 
@@ -99,5 +106,6 @@
 \node[thumb] at ($(model.north)+(0,-1.58)$)
   {\includegraphics[trim=1.219cm 0 0 0,clip,width=1.65cm]{icon_likelihood.pdf}};
 \draw[flow] (vis.east) -- (model.west);
+\end{scope}
 \end{tikzpicture}
 \end{document}
