@@ -1571,8 +1571,15 @@ power-spectrum and posterior figures.</p>
 <p>Setup and sampling write the following to the run's output directories.</p>
 <dl>
 <dt><code>summary.json</code></dt>
-<dd>The sampler settings, dimensions, output paths and evidence, <code>logZ</code> and
-<code>logZerr</code>.</dd>
+<dd>
+<p>The sampler settings, dimensions, output paths and evidence, <code>logZ</code> and
+<code>logZerr</code>.</p>
+<p>The reported <code>logZ</code> includes the automatically restored likelihood offset;
+native MultiNest files retain centred values.</p>
+</dd>
+<dt><code>likelihood_offset.json</code></dt>
+<dd>The fixed numerical offset used by the sampler. Required when resuming;
+the analysis loader restores log likelihoods using the copy in <code>summary.json</code>.</dd>
 <dt><code>data-*.txt</code></dt>
 <dd>The standard MultiNest products. The weighted chain is usually <code>data-.txt</code>;
 a shorter file root may be used to stay within MultiNest's path-length limit.</dd>
