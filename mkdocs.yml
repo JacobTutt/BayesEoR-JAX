@@ -95,7 +95,7 @@ nav:
       - Instrument response: instrument.md
       - Construction and execution: forward-model.md
   - Inference:
-      - Parameterisation and marginalisation: joint-inference.md
+      - Inference: joint-inference.md
       - Running inference: inference.md
       - Posterior analysis: outputs-analysis.md
   - Data:

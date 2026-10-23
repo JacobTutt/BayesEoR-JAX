@@ -20,6 +20,7 @@ VARIANTS = {
     'eor-workflow': ('component_workflow.tex', ''),
     'foreground-workflow': ('component_workflow.tex', r'\def\ForegroundWorkflow{1}'),
     'joint-model-workflow': ('component_workflow.tex', r'\def\JointWorkflow{1}'),
+    'inference-workflow': ('inference_workflow.tex', ''),
 }
 
 

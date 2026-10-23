@@ -1,4 +1,7 @@
-# Parameterisation and marginalisation
+# Inference
+
+[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](assets/diagrams/inference-workflow.png#only-light)](assets/diagrams/inference-workflow.png)
+[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](assets/diagrams/inference-workflow-dark.png#only-dark)](assets/diagrams/inference-workflow-dark.png)
 
 Given a physical model for the measured visibilities, inference connects its
 coefficients to the quantities we wish to recover. BayesEoR assigns zero-mean Gaussian

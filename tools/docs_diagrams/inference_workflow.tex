@@ -1,0 +1,50 @@
+\input{style.tex}
+\begin{document}
+\begin{tikzpicture}[x=1cm,y=1cm]
+
+% Top row: compare model and observation, then introduce the coefficient prior.
+\node[panel=infc,minimum width=6.42cm,minimum height=2.45cm] (data) at (0.45,0) {};
+\draw[infc!45!panelbg,dashed,line width=0.5pt] (3.66,-0.20)--(3.66,-2.25);
+\node[ttl,anchor=north] at (2.055,-0.12) {Modelled Data\ \mdseries\,$\bm m$};
+\node[ttl,anchor=north] at (5.265,-0.12) {Observation\ \mdseries\,$\bm d$};
+% The right-hand waterfall is noiseless; the left-hand waterfall includes noise.
+\node[thumb] at (2.055,-1.40) {\includegraphics[trim=1.219cm 0 0 0,clip,width=1.65cm]{icon_likelihood.pdf}};
+\node[thumb] at (5.265,-1.40) {\includegraphics[trim=0 0 1.219cm 0,clip,width=1.65cm]{icon_likelihood.pdf}};
+
+\node[stage] (like) at (7.47,0) {};
+\node[ttl,anchor=north] at (8.925,-0.12) {Likelihood};
+\node[lbl] at (8.925,-0.70) {$\mathcal L(\bm d\mid\bm b)$};
+\node[lbl] at (8.925,-1.30) {$\propto\exp\!\left[-\tfrac12\bm r^\dagger\mathbf N^{-1}\bm r\right]$};
+\node[small] at (8.925,-1.95) {$\bm r=\bm d-\bm m,\quad\bm m=\mathbf T\bm b$};
+
+\node[stage] (prior) at (10.98,0) {};
+\node[ttl,anchor=north] at (12.435,-0.12) {Prior\\Covariance\ \mdseries\,$\mathbf\Psi(\bm\varphi)$};
+\node[thumb] at (12.485,-1.70) {\includegraphics{icon_prior.pdf}};
+\node[small,text=eorc,anchor=east] at (11.74,-1.50) {$\mathbf\Phi_{21}$};
+\node[small,text=fgc,anchor=west] at (13.24,-2.12) {$\mathbf\Sigma'_{\rm FG}$};
+\draw[flow] (data.east)--(like.west);
+\draw[flow] (like.east)--(prior.west);
+
+% Bottom row runs right to left, completing the inference workflow.
+\node[stage] (marg) at (10.98,-3.25) {};
+\node[ttl,anchor=north] at (12.435,-3.37) {Marginalised\\Likelihood\ \mdseries\,$\mathcal L(\bm d\mid\bm\varphi)$};
+\node[thumb] at (12.435,-4.90) {\includegraphics{icon_marginal.pdf}};
+\draw[flow] (prior.south)--(marg.north);
+
+\node[stage] (ns) at (7.47,-3.25) {};
+\node[ttl,anchor=north] at (8.925,-3.37) {Nested\\Sampling\ \mdseries\,$\bm\rho$};
+\node[thumb] at (8.925,-4.90) {\includegraphics{icon_nested.pdf}};
+\draw[flow] (marg.west)--(ns.east);
+
+\node[panel=infc,minimum width=6.42cm,minimum height=2.45cm] (out) at (0.45,-3.25) {};
+\draw[infc!45!panelbg,dashed,line width=0.5pt] (3.66,-3.45)--(3.66,-5.50);
+\node[ttl,anchor=north] at (2.055,-3.37) {Power Spectrum\ \mdseries\,$\Delta^2_{21}(k)$};
+\node[thumb] at (2.055,-4.72) {\includegraphics{icon_powerspec.pdf}};
+\node[ttl,anchor=north] at (5.265,-3.37) {Bayesian Evidence\ \mdseries\,$\mathcal Z$};
+\node[thumb,anchor=south] at (5.265,-5.3285) {\includegraphics{icon_evidence.pdf}};
+\node[font=\scriptsize,text=eorc,anchor=north] at (4.695,-5.33) {$\mathcal Z_{\rm21+FGs}$};
+\node[font=\scriptsize,text=fgc,anchor=north] at (5.835,-5.33) {$\mathcal Z_{\rm FG}$};
+\draw[flow] (ns.west)--(out.east);
+
+\end{tikzpicture}
+\end{document}

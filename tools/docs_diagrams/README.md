@@ -4,7 +4,9 @@ The Home page uses `workflow.tex`, adapted from the supplied full workflow
 illustration. `component_workflow.tex` contains the EoR-only, foreground-only
 and combined forward-model variants, ending at **Modelled Data** rather than
 inference. The Modelled Data panel uses the right-hand, noiseless waterfall
-from `icon_likelihood.pdf`. All four share `style.tex` and the thumbnails in `plots/`.
+from `icon_likelihood.pdf`. `inference_workflow.tex` contains the two-row
+inference-only workflow, with modelled data and observation in a shared input
+panel. All diagrams share `style.tex` and the thumbnails in `plots/`.
 
 The diagrams are schematic illustrations, not numerical outputs of a common
 model realisation. The cosmological cube thumbnails originate from supplied
