@@ -2,7 +2,7 @@
 
 This is a step-by-step CSD3 setup guide for running the BayesEoR-JAX test examples. It uses a Python 3.12 conda environment, JAXMG from PyPI, and MultiNest as the default sampler.
 
-The recommended [HPC installation](installation.md) now installs native MultiNest
+The recommended [HPC installation](../installation.md) now installs native MultiNest
 through Conda as well as the Python wrapper. The manual instructions below are
 an alternative for site-managed environments; skip the MultiNest build and
 library-path steps when using the supplied Conda environment.
@@ -171,7 +171,7 @@ The analysis outputs are written under:
 ## 9. Example Entry Points
 
 The supplied examples are independent local runs; scheduler-specific scripts
-are not included. See [Examples](examples.md) for their data, configurations
+are not included. See [Examples](../examples/index.md) for their data, configurations
 and commands. On allocated HPC resources, use the installed environment and
 select the desired JAX platform explicitly.
 

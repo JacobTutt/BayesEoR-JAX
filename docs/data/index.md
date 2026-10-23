@@ -38,7 +38,7 @@ frequencies, times and telescope location of the data being analysed:
 - [Instrumental configuration](instrument.md): array layout and primary beam.
 - [Observation configuration](observation.md): frequencies, times and telescope
   location.
-- [Visibility data](data.md): supported formats, units, ordering and noise.
+- [Visibility data](visibility-data.md): supported formats, units, ordering and noise.
 
 ## Generating realistic data
 

@@ -32,7 +32,7 @@ the documentation does not require a GPU or the native MultiNest library.
 
 The Home and Model pages use committed workflow images in `docs/assets/diagrams/`.
 Editable diagram sources and regeneration commands are in
-[tools/docs_diagrams](https://github.com/JacobTutt/BayesEoR-JAX/tree/main/tools/docs_diagrams).
+[docs/tools/diagrams](https://github.com/JacobTutt/BayesEoR-JAX/tree/main/docs/tools/diagrams).
 Their generation is separate from the documentation build and does not require
 changes to the original manuscript figures. Light/dark pairs use Material's
 `#only-light` and `#only-dark` image fragments to follow the active site palette.

@@ -30,7 +30,7 @@ not the contents of the data, so the same dataset can be analysed with each.
 :   The foregrounds alone, as the null hypothesis for model comparison.
 
     - **Operator:** $\mathbf T'_{\rm FG}$, physical or
-      [reduced](kl-reduced-basis.md).
+      [reduced](../model/kl-reduced-basis.md).
     - **Sampled:** nothing. The evidence and MAP coefficients are evaluated in one
       solve; see [foreground-only evidence](map.md#foreground-only-evidence).
     - **Note:** `priors` and `fov_eor` are not needed.
@@ -82,7 +82,7 @@ foreground-only evidence directly when there is nothing to sample.
     call; the [example script](#example-script) does this for you.
 
     MultiNest needs both the native library and `pymultinest`, which the
-    [Conda environments](installation.md) install.
+    [Conda environments](../installation.md) install.
 
 `n_live_scale_factor`
 :   Sets the number of live points relative to the number of sampled parameters.
@@ -109,7 +109,7 @@ MultiNest runs in a single process, while each likelihood evaluation uses the
 available JAX devices. On one CPU or GPU, the likelihood uses native JAX; across
 several GPUs, it uses [JAXMg](https://flatironinstitute.github.io/jaxmg/latest/),
 with one process per GPU. To restrict a run to one GPU, set
-`CUDA_VISIBLE_DEVICES=0`. See [HPC and scaling](hpc-scaling.md).
+`CUDA_VISIBLE_DEVICES=0`. See [HPC and scaling](../technical/hpc-scaling.md).
 
 ## Example script
 

@@ -8,7 +8,7 @@ propagated.
 
 ## 1. Combine the components
 
-The [EoR](eor.md) and [foreground](foregrounds.md) contributions combine into a
+The [EoR](../model/eor.md) and [foreground](../model/foregrounds.md) contributions combine into a
 single linear model over the joint coefficient vector, $\boldsymbol b$, with a
 block-diagonal Gaussian prior.
 
@@ -28,7 +28,7 @@ block-diagonal Gaussian prior.
 
     $\mathbf T'_{\rm FG}$ is either the physical foreground operator, with prior
     $\mathbf\Sigma'_{\rm FG}=\mathbf\Sigma_q$, or its
-    [reduced basis](kl-reduced-basis.md), with $\mathbf\Sigma'_{\rm FG}=\mathbf I$.
+    [reduced basis](../model/kl-reduced-basis.md), with $\mathbf\Sigma'_{\rm FG}=\mathbf I$.
     Only the EoR block, $\mathbf\Phi$, depends on the
     [power spectrum](power-spectrum.md); the foreground prior is fixed.
 
@@ -36,7 +36,7 @@ block-diagonal Gaussian prior.
 
     Setup assembles $\mathbf T$ as `T.npy`, and the diagonal of
     $\mathbf\Psi^{-1}(\boldsymbol\varphi)$ is returned by
-    [PhiInverse](api/inference.md#bayeseor_jax.inference.phi.PhiInverse). The
+    [PhiInverse](../api/inference.md#bayeseor_jax.inference.phi.PhiInverse). The
     foreground widths are `foreground_prior_std_mk` for the physical basis, or ones
     for a reduced basis.
 
@@ -63,7 +63,7 @@ visibilities.
     $$
 
     The foreground term is the same for every proposed power spectrum. Its structure
-    is what the [KL reduced basis](kl-reduced-basis.md) compresses.
+    is what the [KL reduced basis](../model/kl-reduced-basis.md) compresses.
 
 === "Code"
 
@@ -74,7 +74,7 @@ visibilities.
 
 The same likelihood can be written in terms of a system the size of the
 coefficient vector. Its fixed parts are computed once during
-[setup](forward-model.md#saved-arrays), so each proposed power spectrum needs only
+[setup](../model/construction.md#saved-arrays), so each proposed power spectrum needs only
 one Cholesky factorisation.
 
 === "Maths"
@@ -113,13 +113,13 @@ one Cholesky factorisation.
 
     The factors of one half arise because $\boldsymbol d$ holds each visibility and
     its conjugate, so it contains only $N_{\rm d}/2$ independent measurements (see
-    [data vector ordering](data.md#data-vector-ordering)). The single Cholesky
+    [data vector ordering](../data/visibility-data.md#data-vector-ordering)). The single Cholesky
     factorisation of $\mathbf\Sigma$ supplies both the solve and the determinant,
     and is the dominant cost of each evaluation.
 
 === "Code"
 
-    [MarginalisedLikelihood](api/inference.md#bayeseor_jax.inference.likelihood_marg.MarginalisedLikelihood)
+    [MarginalisedLikelihood](../api/inference.md#bayeseor_jax.inference.likelihood_marg.MarginalisedLikelihood)
     evaluates this for a vector of log amplitudes, omitting $c_{\rm fixed}$:
 
     ```python
@@ -143,7 +143,7 @@ visibility. It is set by one of:
 
 `sigma`
 :   The default model, with variance $N_{tfb} = \sigma^2/R_{tb}$ for a baseline of
-    redundancy $R_{tb}$ (see [array layout](instrument.md#array-layout)).
+    redundancy $R_{tb}$ (see [array layout](../data/instrument.md#array-layout)).
 
     - **Units:** mK sr, the complex RMS per visibility before redundancy averaging.
     - **Required:** unless `effective_noise_path` is set, including when the data use
@@ -153,14 +153,14 @@ visibility. It is set by one of:
 :   Per-visibility noise amplitudes, replacing the `sigma` model.
 
     - **Format:** a `.npy` vector of length $2N_tN_\nu N_{\rm bls}$, in the
-      [data vector ordering](data.md#data-vector-ordering); its squared magnitudes
+      [data vector ordering](../data/visibility-data.md#data-vector-ordering); its squared magnitudes
       are the variances.
     - **Note:** it only changes the weights. It does not affect whether noise is
       added to the data.
 
 A noise vector supplied with `noise_data_path`, or estimated with `calc_noise`,
 does not set these weights, so `sigma` should still describe the noise level of
-the data. See [noise in the data](data.md#noise).
+the data. See [noise in the data](../data/visibility-data.md#noise).
 
 ### Foreground prior
 
@@ -170,6 +170,6 @@ the data. See [noise in the data](data.md#noise).
     - **Default:** `[8690.96, 2479547.30, 1406322.41]`.
     - **Units:** mK.
     - **Format:** one value for the constant term and one per entry of
-      [`beta_fg`](foregrounds.md#configuration); each is applied to every pixel.
+      [`beta_fg`](../model/foregrounds.md#configuration); each is applied to every pixel.
     - **Note:** not used with `foreground_kl_path`, whose coefficients have a unit
       prior.

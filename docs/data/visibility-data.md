@@ -98,7 +98,7 @@ $$
 
 The vector therefore has length $2N_tN_\nu N_{\rm bls}$. The conjugate copies are
 not independent measurements; the
-[marginalised likelihood](marginalisation.md#3-evaluate-in-coefficient-space)
+[marginalised likelihood](../inference/marginalisation.md#3-evaluate-in-coefficient-space)
 accounts for this. Visibility files are arranged this way automatically, but a
 `.npy` vector, its noise vectors and the [instrument model](instrument.md#array-layout)
 must already follow it.
@@ -139,4 +139,4 @@ applies is used:
     them unset for measurements that already contain noise.
 
 This only determines the data. The noise covariance that weights the likelihood
-is set separately; see [noise covariance](marginalisation.md#noise-covariance).
+is set separately; see [noise covariance](../inference/marginalisation.md#noise-covariance).

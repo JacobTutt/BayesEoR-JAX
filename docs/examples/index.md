@@ -4,7 +4,7 @@ These two independent examples run locally on CPU using supplied noiseless data:
 infer the cosmological power spectrum alone, or construct a foreground KL basis
 and perform joint inference. Each has its own data, configuration and entry point.
 Run the commands from the repository
-root after following [installation](installation.md). Nested sampling requires
+root after following [installation](../installation.md). Nested sampling requires
 the native MultiNest library as well as PyMultiNest; the supplied Conda
 environment installs both.
 
@@ -24,7 +24,7 @@ No sky-simulation script, external sky files or scheduler scripts are required.
 ## Observation and inputs
 
 The observing setup follows the wide-field study of
-[Tutt et al. (2026, manuscript)](references.md#wide-field-foreground-compression),
+[Tutt et al. (2026, manuscript)](../technical/references.md#wide-field-foreground-compression),
 using the same HERA-like baseline selection, Airy beam and noise prescription.
 These are reduced-observation demonstrations, not reproductions of its full-sky
 results: they use 15 rather than 47 integrations, 15 rather than 39 channels,
@@ -173,7 +173,7 @@ save_analysis(
 This reads existing samples without rerunning inference. Pass `expected_ps`
 to include a known reference spectrum. The plot functions also accept a
 multi-run `DataContainer` for posterior comparisons.
-See [posterior analysis](outputs-analysis.md) for comparing results.
+See [posterior analysis](../inference/posterior-analysis.md) for comparing results.
 The `outputs/` directory is ignored by Git.
 
 Give changed observations or models their own output and matrix directories.

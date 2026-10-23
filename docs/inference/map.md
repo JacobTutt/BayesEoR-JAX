@@ -28,7 +28,7 @@ component.
 
 === "Code"
 
-    [MaximumAPosteriori](api/inference.md#bayeseor_jax.inference.maxaposteriori.MaximumAPosteriori)
+    [MaximumAPosteriori](../api/inference.md#bayeseor_jax.inference.maxaposteriori.MaximumAPosteriori)
     reuses the likelihood products from setup:
 
     ```python
@@ -79,7 +79,7 @@ single solve.
 
 === "Code"
 
-    With `model: fg`, [running inference](inference.md) skips sampling and writes:
+    With `model: fg`, [running inference](running.md) skips sampling and writes:
 
     - `summary.json`: the evidence, with `sampler: analytic` and `logZerr: 0`.
     - `map_coefficients.npy`: the MAP foreground coefficients,

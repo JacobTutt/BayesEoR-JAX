@@ -29,7 +29,7 @@ eor/
 
 ## Supplied observation
 
-The setup follows [Tutt et al. (2026, manuscript)](../../docs/references.md#wide-field-foreground-compression),
+The setup follows [Tutt et al. (2026, manuscript)](../../docs/technical/references.md#wide-field-foreground-compression),
 *A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
 Evidence Evaluation in Interferometric Visibilities*, with reduced time and
 frequency coverage for a local demonstration.
@@ -73,7 +73,7 @@ fresh output and matrix paths for changed settings.
 This uses the central 15 times and channels of the manuscript's 47-time,
 39-channel setup, not its full observation or full-sky foreground analysis.
 The small live-point budget is for demonstrating the workflow, not establishing
-validated scientific constraints. See the [examples guide](../../docs/examples.md)
+validated scientific constraints. See the [examples guide](../../docs/examples/index.md)
 for output conventions.
 
 ![Pipeline power-spectrum and posterior plots](plots/power_spectrum_and_posteriors.png)

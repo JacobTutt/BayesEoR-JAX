@@ -1,9 +1,9 @@
 # Inference
 
 `MarginalisedLikelihood` evaluates the
-[marginalised likelihood](../marginalisation.md) for a set of power-spectrum
+[marginalised likelihood](../inference/marginalisation.md) for a set of power-spectrum
 amplitudes, and `run_multinest` samples it. `MaximumAPosteriori` recovers the
-[conditional coefficients](../map.md) from the same products. All three are built
+[conditional coefficients](../inference/map.md) from the same products. All three are built
 from the `SetupResult` returned by [`run_setup`](setup.md).
 
 ```python
@@ -33,8 +33,8 @@ log_l = setup.likelihood_class.log_likelihood(rho)
 
 ## Priors and noise
 
-The power-spectrum prior, the [coefficient prior](../power-spectrum.md#3-set-the-coefficient-prior)
-and the [noise covariance](../marginalisation.md#noise-covariance).
+The power-spectrum prior, the [coefficient prior](../inference/power-spectrum.md#3-set-the-coefficient-prior)
+and the [noise covariance](../inference/marginalisation.md#noise-covariance).
 
 ::: bayeseor_jax.inference.prior.Prior
     options:

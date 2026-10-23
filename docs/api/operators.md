@@ -1,6 +1,6 @@
 # Operators
 
-These functions evaluate the [EoR](../eor.md) and [foreground](../foregrounds.md)
+These functions evaluate the [EoR](../model/eor.md) and [foreground](../model/foregrounds.md)
 operators as JAX arrays. They do not read files, choose hardware or apply priors,
 so they can be used inside compiled code. For full-size operators saved to disk,
 see [construction](construction.md).
@@ -15,7 +15,7 @@ $$
 
 `T_21` and `T_fg` build a block of each operator from the sky geometry, baselines
 and beam. `T_fg_weighted` applies the prior and noise weighting used by the
-[KL reduced basis](../kl-reduced-basis.md).
+[KL reduced basis](../model/kl-reduced-basis.md).
 
 ::: bayeseor_jax.model.operators
     options:

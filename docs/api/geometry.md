@@ -3,7 +3,7 @@
 `build_image_geometry` selects the HEALPix pixels of each model field and tracks
 their directions through the observation. `build_fourier_geometry` defines the
 EoR coefficient grid, whose modes are converted to wavenumbers and grouped into
-[power-spectrum bins](../power-spectrum.md).
+[power-spectrum bins](../inference/power-spectrum.md).
 
 ## Sky pixels
 

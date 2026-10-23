@@ -55,13 +55,13 @@ noise.
 
 === "Code"
 
-    [weight_foreground_operator](api/operators.md#bayeseor_jax.model.operators.weight_foreground_operator)
+    [weight_foreground_operator](../api/operators.md#bayeseor_jax.model.operators.weight_foreground_operator)
     applies these factors to an existing operator, and
-    [T_fg_weighted](api/operators.md#bayeseor_jax.model.operators.T_fg_weighted)
+    [T_fg_weighted](../api/operators.md#bayeseor_jax.model.operators.T_fg_weighted)
     constructs and weights a visibility block directly.
 
     For a full analysis,
-    [T_fg_weighted_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_weighted_build_save)
+    [T_fg_weighted_build_save](../api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_weighted_build_save)
     builds $\mathbf A$ in CPU blocks and saves it as `A_fg.npy`, without first
     saving the unweighted operator.
 
@@ -92,7 +92,7 @@ visibility-space modes, each with a variance measured relative to the noise.
 
 === "Code"
 
-    [T_fg_svd_build_save](api/construction.md#bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save)
+    [T_fg_svd_build_save](../api/construction.md#bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save)
     performs the decomposition, truncation and rescaling of steps 2 to 4 in one call.
     It uses an exact, thin SVD of $\mathbf A$:
 
@@ -123,7 +123,7 @@ noise, so the reduced basis preserves the component's uncertainty to that level.
 
 === "Code"
 
-    [select_foreground_rank](api/construction.md#bayeseor_jax.model.construction.kl_reduction.select_foreground_rank)
+    [select_foreground_rank](../api/construction.md#bayeseor_jax.model.construction.kl_reduction.select_foreground_rank)
     implements this criterion, and is called by `T_fg_svd_build_save` through its
     `f` argument.
 
@@ -191,5 +191,5 @@ existing basis for the same observation, noise and foreground prior.
     - **Note:** the operator must match the observation, visibility ordering and
       foreground prior it was built from. Shape checks alone cannot confirm this.
 
-See [execution](forward-model.md#execution) and [HPC and scaling](hpc-scaling.md)
+See [execution](construction.md#execution) and [HPC and scaling](../technical/hpc-scaling.md)
 for memory requirements and distributed execution.

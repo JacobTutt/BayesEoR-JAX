@@ -9,7 +9,7 @@ and the only parameters explored by the sampler.
 
 ## 1. Convert the Fourier modes to wavenumbers
 
-Each [EoR coefficient](eor.md) belongs to a mode $(u, v, \eta)$, which corresponds
+Each [EoR coefficient](../model/eor.md) belongs to a mode $(u, v, \eta)$, which corresponds
 to a comoving wavenumber at the central redshift of the observation.
 
 === "Maths"
@@ -28,7 +28,7 @@ to a comoving wavenumber at the central redshift of the observation.
 
     `generate_k_modes_in_physical_coordinates` returns the wavenumber magnitude of
     each mode, in the same order as the columns of $\mathbf T_{21}$. This continues
-    the example on the [EoR model](eor.md) page.
+    the example on the [EoR model](../model/eor.md) page.
 
     ```python
     from bayeseor_jax.model.cosmology.transforms import Cosmology
@@ -103,7 +103,7 @@ is diagonal, with each variance set by the amplitude of its bin.
 
 === "Code"
 
-    [PhiInverse](api/inference.md#bayeseor_jax.inference.phi.PhiInverse) applies the
+    [PhiInverse](../api/inference.md#bayeseor_jax.inference.phi.PhiInverse) applies the
     normalisation and returns the diagonal prior precision of the joint coefficients
     for a given set of amplitudes. Its foreground block is fixed; see
     [analytical marginalisation](marginalisation.md).

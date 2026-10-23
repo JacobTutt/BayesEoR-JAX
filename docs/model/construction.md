@@ -13,13 +13,13 @@ Pass `build_foreground_kl=True` to construct a KL basis at the configured
 `foreground_kl_path` using the resolved physical model and noise; otherwise
 an existing basis is loaded unchanged:
 
-1. Load and prepare the [visibility data](data.md).
+1. Load and prepare the [visibility data](../data/visibility-data.md).
 2. Resolve the model geometry: the image pixels, the Fourier grid and, when the
    EoR is included, its $k$ bins.
 3. Build or reuse $\mathbf T_{21}$ and $\mathbf T_{\rm FG}$, or load a
    [reduced basis](kl-reduced-basis.md), and assemble the joint operator,
    $\mathbf T = [\mathbf T_{21}\ \ \mathbf T_{\rm FG}]$.
-4. Build the inverse [noise covariance](marginalisation.md#noise-covariance).
+4. Build the inverse [noise covariance](../inference/marginalisation.md#noise-covariance).
 5. Precompute the likelihood products.
 6. Construct the priors and the marginalised likelihood, and return a
    `SetupResult` ready for sampling.
@@ -27,7 +27,7 @@ an existing basis is loaded unchanged:
 Because the sky coefficients are marginalised analytically, the likelihood depends
 on the data and operators only through a few fixed matrix products, which are
 computed here once rather than at every sampler step. Their mathematical
-formulation is presented in [analytical marginalisation](marginalisation.md).
+formulation is presented in [analytical marginalisation](../inference/marginalisation.md).
 
 ## Saved arrays
 
@@ -91,7 +91,7 @@ GPUs. A single device uses native JAX; across several GPUs,
 process per GPU, with distributed JAX initialised before setup. The
 [KL decomposition](kl-reduced-basis.md) follows the same rule.
 
-See [HPC and scaling](hpc-scaling.md) for memory requirements and practical run
+See [HPC and scaling](../technical/hpc-scaling.md) for memory requirements and practical run
 advice.
 
 ## Using the operators directly

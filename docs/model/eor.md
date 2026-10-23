@@ -6,8 +6,8 @@ intrinsic link to the power spectrum we aim to recover, and exposing the
 line-of-sight structure that distinguishes the signal from spectrally smooth
 foregrounds.
 
-[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png#only-light)](assets/diagrams/eor-workflow.png)
-[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow-dark.png#only-dark)](assets/diagrams/eor-workflow-dark.png)
+[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](../assets/diagrams/eor-workflow.png#only-light)](../assets/diagrams/eor-workflow.png)
+[![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](../assets/diagrams/eor-workflow-dark.png#only-dark)](../assets/diagrams/eor-workflow-dark.png)
 
 The coefficients, $\boldsymbol a$, are mapped to the visibilities by a sequence
 of linear operators, read from right to left:
@@ -45,7 +45,7 @@ three-dimensional sky directions.
 
 === "Code"
 
-    [build_fourier_geometry](api/geometry.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry) takes grid sizes and spacings, and returns the retained coordinates and integration weights. This example uses eight transverse pairs and three spectral modes.
+    [build_fourier_geometry](../api/geometry.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry) takes grid sizes and spacings, and returns the retained coordinates and integration weights. This example uses eight transverse pairs and three spectral modes.
 
     ```python
     import jax
@@ -86,7 +86,7 @@ the spectral modes into the field at each observing frequency.
 
 === "Code"
 
-    [build_spectral_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_spectral_fourier_operator) accepts spectral coordinates, frequency offsets in Hz and the spectral spacing. It returns a matrix shaped `(n_frequency, n_eta_mode)`.
+    [build_spectral_fourier_operator](../api/operators.md#bayeseor_jax.model.operators.build_spectral_fourier_operator) accepts spectral coordinates, frequency offsets in Hz and the spectral spacing. It returns a matrix shaped `(n_frequency, n_eta_mode)`.
 
     ```python
     from bayeseor_jax.model.operators import build_spectral_fourier_operator
@@ -123,7 +123,7 @@ Earth rotates.
 
 === "Code"
 
-    [build_image_geometry](api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) selects and tracks the sky pixels. [build_transverse_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator) maps the Fourier grid onto their reference-time coordinates, returning `(n_pixel, n_uv_mode)`.
+    [build_image_geometry](../api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) selects and tracks the sky pixels. [build_transverse_fourier_operator](../api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator) maps the Fourier grid onto their reference-time coordinates, returning `(n_pixel, n_uv_mode)`.
 
     ```python
     from bayeseor_jax.model.observation.image_geometry import build_image_geometry
@@ -151,7 +151,7 @@ Earth rotates.
 
 The primary beam, $\mathbf P$, weights each pixel by its direction and frequency,
 with zero response at and below the horizon. See the
-[primary beam](instrument.md#primary-beam) for the supported models.
+[primary beam](../data/instrument.md#primary-beam) for the supported models.
 
 === "Maths"
 
@@ -163,7 +163,7 @@ with zero response at and below the horizon. See the
 
 === "Code"
 
-    [Beam_Model.get_beam_vals](api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) takes azimuth/zenith-angle coordinates and frequencies in Hz. Its output order is `(frequency, time, pixel)`; the visibility operator expects `(time, frequency, pixel)`.
+    [Beam_Model.get_beam_vals](../api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) takes azimuth/zenith-angle coordinates and frequencies in Hz. Its output order is `(frequency, time, pixel)`; the visibility operator expects `(time, frequency, pixel)`.
 
     ```python
     from bayeseor_jax.model.instrument.beam import Beam_Model
@@ -193,11 +193,11 @@ angle, so it must not be applied again.
     m_{21,tfb}=\sum_p\delta m_{21,tfbp}.
     $$
 
-    Here $\Delta\Omega$ is the pixel solid angle and $\boldsymbol u_b$ is the baseline in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` baseline convention. See [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) for the convention and units.
+    Here $\Delta\Omega$ is the pixel solid angle and $\boldsymbol u_b$ is the baseline in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` baseline convention. See [build_sky_to_visibility_operator](../api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) for the convention and units.
 
 === "Code"
 
-    [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) combines sky directions, baselines in wavelengths, beam weights and pixel area into an array shaped `(time, frequency, baseline, pixel)`.
+    [build_sky_to_visibility_operator](../api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) combines sky directions, baselines in wavelengths, beam weights and pixel area into an array shaped `(time, frequency, baseline, pixel)`.
 
     ```python
     from bayeseor_jax.model.operators import build_sky_to_visibility_operator
@@ -247,7 +247,7 @@ the same result as following the steps above.
 
 === "Code"
 
-    [build_T_21_core](api/operators.md#bayeseor_jax.model.operators.build_T_21_core) contracts the three supplied operators. [T_21](api/operators.md#bayeseor_jax.model.operators.T_21) provides the same calculation while constructing the beam-weighted response from geometry arrays.
+    [build_T_21_core](../api/operators.md#bayeseor_jax.model.operators.build_T_21_core) contracts the three supplied operators. [T_21](../api/operators.md#bayeseor_jax.model.operators.T_21) provides the same calculation while constructing the beam-weighted response from geometry arrays.
 
     ```python
     import numpy as np
@@ -261,7 +261,7 @@ the same result as following the steps above.
     )
     ```
 
-    For larger calculations, [T_21_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_21_build_save) evaluates CPU time-frequency blocks and saves `T_21.npy`. The [construction workflow](forward-model.md) changes how this operator is built and stored, not its mathematical definition.
+    For larger calculations, [T_21_build_save](../api/construction.md#bayeseor_jax.model.construction.operator_construction.T_21_build_save) evaluates CPU time-frequency blocks and saves `T_21.npy`. The [construction workflow](construction.md) changes how this operator is built and stored, not its mathematical definition.
 
 ## Configuration
 
@@ -304,5 +304,5 @@ memory and computation required.
     - **Default:** inferred from the longest baseline and highest frequency.
     - **Note:** lower values are kept, with a warning.
 
-See the [configuration reference](configuration.md), and the configurations in
+See the [configuration reference](../examples/configuration.md), and the configurations in
 `examples/eor/` and `examples/eor_fgs/` for complete runs.

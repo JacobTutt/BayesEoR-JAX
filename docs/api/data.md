@@ -2,10 +2,10 @@
 
 `get_vis_data` loads a visibility file or preprocessed vector and returns the data
 vector, noise information and observation axes in the
-[analysis convention](../data.md#data-vector-ordering). The instrument enters
+[analysis convention](../data/visibility-data.md#data-vector-ordering). The instrument enters
 through its baselines, `InstrumentModel`, and its primary beam, `Beam_Model`.
 
-See the [Data guide](../visibilities.md) for the supported inputs and settings.
+See the [Data guide](../data/index.md) for the supported inputs and settings.
 
 ## Visibilities
 

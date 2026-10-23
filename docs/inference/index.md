@@ -6,8 +6,8 @@ the power spectrum of the 21-cm field. These few power-spectrum amplitudes defin
 the prior on the coefficients in each $k$ bin, so the sampler explores tens of
 parameters rather than tens of thousands.
 
-[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](assets/diagrams/inference-workflow.png#only-light)](assets/diagrams/inference-workflow.png)
-[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](assets/diagrams/inference-workflow-dark.png#only-dark)](assets/diagrams/inference-workflow-dark.png)
+[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](../assets/diagrams/inference-workflow.png#only-light)](../assets/diagrams/inference-workflow.png)
+[![Inference workflow: modelled data and observation, likelihood, prior covariance, marginalised likelihood, nested sampling, and power-spectrum and evidence outputs.](../assets/diagrams/inference-workflow-dark.png#only-dark)](../assets/diagrams/inference-workflow-dark.png)
 
 ## Overview
 
@@ -18,7 +18,7 @@ parameters rather than tens of thousands.
   coefficients to give a likelihood for the power spectrum alone.
 - [Maximum a posteriori](map.md): recovering the coefficients and model
   visibilities for a fixed prior, and the foreground-only evidence.
-- [Running inference](inference.md): choosing the model and exploring the
+- [Running inference](running.md): choosing the model and exploring the
   posterior and evidence with nested sampling.
-- [Posterior analysis](outputs-analysis.md): reading, summarising and plotting
+- [Posterior analysis](posterior-analysis.md): reading, summarising and plotting
   the results.

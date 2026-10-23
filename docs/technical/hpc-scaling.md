@@ -82,7 +82,7 @@ log determinants; GPU KL construction uses its SVD routine.
 
 The `hpc` extra installs `jaxmg[cuda12]` from PyPI on supported Linux x86_64
 and aarch64 systems. Use Python 3.12+ and a compatible NVIDIA driver; no
-cluster-specific wheels or extras are needed. See [Installation](installation.md).
+cluster-specific wheels or extras are needed. See [Installation](../installation.md).
 
 Distributed JAXMG execution requires one Python process per GPU, with
 distributed JAX initialised before creating the device mesh. Scheduler and

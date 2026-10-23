@@ -3,7 +3,7 @@
 `DataContainer` reads one or more MultiNest runs with their setup metadata, and
 summarises the posterior on $\Delta^2_{21}(k)$ in each bin. The plotting functions
 take a `DataContainer` and return Matplotlib figures and axes. See
-[posterior analysis](../outputs-analysis.md) for a guide.
+[posterior analysis](../inference/posterior-analysis.md) for a guide.
 
 ```python
 from bayeseor_jax import DataContainer

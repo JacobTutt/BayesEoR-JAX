@@ -2,7 +2,7 @@
 
 These functions build full-size operators on CPU in time-frequency blocks, writing
 them to disk, and return the saved paths. Every participating process makes the
-same calls; see [execution](../forward-model.md#execution).
+same calls; see [execution](../model/construction.md#execution).
 
 ## Operators
 
@@ -26,7 +26,7 @@ same writers as methods. The writers can also be called directly.
 ## KL reduction
 
 `T_fg_svd_build_save` decomposes a prior- and noise-weighted operator, truncates it
-and saves the [reduced basis](../kl-reduced-basis.md).
+and saves the [reduced basis](../model/kl-reduced-basis.md).
 
 ::: bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save
     options:
@@ -38,7 +38,7 @@ and saves the [reduced basis](../kl-reduced-basis.md).
 
 ## Likelihood products
 
-The fixed products of the [marginalised likelihood](../marginalisation.md),
+The fixed products of the [marginalised likelihood](../inference/marginalisation.md),
 $\mathbf T^\dagger\mathbf N^{-1}\mathbf T$, $\mathbf T^\dagger\mathbf N^{-1}\boldsymbol d$
 and $\boldsymbol d^\dagger\mathbf N^{-1}\boldsymbol d$. `save_likelihood_products`
 writes all three; the `build_` functions evaluate them in memory.

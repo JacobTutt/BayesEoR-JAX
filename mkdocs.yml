@@ -7,6 +7,7 @@ edit_uri: edit/main/docs/
 strict: true
 exclude_docs: |
   overrides/
+  tools/
 
 theme:
   name: material
@@ -94,26 +95,26 @@ nav:
       - Installation: installation.md
       - Getting started: basics.md
   - Data:
-      - Interferometric data: visibilities.md
-      - Instrumental configuration: instrument.md
-      - Observation configuration: observation.md
-      - Visibility data: data.md
+      - Interferometric data: data/index.md
+      - Instrumental configuration: data/instrument.md
+      - Observation configuration: data/observation.md
+      - Visibility data: data/visibility-data.md
   - Model:
-      - Bayesian forward model: model.md
-      - EoR model: eor.md
-      - Foreground model: foregrounds.md
-      - KL Reduced Basis: kl-reduced-basis.md
-      - Construction and execution: forward-model.md
+      - Bayesian forward model: model/index.md
+      - EoR model: model/eor.md
+      - Foreground model: model/foregrounds.md
+      - KL Reduced Basis: model/kl-reduced-basis.md
+      - Construction and execution: model/construction.md
   - Inference:
-      - Overview: joint-inference.md
-      - Δ² parameterisation: power-spectrum.md
-      - Analytical marginalisation: marginalisation.md
-      - Maximum a posteriori: map.md
-      - Running inference: inference.md
-      - Posterior analysis: outputs-analysis.md
+      - Overview: inference/index.md
+      - Δ² parameterisation: inference/power-spectrum.md
+      - Analytical marginalisation: inference/marginalisation.md
+      - Maximum a posteriori: inference/map.md
+      - Running inference: inference/running.md
+      - Posterior analysis: inference/posterior-analysis.md
   - Examples:
-      - Running the example scripts: examples.md
-      - Configuration reference: configuration.md
+      - Running the example scripts: examples/index.md
+      - Configuration reference: examples/configuration.md
   - API:
       - Overview: api/index.md
       - Setup: api/setup.md

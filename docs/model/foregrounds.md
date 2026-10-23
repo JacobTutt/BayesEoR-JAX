@@ -5,8 +5,8 @@ pixel of a spherical HEALPix grid. Working on the sphere, rather than a tangent
 plane, lets the model extend all the way to the horizon, while the spectral
 smoothness of the foregrounds is what separates them from the 21-cm signal.
 
-[![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow.png#only-light)](assets/diagrams/foreground-workflow.png)
-[![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow-dark.png#only-dark)](assets/diagrams/foreground-workflow-dark.png)
+[![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](../assets/diagrams/foreground-workflow.png#only-light)](../assets/diagrams/foreground-workflow.png)
+[![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](../assets/diagrams/foreground-workflow-dark.png#only-dark)](../assets/diagrams/foreground-workflow-dark.png)
 
 The amplitudes, $\boldsymbol q$, are mapped to the visibilities by a sequence of
 linear operators, read from right to left:
@@ -44,7 +44,7 @@ adds coefficients without changing the construction.
 
 === "Code"
 
-    [build_image_geometry](api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) takes field extents, HEALPix resolution, telescope location and observing times. It returns the pixel directions, beam coordinates and pixel solid angle.
+    [build_image_geometry](../api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) takes field extents, HEALPix resolution, telescope location and observing times. It returns the pixel directions, beam coordinates and pixel solid angle.
 
     ```python
     import jax
@@ -85,7 +85,7 @@ in each pixel.
 
 === "Code"
 
-    [build_foreground_spectral_operator](api/operators.md#bayeseor_jax.model.operators.build_foreground_spectral_operator) takes frequencies in **MHz**, a reference frequency and signed power-law exponents. It returns `(n_frequency, n_component)`.
+    [build_foreground_spectral_operator](../api/operators.md#bayeseor_jax.model.operators.build_foreground_spectral_operator) takes frequencies in **MHz**, a reference frequency and signed power-law exponents. It returns `(n_frequency, n_component)`.
 
     ```python
     from bayeseor_jax.model.operators import build_foreground_spectral_operator
@@ -111,7 +111,7 @@ in each pixel.
 
 The primary beam, $\mathbf P$, weights each pixel by its direction and frequency.
 Its response is zero at and below the horizon, so pixels stop contributing as
-they set. See the [primary beam](instrument.md#primary-beam) for the supported
+they set. See the [primary beam](../data/instrument.md#primary-beam) for the supported
 models.
 
 === "Maths"
@@ -125,7 +125,7 @@ models.
 
 === "Code"
 
-    [Beam_Model.get_beam_vals](api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) accepts azimuth/zenith-angle coordinates and frequencies in **Hz**. Reorder its `(frequency, time, pixel)` output for the forward operators.
+    [Beam_Model.get_beam_vals](../api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) accepts azimuth/zenith-angle coordinates and frequencies in **Hz**. Reorder its `(frequency, time, pixel)` output for the forward operators.
 
     ```python
     from bayeseor_jax.model.instrument.beam import Beam_Model
@@ -139,7 +139,7 @@ models.
     )] == 0))
     ```
 
-    See [instrument configuration](instrument.md#primary-beam) for the other analytic profiles and interpolated beam inputs.
+    See [instrument configuration](../data/instrument.md#primary-beam) for the other analytic profiles and interpolated beam inputs.
 
 ## 4. Add the pixel contributions to each visibility
 
@@ -161,11 +161,11 @@ angle.
     m_{{\rm FG},tfb}=\sum_p\delta m_{{\rm FG},tfbp}.
     $$
 
-    Baselines $\boldsymbol u_b$ are expressed in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` convention, as implemented in [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator).
+    Baselines $\boldsymbol u_b$ are expressed in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` convention, as implemented in [build_sky_to_visibility_operator](../api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator).
 
 === "Code"
 
-    [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) returns the beam-weighted response with shape `(time, frequency, baseline, pixel)`.
+    [build_sky_to_visibility_operator](../api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) returns the beam-weighted response with shape `(time, frequency, baseline, pixel)`.
 
     ```python
     from bayeseor_jax.model.operators import build_sky_to_visibility_operator
@@ -208,7 +208,7 @@ spectral amplitude in each pixel contributes to every visibility.
 
 === "Code"
 
-    [build_T_fg_core](api/operators.md#bayeseor_jax.model.operators.build_T_fg_core) combines the response and spectral factors. [T_fg](api/operators.md#bayeseor_jax.model.operators.T_fg) also constructs the response directly from the supplied geometry and beam arrays.
+    [build_T_fg_core](../api/operators.md#bayeseor_jax.model.operators.build_T_fg_core) combines the response and spectral factors. [T_fg](../api/operators.md#bayeseor_jax.model.operators.T_fg) also constructs the response directly from the supplied geometry and beam arrays.
 
     ```python
     import numpy as np
@@ -222,7 +222,7 @@ spectral amplitude in each pixel contributes to every visibility.
     )
     ```
 
-    For disk-backed construction, [T_fg_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_build_save) evaluates the same mapping in CPU time-frequency blocks and writes `T_fg.npy`. See the [construction workflow](forward-model.md) for execution and storage.
+    For disk-backed construction, [T_fg_build_save](../api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_build_save) evaluates the same mapping in CPU time-frequency blocks and writes `T_fg.npy`. See the [construction workflow](construction.md) for execution and storage.
 
 ## Configuration
 
@@ -248,5 +248,5 @@ spectral amplitude in each pixel contributes to every visibility.
 `nside`
 :   The HEALPix resolution, shared with the [EoR model](eor.md#configuration).
 
-See the [configuration reference](configuration.md) and the configuration in
+See the [configuration reference](../examples/configuration.md) and the configuration in
 `examples/eor_fgs/` for a complete run.

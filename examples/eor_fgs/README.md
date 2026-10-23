@@ -32,7 +32,7 @@ eor_fgs/
 
 ## Supplied observation and sky
 
-The setup follows [Tutt et al. (2026, manuscript)](../../docs/references.md#wide-field-foreground-compression),
+The setup follows [Tutt et al. (2026, manuscript)](../../docs/technical/references.md#wide-field-foreground-compression),
 *A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
 Evidence Evaluation in Interferometric Visibilities*, with reduced time,
 frequency and sky coverage for a local demonstration.
@@ -90,7 +90,7 @@ These 15 times and channels are central subsets of the manuscript's 47-time,
 this is not a full-sky validation or a demonstration of horizon recovery.
 The shared footprint does not guarantee exact representation of point-source
 subpixel structure. The small live-point budget illustrates the workflow,
-not validated scientific constraints. See the [examples guide](../../docs/examples.md)
+not validated scientific constraints. See the [examples guide](../../docs/examples/index.md)
 for output conventions.
 
 ![Pipeline power-spectrum and posterior plots](plots/power_spectrum_and_posteriors.png)

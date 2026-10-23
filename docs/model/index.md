@@ -6,14 +6,14 @@ that a given sky would produce for comparison with the data. This section descri
 are each modelled, and how both are mapped through the instrument into a single
 model for the measured visibilities.
 
-[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow.png#only-light)](assets/diagrams/joint-model-workflow.png)
-[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow-dark.png#only-dark)](assets/diagrams/joint-model-workflow-dark.png)
+[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](../assets/diagrams/joint-model-workflow.png#only-light)](../assets/diagrams/joint-model-workflow.png)
+[![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](../assets/diagrams/joint-model-workflow-dark.png#only-dark)](../assets/diagrams/joint-model-workflow-dark.png)
 
 ## The interferometric measurement equation
 
 At full fidelity, every direction on the sky and every frequency is propagated
 into the data through the continuous measurement equation, which relates each
-[visibility](visibilities.md) to the sky brightness, $I$, weighted by the primary
+[visibility](../data/index.md) to the sky brightness, $I$, weighted by the primary
 beam, $P$:
 
 $$
@@ -48,5 +48,5 @@ $$
   out to the horizon if required.
 - [KL Reduced Basis](kl-reduced-basis.md): a latent compression, rooted in this
   physics, can be used to reduce the model before inference.
-- [Construction and execution](forward-model.md): how the operators are built,
+- [Construction and execution](construction.md): how the operators are built,
   stored and run.

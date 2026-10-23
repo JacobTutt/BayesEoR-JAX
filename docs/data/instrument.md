@@ -81,7 +81,7 @@ How the baselines are supplied depends on the data format.
         - **Components:** east, north, up.
         - **Order:** entries $b$ and $N_{\rm bls}+b$ are the same baseline with
           opposite sign, and the order matches the data vector; see
-          [visibility ordering](data.md#data-vector-ordering).
+          [visibility ordering](visibility-data.md#data-vector-ordering).
 
     `redundancy_model.npy` (required)
     :   The number of baselines averaged into each entry.
@@ -215,4 +215,4 @@ Below, $\theta$ is the zenith angle.
 
     Beam sidelobes matter. If the beam has a non-negligible response outside the
     EoR field of view, set the foreground field of view, `fov_fg`, larger than
-    `fov_eor`. See the [foreground model](foregrounds.md).
+    `fov_eor`. See the [foreground model](../model/foregrounds.md).

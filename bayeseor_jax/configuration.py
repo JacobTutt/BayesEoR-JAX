@@ -267,7 +267,7 @@ class RunConfig(ModelConfig):
     Notes
     -----
     Data selection and noise controls retain the YAML/CLI names documented in
-    ``docs/configuration.md``. Construct directly in Python or obtain from
+    ``docs/examples/configuration.md``. Construct directly in Python or obtain from
     ``BayesEoRParser.parse_args``. Use ``dataclasses.replace`` for a new run
     configuration; setup leaves this object unchanged. Sequence inputs are
     read-only by convention, even when supplied as lists or NumPy arrays.
