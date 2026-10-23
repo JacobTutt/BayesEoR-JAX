@@ -93,11 +93,13 @@ nav:
       - Foreground model: foregrounds.md
       - KL Reduced Basis: kl-reduced-basis.md
       - Construction and execution: forward-model.md
+  - Inference:
+      - Parameterisation and marginalisation: joint-inference.md
+      - Running inference: inference.md
+      - Posterior analysis: outputs-analysis.md
   - User guide:
       - Configuration: configuration.md
       - Instrument and data: instrument.md
-      - Inference: inference.md
-      - Outputs and analysis: outputs-analysis.md
   - API:
       - Overview: api/index.md
       - Configuration and setup: api/setup.md

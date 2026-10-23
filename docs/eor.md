@@ -133,7 +133,7 @@ normalisation in
 [PhiInverse](api/inference.md#bayeseor_jax.inference.phi.PhiInverse);
 $\varphi_s$ should not be inserted as the raw coefficient variance without
 that conversion. The linear coefficients are analytically marginalised in the
-[inference stage](inference.md).
+[inference stage](joint-inference.md).
 
 ## Configuration
 

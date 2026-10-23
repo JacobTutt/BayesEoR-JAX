@@ -1,6 +1,10 @@
-# Inference
+# Running inference
 
 BayesEoR-JAX uses MultiNest with the analytically marginalised likelihood to infer power-spectrum parameters and evaluate Bayesian evidence.
+
+For the mathematical workflow, start with
+[parameterisation and marginalisation](joint-inference.md). This guide covers
+configuration, numerical conventions and running the inference.
 
 The sampler runner and conditional MAP solver live in `inference/run_ns.py` and
 `inference/maxaposteriori.py`, alongside the priors and likelihood. They are

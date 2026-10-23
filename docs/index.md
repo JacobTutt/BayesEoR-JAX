@@ -66,7 +66,7 @@ supports comparison and validation of competing models.
 - [EoR model](eor.md): from $(u,v,\eta)$ coefficients to cosmological visibilities.
 - [Foreground model](foregrounds.md): from image-domain spectral amplitudes to wide-field visibilities.
 - [KL Reduced Basis](kl-reduced-basis.md): from physical foreground uncertainty to a reduced operator.
-- [Inference](inference.md): marginalisation, posterior sampling and evidence evaluation.
+- [Inference](joint-inference.md): parameterisation, marginalisation, posterior sampling and evidence evaluation.
 
 ## Get started
 

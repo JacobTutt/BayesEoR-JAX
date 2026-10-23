@@ -99,3 +99,6 @@ varying fastest.
 
 The [KL Reduced Basis](kl-reduced-basis.md) changes the representation of
 foreground uncertainty, not the underlying measurement equation.
+
+Continue to [Inference](joint-inference.md) to combine these operators with
+coefficient priors and analytically marginalise their amplitudes.
