@@ -21,41 +21,6 @@ from .multinest_paths import (
 LOGGER = logging.getLogger(__name__)
 
 
-def estimate_average_eval_time(
-    likelihood_fn,
-    theta_ref: np.ndarray,
-    avg_iters: int,
-) -> float:
-    """
-    Estimate the average scalar likelihood evaluation time.
-
-    Parameters
-    ----------
-    likelihood_fn : callable
-        Scalar log-likelihood callback.
-    theta_ref : numpy.ndarray
-        Reference parameter vector used for repeated timing calls.
-    avg_iters : int
-        Number of repeated evaluations.
-    """
-    start = time.perf_counter()
-    for _ in range(int(avg_iters)):
-        value = likelihood_fn(theta_ref)
-        value = jax.block_until_ready(value)
-        if not np.isfinite(float(np.asarray(value))):
-            raise ValueError("Non-finite likelihood value encountered during timing.")
-    return (time.perf_counter() - start) / max(1, int(avg_iters))
-
-
-def _multinest_resume_checkpoints(outputfiles_basename: str) -> list[Path]:
-    """Return candidate MultiNest checkpoint files for an output basename."""
-    return [
-        Path(f"{outputfiles_basename}resume.dat"),
-        Path(f"{outputfiles_basename}phys_live.points"),
-        Path(f"{outputfiles_basename}.resume"),
-    ]
-
-
 def run_multinest(
     setup_result: SetupResult,
     out_dir: Path | str,
@@ -319,3 +284,38 @@ def run_multinest(
 
 
 run_nestedsampling = run_multinest
+
+
+def estimate_average_eval_time(
+    likelihood_fn,
+    theta_ref: np.ndarray,
+    avg_iters: int,
+) -> float:
+    """
+    Estimate the average scalar likelihood evaluation time.
+
+    Parameters
+    ----------
+    likelihood_fn : callable
+        Scalar log-likelihood callback.
+    theta_ref : numpy.ndarray
+        Reference parameter vector used for repeated timing calls.
+    avg_iters : int
+        Number of repeated evaluations.
+    """
+    start = time.perf_counter()
+    for _ in range(int(avg_iters)):
+        value = likelihood_fn(theta_ref)
+        value = jax.block_until_ready(value)
+        if not np.isfinite(float(np.asarray(value))):
+            raise ValueError("Non-finite likelihood value encountered during timing.")
+    return (time.perf_counter() - start) / max(1, int(avg_iters))
+
+
+def _multinest_resume_checkpoints(outputfiles_basename: str) -> list[Path]:
+    """Return candidate MultiNest checkpoint files for an output basename."""
+    return [
+        Path(f"{outputfiles_basename}resume.dat"),
+        Path(f"{outputfiles_basename}phys_live.points"),
+        Path(f"{outputfiles_basename}.resume"),
+    ]
