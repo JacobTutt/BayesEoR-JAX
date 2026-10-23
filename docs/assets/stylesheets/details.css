@@ -1,0 +1,30 @@
+/* Optional technical detail should read as documentation, not an alert. */
+.md-typeset details:is(.note, .example) {
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--md-default-fg-color);
+  font-size: inherit;
+}
+
+.md-typeset details:is(.note, .example) > summary {
+  padding: 0.55rem 2rem 0.55rem 0.8rem;
+  background: transparent;
+  color: var(--md-default-fg-color);
+  font-weight: 500;
+}
+
+.md-typeset details:is(.note, .example) > summary::before {
+  display: none;
+}
+
+.md-typeset details:is(.note, .example) > summary::after {
+  top: 0.55rem;
+  background-color: var(--md-default-fg-color--light);
+}
+
+.md-typeset details:is(.note, .example) > summary:focus-visible {
+  outline: 2px solid var(--md-default-fg-color--light);
+  outline-offset: -2px;
+}
