@@ -191,5 +191,4 @@ existing basis for the same observation, noise and foreground prior.
     - **Note:** the operator must match the observation, visibility ordering and
       foreground prior it was built from. Shape checks alone cannot confirm this.
 
-See [execution](construction.md#execution) and [HPC and scaling](../technical/hpc-scaling.md)
-for memory requirements and distributed execution.
+See [execution](construction.md#execution) for the CPU and distributed-GPU workflow.

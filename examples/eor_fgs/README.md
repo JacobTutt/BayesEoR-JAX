@@ -32,7 +32,7 @@ eor_fgs/
 
 ## Supplied observation and sky
 
-The setup follows [Tutt et al. (2026, manuscript)](../../docs/technical/references.md#wide-field-foreground-compression),
+The setup follows Tutt et al. (2026, manuscript),
 *A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
 Evidence Evaluation in Interferometric Visibilities*, with reduced time,
 frequency and sky coverage for a local demonstration.

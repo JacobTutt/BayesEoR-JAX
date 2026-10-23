@@ -24,7 +24,8 @@ No sky-simulation script, external sky files or scheduler scripts are required.
 ## Observation and inputs
 
 The observing setup follows the wide-field study of
-[Tutt et al. (2026, manuscript)](../technical/references.md#wide-field-foreground-compression),
+Tutt et al. (2026, manuscript), *A Karhunen–Loève Latent Space for Bayesian
+Uncertainty Quantification and Evidence Evaluation in Interferometric Visibilities*,
 using the same HERA-like baseline selection, Airy beam and noise prescription.
 These are reduced-observation demonstrations, not reproductions of its full-sky
 results: they use 15 rather than 47 integrations, 15 rather than 39 channels,

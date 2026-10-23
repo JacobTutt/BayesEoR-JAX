@@ -109,7 +109,7 @@ MultiNest runs in a single process, while each likelihood evaluation uses the
 available JAX devices. On one CPU or GPU, the likelihood uses native JAX; across
 several GPUs, it uses [JAXMg](https://flatironinstitute.github.io/jaxmg/latest/),
 with one process per GPU. To restrict a run to one GPU, set
-`CUDA_VISIBLE_DEVICES=0`. See [HPC and scaling](../technical/hpc-scaling.md).
+`CUDA_VISIBLE_DEVICES=0`.
 
 ## Example script
 

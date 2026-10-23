@@ -1,6 +1,6 @@
 # BayesEoR-JAX
 
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [CSD3](docs/technical/csd3.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [References](docs/technical/references.md)
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [Citation](#citation)
 
 BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
 
@@ -23,11 +23,9 @@ The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`
 
 The documentation uses MkDocs Material with a generated Python API reference.
 For a local preview, run `python -m pip install -e ".[docs]"` followed by
-`python -m mkdocs serve`. See [building and publishing the documentation](docs/technical/documentation.md)
-for the strict build check and optional versioned GitHub Pages deployment.
+`python -m mkdocs serve`. Check the site with `python -m mkdocs build --strict`.
 
 - [Installation](docs/installation.md): CPU and GPU environments, JAX checks, and MultiNest setup.
-- [CSD3 Getting Started](docs/technical/csd3.md): CSD3 environment setup, MultiNest library setup, and running on allocated resources.
 - [Basics](docs/basics.md): the scientific and workflow overview for new users.
 - [Model](docs/model/index.md): step-by-step cosmological and foreground mappings, with diagrams, equations and implementation links.
 - [KL Reduced Basis](docs/model/kl-reduced-basis.md): prior/noise weighting, mode selection and reduced-operator construction.
@@ -38,8 +36,6 @@ for the strict build check and optional versioned GitHub Pages deployment.
 - [Inference](docs/inference/running.md): marginalised likelihood, MultiNest, and MAP helpers.
 - [Configuration](docs/examples/configuration.md): grouped reference for YAML and CLI parameters.
 - [Outputs and Analysis](docs/inference/posterior-analysis.md): cached matrices, sampler outputs, metadata, and plotting helpers.
-- [HPC and Scaling](docs/technical/hpc-scaling.md): JAX devices, precision, memory scaling, and cluster notes.
-- [References](docs/technical/references.md): BayesEoR papers and sampler/software references.
 
 ## Quick Start
 
@@ -78,12 +74,16 @@ existing environments and running the examples. Laptop KL
 construction uses native JAX SVD; larger distributed decompositions use JAXMG.
 Both produce the same reduced-operator format for inference.
 
-For CSD3 environment and allocation guidance, see [CSD3 Getting Started](docs/technical/csd3.md).
-
 ## Citation
 
-Please cite the relevant BayesEoR methodology and software papers when using this package. The core references are listed in [References](docs/technical/references.md), including Sims et al. (2016, 2017), Sims & Pober (2019), Burba, Sims & Pober (2023), and Sims, Burba & Pober (2025).
+Please cite the relevant BayesEoR methodology and software papers when using this
+package: [Sims et al. (2016)](https://arxiv.org/abs/1607.07628),
+[Sims et al. (2017)](https://arxiv.org/abs/1701.03384),
+[Sims & Pober (2019)](https://arxiv.org/abs/1907.02608),
+[Burba, Sims & Pober (2023)](https://arxiv.org/abs/2302.04058), and
+[Sims, Burba & Pober (2025)](https://arxiv.org/abs/2501.12928).
+For MultiNest, cite [Feroz, Hobson & Bridges (2009)](https://arxiv.org/abs/0809.3437).
 
 ---
 
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [CSD3](docs/technical/csd3.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [References](docs/technical/references.md)
+**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [Citation](#citation)

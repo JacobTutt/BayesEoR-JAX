@@ -91,9 +91,6 @@ GPUs. A single device uses native JAX; across several GPUs,
 process per GPU, with distributed JAX initialised before setup. The
 [KL decomposition](kl-reduced-basis.md) follows the same rule.
 
-See [HPC and scaling](../technical/hpc-scaling.md) for memory requirements and practical run
-advice.
-
 ## Using the operators directly
 
 The operators can also be built outside `run_setup`, either as arrays in memory

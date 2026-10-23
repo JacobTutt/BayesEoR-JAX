@@ -29,7 +29,7 @@ eor/
 
 ## Supplied observation
 
-The setup follows [Tutt et al. (2026, manuscript)](../../docs/technical/references.md#wide-field-foreground-compression),
+The setup follows Tutt et al. (2026, manuscript),
 *A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
 Evidence Evaluation in Interferometric Visibilities*, with reduced time and
 frequency coverage for a local demonstration.
