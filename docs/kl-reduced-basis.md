@@ -1,148 +1,178 @@
 # KL Reduced Basis
 
-The physical foreground model can contain many coefficients describing
-visibility responses that are degenerate or small relative to the observational
-noise. The KL construction identifies the modes needed to represent their
-combined prior-predictive uncertainty, with an explicit noise-relative
-truncation criterion.
+The Karhunen–Loève (KL) reduced basis is a general compression for any linear
+model component with a Gaussian prior, equivalent to an optimal low-rank
+approximation of a Bayesian linear inverse problem (Spantini et al. 2015). It
+propagates the component's physically
+motivated structure through to its prior-predictive covariance in visibility
+space, and represents that covariance in an orthogonal basis ordered by how far
+each mode rises above the noise. Modes the data cannot distinguish from noise are
+then discarded.
 
-The workflow is
+For a component $\boldsymbol m = \mathbf T\boldsymbol x$ with prior
+$\boldsymbol x \sim \mathcal N(\boldsymbol 0, \mathbf\Sigma)$, the compression
+proceeds as
 
 $$
-\mathbf T_{\rm FG}
+\mathbf T
 \ \longrightarrow\
-\mathbf A=\mathbf N^{-1/2}\mathbf T_{\rm FG}\mathbf\Sigma_q^{1/2}
+\mathbf A=\mathbf N^{-1/2}\mathbf T\,\mathbf\Sigma^{1/2}
 \ \longrightarrow\
 (\mathbf U,\mathbf S)
 \ \longrightarrow\
-\mathbf T_{{\rm FG},r}.
+\mathbf T_r .
 $$
 
-This stage begins with the [physical foreground operator](foregrounds.md)
-and ends with a reduced operator in the same visibility space.
+Because the coefficients are marginalised analytically, the inference depends only
+on the uncertainty they induce in the visibilities,
+$\mathbf C = \mathbf T\mathbf\Sigma\mathbf T^\dagger$, not on the coefficients
+themselves. Any basis spanning $\mathbf C$ is therefore equivalent, and the
+reduced operator, $\mathbf T_r$, replaces $\mathbf T$ in the same visibility
+space with far fewer columns.
 
-## 1. Weight the physical mapping by prior and noise
+The pipeline currently applies this to the [foreground model](foregrounds.md),
+whose physical basis is the largest. The same construction could be applied to
+the [EoR model](eor.md) independently within each $k$ bin, keeping the
+power-spectrum amplitudes as sampled parameters.
 
-Let $\mathbf\Sigma_q$ describe the foreground coefficient covariance and
-$\mathbf N$ the visibility-noise covariance. Define
+## 1. Weight the mapping by prior and noise
 
-$$
-\mathbf A=\mathbf N^{-1/2}\mathbf T_{\rm FG}\mathbf\Sigma_q^{1/2},
-\qquad
-\mathbf C_{{\rm FG},w}=\mathbf A\mathbf A^\dagger.
-$$
+Each coefficient is scaled by its prior standard deviation, and each visibility by
+its inverse noise RMS, so that the operator's response is measured relative to the
+noise.
 
-[weight_foreground_operator](api/operators.md#bayeseor_jax.model.operators.weight_foreground_operator)
-applies these factors to an existing operator.
-[T_fg_weighted](api/operators.md#bayeseor_jax.model.operators.T_fg_weighted)
-constructs and weights a supplied visibility block directly.
+=== "Maths"
 
-For diagonal priors and noise, each column is multiplied by its coefficient
-prior standard deviation and each row divided by its visibility-noise RMS.
-[T_fg_weighted_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_weighted_build_save)
-performs this calculation on CPU blocks and saves **A_fg.npy**, without
-requiring a complete unweighted matrix to be saved first.
+    $$
+    \mathbf A=\mathbf N^{-1/2}\mathbf T\,\mathbf\Sigma^{1/2},
+    \qquad
+    \mathbf C_w = \mathbf N^{-1/2}\mathbf C\,\mathbf N^{-1/2} = \mathbf A\mathbf A^\dagger.
+    $$
+
+    $\mathbf C_w$ is the prior-predictive covariance in noise-whitened visibility
+    space. For diagonal priors and noise, each column of $\mathbf T$ is multiplied by
+    its prior standard deviation and each row divided by its noise RMS.
+
+=== "Code"
+
+    [weight_foreground_operator](api/operators.md#bayeseor_jax.model.operators.weight_foreground_operator)
+    applies these factors to an existing operator, and
+    [T_fg_weighted](api/operators.md#bayeseor_jax.model.operators.T_fg_weighted)
+    constructs and weights a visibility block directly.
+
+    For a full analysis,
+    [T_fg_weighted_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_weighted_build_save)
+    builds $\mathbf A$ in CPU blocks and saves it as `A_fg.npy`, without first
+    saving the unweighted operator.
 
 ## 2. Decompose the weighted operator
 
-A thin singular-value decomposition gives
+A singular-value decomposition of $\mathbf A$ gives an orthonormal set of
+visibility-space modes, each with a variance measured relative to the noise.
 
-$$
-\mathbf A=\mathbf U\mathbf S\mathbf V^\dagger,
-\qquad
-\mathbf C_{{\rm FG},w}
-=\mathbf U\mathbf S^2\mathbf U^\dagger.
-$$
+=== "Maths"
 
-The columns of $\mathbf U$ are orthonormal visibility-space modes.
-Their eigenvalues $\lambda_i=s_i^2$ measure prior-predictive variance relative
-to the noise. An eigendecomposition of $\mathbf C_{{\rm FG},w}$ gives the
-same eigenspaces; the saved-file construction currently uses the operator SVD.
+    $$
+    \mathbf A=\mathbf U\mathbf S\mathbf V^\dagger,
+    \qquad
+    \mathbf C_w = \mathbf U\mathbf S^2\mathbf U^\dagger.
+    $$
 
-The exact rank obeys
+    The columns of $\mathbf U$ are the KL modes, and $\lambda_i = s_i^2$ is the
+    prior-predictive variance of each relative to the noise. An eigendecomposition
+    of $\mathbf C_w$ gives the same modes; the operator form is smaller when there
+    are fewer coefficients than visibilities. The number of modes is bounded by
 
-$$
-r_{\rm FG}\leq\min(N_{\rm d},N_{\rm FG,param}).
-$$
+    $$
+    r \leq \operatorname{rank}(\mathbf C) \leq \min(N_{\rm d}, N_{\rm param}),
+    $$
 
-Retaining the largest singular modes minimises the discarded
-noise-whitened covariance trace for a given rank. This is the sense in which
-the representation is statistically optimal.
+    and keeping the largest modes minimises the discarded whitened variance for any
+    given rank, which is the sense in which the basis is statistically optimal.
+
+=== "Code"
+
+    [T_fg_svd_build_save](api/construction.md#bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save)
+    performs the decomposition, truncation and rescaling of steps 2 to 4 in one call.
+    It uses an exact, thin SVD of $\mathbf A$:
+
+    - **CPU:** native JAX on a single device. $\mathbf A$, $\mathbf U$ and the
+      workspace must fit in RAM.
+    - **GPU:** distributed with [JAXMg](https://flatironinstitute.github.io/jaxmg/latest/),
+      with one process per GPU and shared storage.
 
 ## 3. Choose the retained rank
 
-With singular values ordered from largest to smallest, retain the smallest
-$r$ satisfying
+The modes are truncated once the variance left over is a small fraction of the
+noise, so the reduced basis preserves the component's uncertainty to that level.
 
-$$
-\epsilon_{\rm RMS}(r)
-=\left[\frac{1}{N_{\rm d}}\sum_{i>r}s_i^2\right]^{1/2}
-\leq f.
-$$
+=== "Maths"
 
-[select_foreground_rank](api/construction.md#bayeseor_jax.model.construction.kl_reduction.select_foreground_rank)
-implements this criterion. The default $f=0.1$ limits the average discarded
-prior-predictive RMS in whitened visibility space to ten per cent of the noise RMS.
-This is not a bound on every individual visibility or every possible sky realisation.
+    With the singular values ordered from largest to smallest, keep the smallest $r$
+    satisfying
+
+    $$
+    \epsilon_{\rm RMS}(r)
+    =\left[\frac{1}{N_{\rm d}}\sum_{i>r}s_i^2\right]^{1/2}
+    \leq f.
+    $$
+
+    The default $f = 0.1$ limits the discarded prior-predictive RMS, averaged over
+    the visibilities, to ten per cent of the noise RMS. It is not a bound on every
+    individual visibility.
+
+=== "Code"
+
+    [select_foreground_rank](api/construction.md#bayeseor_jax.model.construction.kl_reduction.select_foreground_rank)
+    implements this criterion, and is called by `T_fg_svd_build_save` through its
+    `f` argument.
 
 ## 4. Restore visibility units
 
-Undo the noise whitening, but retain the absorbed foreground prior:
+The retained modes are un-whitened, keeping the prior absorbed into them, to give
+the reduced operator.
 
-$$
-\mathbf T_{{\rm FG},r}
-=\mathbf N^{1/2}\mathbf U_r\mathbf S_r,
-\qquad
-\boldsymbol m_{\rm FG}^{(r)}=\mathbf T_{{\rm FG},r}\boldsymbol z,
-\qquad
-\langle\boldsymbol z\boldsymbol z^\dagger\rangle=\mathbf I_r.
-$$
+=== "Maths"
 
-The reduced covariance is
+    $$
+    \mathbf T_r=\mathbf N^{1/2}\mathbf U_r\mathbf S_r,
+    \qquad
+    \boldsymbol m^{(r)}=\mathbf T_r\boldsymbol z,
+    \qquad
+    \boldsymbol z \sim \mathcal N(\boldsymbol 0, \mathbf I_r).
+    $$
 
-$$
-\mathbf C_{\rm FG}^{(r)}
-=\mathbf T_{{\rm FG},r}\mathbf T_{{\rm FG},r}^{\dagger}.
-$$
+    The latent coefficients, $\boldsymbol z$, have a standard-normal prior by
+    construction, and the retained covariance is
+    $\mathbf C^{(r)}=\mathbf T_r\mathbf T_r^\dagger$.
 
-The reduced coefficients have a standard-normal prior by construction.
-Applying the original physical prior widths again would double-count their
-weighting.
+=== "Code"
 
-## 5. Save and use the reduced operator
+    ```python
+    from bayeseor_jax import T_fg_svd_build_save
 
-[T_fg_svd_build_save](api/construction.md#bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save)
-loads the weighted operator, decomposes it, selects $r$, undoes whitening and
-saves the reduced operator:
+    reduced_path = T_fg_svd_build_save(
+        "arrays/A_fg.npy",
+        "arrays/Ninv.npy",
+        output_path="arrays/T_fg_reduced.npy",
+        f=0.1,
+    )
+    ```
 
-~~~python
-from bayeseor_jax import T_fg_svd_build_save
+    `Ninv.npy` must be the inverse noise used to build $\mathbf A$. The routine also
+    saves the singular values, `T_fg_reduced.singular_values.npy`, and the truncation
+    diagnostics, `T_fg_reduced.svd.json`.
 
-reduced_path = T_fg_svd_build_save(
-    "arrays/A_fg.npy",
-    "arrays/Ninv.npy",
-    output_path="arrays/T_fg_reduced.npy",
-    f=0.1,
-)
-~~~
+## Configuration
 
-The supplied inverse-noise diagonal must be the one used in constructing
-$\mathbf A$. Native JAX provides the single-process CPU decomposition;
-the GPU path uses JAXMG with one process per GPU and shared storage.
-The saved-file routine supports diagonal noise and saves the singular values
-and truncation diagnostics alongside the reduced operator.
+`foreground_kl_path`
+:   A saved reduced operator, used in place of the physical foreground model.
 
-Select it for subsequent setup with
+    - **Effect:** its columns are used with a unit prior; setup does not repeat the
+      decomposition, and `foreground_prior_std_mk` is not applied again.
+    - **Requires:** `model: fg` or `model: eor+fg`.
+    - **Note:** the operator must match the observation, visibility ordering and
+      foreground prior it was built from. Shape checks alone cannot confirm this.
 
-~~~yaml
-foreground_kl_path: arrays/T_fg_reduced.npy
-~~~
-
-Setup then uses its columns with unit prior widths, optionally alongside
-$\mathbf T_{21}$. It does not run the decomposition again or reapply
-`foreground_prior_std_mk`.
-
-The operator must match the observation, visibility ordering and foreground
-uncertainty model. Shape checks alone cannot establish that match. See the
-[construction guide](forward-model.md#foreground-svd-and-truncation) for
-memory requirements, distributed execution and saved metadata.
+See [execution](forward-model.md#execution) and [HPC and scaling](hpc-scaling.md)
+for memory requirements and distributed execution.

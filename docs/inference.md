@@ -1,183 +1,125 @@
 # Running inference
 
-BayesEoR-JAX uses MultiNest with the analytically marginalised likelihood to infer power-spectrum parameters and evaluate Bayesian evidence.
+With setup complete, BayesEoR explores the power-spectrum posterior with
+[MultiNest](https://github.com/JohannesBuchner/MultiNest), an implementation of
+nested sampling that allows simultaneous posterior exploration and Bayesian-evidence
+evaluation. Each
+likelihood call is a single [marginalised likelihood](marginalisation.md)
+evaluation, so the sampler only ever sees the power-spectrum amplitudes.
 
-For the mathematical workflow, start with
-[inference overview](joint-inference.md). This guide covers
-configuration, numerical conventions and running the inference.
+## Choosing the model
 
-The sampler runner and conditional MAP solver live in `inference/run_ns.py` and
-`inference/maxaposteriori.py`, alongside the priors and likelihood. They are
-available from `bayeseor_jax.inference`; the existing top-level imports from
-`bayeseor_jax` remain supported. Direct imports from the former root-level modules
-must use these new paths.
+`model` selects which components are fitted. It describes the inference model,
+not the contents of the data, so the same dataset can be analysed with each.
 
-## Selecting the fitted components
+`eor+fg`
+:   The joint model, and the default.
 
-Set `model` in YAML, pass `--model` on the command line, or supply it to
-`RunConfig` passed to `run_setup(config)`. The default remains `eor+fg`.
+    - **Operator:** $[\mathbf T_{21}\ \ \mathbf T'_{\rm FG}]$.
+    - **Sampled:** the power-spectrum amplitudes, with MultiNest.
 
-| `model` | Forward operator | Sampled parameters | Evaluation |
-|---|---|---|---|
-| `eor` | `T_21` | Power-spectrum amplitudes | MultiNest |
-| `fg` | Original or reduced `T_fg` | None, with fixed foreground/noise priors | Analytic evidence and MAP |
-| `eor+fg` | `[T_21, T_fg]` | Power-spectrum amplitudes | MultiNest |
+`eor`
+:   The EoR alone.
 
-This selects the **inference model**, not the contents of the input data. For
-example, `model: fg` can be applied to either foreground-only or signal-injected
-data. Setup constructs only the selected component operators and their priors;
-`T.npy` and the noise-weighted likelihood products keep the same names in all
-three cases. Changing the selected components invalidates the combined-matrix
-and Gram-matrix caches. Use separate output directories for the three analyses
-to retain their metadata and results; changing physical model or observation
-settings still requires a new matrix directory or `clobber`.
+    - **Operator:** $\mathbf T_{21}$.
+    - **Sampled:** the power-spectrum amplitudes, with MultiNest.
+    - **Note:** foreground settings are ignored, and `foreground_kl_path` is
+      rejected.
 
-```yaml
-model: fg
-fov_fg: 180.0
-# Optional: use a preconstructed KL basis instead of the original foreground model.
-# foreground_kl_path: /path/to/T_fg_reduced.npy
-```
+`fg`
+:   The foregrounds alone, as the null hypothesis for model comparison.
 
-FG-only setup does not require `priors` or `fov_eor`; cosmological prior settings
-in a reused configuration are ignored. It currently requires fixed noise.
-For `eor`, foreground settings are unused and supplying `foreground_kl_path` is
-rejected. The EoR-only example explicitly selects `model: eor`.
+    - **Operator:** $\mathbf T'_{\rm FG}$, physical or
+      [reduced](kl-reduced-basis.md).
+    - **Sampled:** nothing. The evidence and MAP coefficients are evaluated in one
+      solve; see [foreground-only evidence](map.md#foreground-only-evidence).
+    - **Note:** `priors` and `fov_eor` are not needed.
 
-`run_nestedsampling(setup, out_dir=...)` dispatches to MultiNest when power-spectrum
-parameters remain. For a parameter-free FG model it instead saves
-`map_coefficients.npy` and `summary.json` with `sampler: analytic`, `logZ` and
-`logZerr: 0`. There are no posterior samples or power-spectrum plots in this
-case. `logZ` uses the same omitted-constant convention as sampled runs, described
-below; it is not an absolutely normalised evidence without restoring those terms.
+Use a separate output directory for each model, so their results and metadata are
+kept apart.
 
-## Marginalised Likelihood
+## Nested sampling
 
-The latent EoR and foreground coefficients are analytically marginalised. The sampler explores power-spectrum parameters, `theta`, which define the EoR prior covariance.
+`run_nestedsampling` runs MultiNest on a completed setup, or evaluates the
+foreground-only evidence directly when there is nothing to sample.
 
-For each proposed `theta`, the likelihood forms:
+=== "Maths"
 
-```text
-Sigma(theta) = T^H N^{-1} T + Phi^{-1}(theta)
-```
+    With the coefficients marginalised, the remaining posterior and evidence are
 
-where:
+    $$
+    P(\boldsymbol\rho\mid\boldsymbol d,\mathcal M)
+    =\frac{\mathcal L(\boldsymbol d\mid\boldsymbol\rho,\mathcal M)\,
+    \pi(\boldsymbol\rho\mid\mathcal M)}{\mathcal Z_{\mathcal M}},
+    \qquad
+    \mathcal Z_{\mathcal M}
+    =\int\mathcal L(\boldsymbol d\mid\boldsymbol\rho,\mathcal M)\,
+    \pi(\boldsymbol\rho\mid\mathcal M)\,\mathrm d\boldsymbol\rho.
+    $$
 
-- `T^H N^{-1} T` is cached during setup.
-- `Phi^{-1}(theta)` is the latent prior precision.
-- `T^H N^{-1} d` and `d^H N^{-1} d` are also cached.
+    Comparing $\mathcal Z$ between the joint and foreground-only models quantifies
+    the support for a 21-cm signal. Applying the same comparison to signal-free
+    data tests whether the EoR component is absorbing unmodelled foreground
+    structure instead.
 
-Evaluating the likelihood requires dense positive-definite linear algebra, including a Cholesky factorization, solves, and a log determinant. A single CPU or GPU uses standard JAX Cholesky; a multi-GPU solver mesh uses JAXMG. Both use the same likelihood and conditional MAP expressions. JAXMG is imported by the solver only for multi-GPU inference. By default the mesh includes all visible devices; restrict GPU visibility to one device (for example, `CUDA_VISIBLE_DEVICES=0`) to run native JAX inference on one GPU.
+=== "Code"
 
-### Complex storage and the factors of one half
+    ```python
+    from bayeseor_jax import BayesEoRParser, run_setup, run_nestedsampling
 
-The visibility loader appends the conjugate of each measured visibility, together
-with its reversed baseline. Thus `d = (v, v.conj())`, up to row ordering, has
-`N_d = 2*m` complex entries but only `m` independent complex measurements.
-Noise variance means `E[abs(n)**2]`; each independent real or imaginary component
-has half that variance. Conjugate rows carry the same noise variance.
+    config = BayesEoRParser().parse_args(["--config", "config.yaml"])
+    setup = run_setup(config)
+    summary = run_nestedsampling(
+        setup,
+        out_dir=f"{config.output_dir}/multinest",
+        random_key=config.random_key,
+        n_live_scale_factor=config.n_live_scale_factor,
+        resume=config.resume,
+    )
+    ```
 
-Consequently, `d^H N^{-1} d` counts each independent measurement twice. The
-correct Gaussian exponent is `-0.5*d^H N^{-1} d`, not `-d^H N^{-1} d`.
-Complex storage does not make the conjugate entries independent.
+    The sampler settings below are read from the configuration and passed to this
+    call; the [example script](#example-script) does this for you.
 
-The foreground brightness coefficients are real; cosmological Fourier partners
-obey `a(-k) = a(k).conj()` with equal prior variances. Writing the calculation in
-independent real coordinates gives the same marginalised target:
+    MultiNest needs both the native library and `pymultinest`, which the
+    [Conda environments](installation.md) install.
 
-```text
-log L = -0.5 * (log|Sigma| + log|Phi|
-               + d^H N^{-1} d - dbar^H Sigma^{-1} dbar)
-        -0.5 * (log|N| + N_d*log(pi))
-```
+`n_live_scale_factor`
+:   Sets the number of live points relative to the number of sampled parameters.
 
-Here the density is with respect to the real and imaginary components of the
-`m` independent visibilities. KL reduction preserves this result through the
-induced visibility covariance; it does not turn the latent sky into an
-independent proper-complex field. Supplying independent complex observations
-without their conjugate counterparts requires a different formulation, not
-simply the same cached products. Saved `.npy` data bypass raw-data preprocessing,
-so their convention must already match their operators and noise weights.
+    - **Default:** 25, so live points $= 25\,N_{\rm dim}$.
 
-### Evidence normalisation
+`random_key`
+:   The sampler's random seed.
 
-For fixed noise, `log_likelihood` returns the expression above without
+    - **Default:** 0.
 
-```text
-c_fixed = -0.5 * (d^H N^{-1} d + log|N| + N_d*log(pi)).
-```
+`resume`
+:   Continues an existing MultiNest run from `output_dir`.
 
-Add `c_fixed` to the reported log evidence to recover its absolute normalisation.
-It cancels when comparing foreground-only and joint models of the same dataset
-with the same noise covariance and prior convention, even if their coefficient
-counts differ. It does not generally cancel between different datasets.
+    - **Default:** `false`.
+    - **Note:** reports an error if no checkpoint files are found.
 
-When fitting a noise amplitude `alpha`, the code retains the varying data and
-noise-determinant terms. Its omitted constant is instead
-`c_noise = -0.5*(log|N| + N_d*log(pi))`, where `N` is the reference covariance
-before multiplication by `alpha**2`. Restore the appropriate constant before
-comparing fixed-noise and fitted-noise models. These statements assume the
-normalised log-uniform power priors; the legacy `uniform_priors` Jacobian option
-also requires its prior-normalisation constants for absolute evidence.
+`output_dir`
+:   Where the sampler outputs and run metadata are written.
 
-The regression tests compare the original and KL coefficient-space targets
-against a normalised Gaussian density on independent real/imaginary data,
-including truncated bases, foreground-only models and fitted noise amplitudes.
+## Hardware
 
-### Residual-noise checks
+MultiNest runs in a single process, while each likelihood evaluation uses the
+available JAX devices. On one CPU or GPU, the likelihood uses native JAX; across
+several GPUs, it uses [JAXMg](https://flatironinstitute.github.io/jaxmg/latest/),
+with one process per GPU. To restrict a run to one GPU, set
+`CUDA_VISIBLE_DEVICES=0`. See [HPC and scaling](hpc-scaling.md).
 
-For independent Gaussian noise before any fitting or sample rescaling, the
-augmented statistic `Q = n^H N^{-1} n` follows
-`2*Gamma(N_d/2, 1)`, equivalently `chi2(N_d)`, not `Gamma(N_d, 1)`.
-Both expressions have mean `N_d`, but their variances differ by a factor of two.
-The existing noise generator also rescales each draw by its measured standard
-deviation before enforcing conjugacy, so its finite-sample distribution is not
-exactly this Gaussian reference. A calibrated residual test must account for
-that generation procedure and the subsequent fitting; likelihood algebra alone
-does not validate a residual-tail probability.
+## Example script
 
-## MultiNest
-
-MultiNest is the supported nested sampler. It is available directly through:
-
-```python
-from bayeseor_jax import run_multinest
-```
-
-The generic name `run_nestedsampling` is an alias for the same function:
-
-```python
-from bayeseor_jax import run_nestedsampling
-
-summary = run_nestedsampling(
-    setup_result,
-    out_dir="outputs/nested_sampling",
-)
-```
-
-MultiNest is often useful when likelihood evaluations are expensive and evidence estimates are required. It requires the native MultiNest library as well as `pymultinest`.
-
-## MAP Helper
-
-`MaximumAPosteriori` provides a maximum-a-posteriori analysis path. Use it for reconstruction and diagnostic workflows rather than as the default power-spectrum posterior estimator.
-
-## Example Script
-
-The shipped example runs setup by default:
+The example script runs setup, and with `--sample`, nested sampling followed by a
+short posterior analysis:
 
 ```bash
 python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
-```
-
-Add `--sample` to run nested sampling:
-
-```bash
 python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
 ```
 
-The example calls `run_nestedsampling`. After sampling, it writes posterior
-summaries and diagnostic plots; an analytic FG-only run stops after saving its
-evidence and MAP coefficients. For serious runs, create a dedicated configuration
-and output directory rather than using the default example paths.
-
-Record the live-point count, random seed and stopping settings with each scientific result.
+For scientific runs, use a dedicated configuration and output directory, and
+record the live-point count, seed and stopping settings with each result.

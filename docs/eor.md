@@ -1,21 +1,31 @@
 # EoR model
 
-The EoR model starts with a three-dimensional Fourier description of the cosmological 21-cm field and follows it through the instrument to predict the measured visibilities.
+BayesEoR describes the cosmological 21-cm signal on a three-dimensional Fourier
+grid. Each coefficient belongs to a single spatial scale, giving the model an
+intrinsic link to the power spectrum we aim to recover, and exposing the
+line-of-sight structure that distinguishes the signal from spectrally smooth
+foregrounds.
 
 [![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png#only-light)](assets/diagrams/eor-workflow.png)
 [![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow-dark.png#only-dark)](assets/diagrams/eor-workflow-dark.png)
 
-Let's follow this mapping one step at a time. First we turn Fourier coefficients into brightness at each sky pixel, then follow each pixel's contribution to the visibilities. Adding those contributions gives the predicted cosmological signal.
+The coefficients, $\boldsymbol a$, are mapped to the visibilities by a sequence
+of linear operators, read from right to left:
 
-Each step below has optional **Mathematics** and **Code and example** panels. The Python examples build on one another and use a small illustrative grid, not an analysis-ready configuration. For a complete run, use the [example scripts](examples.md).
+$$
+\boldsymbol m_{21} = \mathbf F^{-1}\,\mathbf P\,\mathbf F'\,\mathbf F_z\,\boldsymbol a
+\equiv \mathbf T_{21}\,\boldsymbol a.
+$$
 
 ## 1. Choose the Fourier modes
 
-We describe the field using transverse angular modes and line-of-sight spectral modes. This makes the connection to the cosmological power spectrum natural: each coefficient belongs to a particular spatial scale, rather than to one sky pixel.
+The coefficients are defined on a grid of transverse angular modes, $(u,v)$, and
+line-of-sight spectral modes, $\eta$, the Fourier dual of frequency. This model
+grid is separate from the baselines sampled by the instrument: it describes a
+local tangent plane, while the later propagation to visibilities uses the full
+three-dimensional sky directions.
 
-These model coordinates are distinct from the baselines sampled by the instrument. The transverse grid describes a local tangent plane; the later propagation to visibilities uses the full three-dimensional sky directions.
-
-??? note "Mathematics: the coefficient grid"
+=== "Maths"
 
     A coefficient $a_{he}$ belongs to transverse pair $(u_h,v_h)$ and spectral mode $\eta_e$, the Fourier dual of observing frequency. The usual spacings are the reciprocal model extents and bandwidth:
 
@@ -33,7 +43,7 @@ These model coordinates are distinct from the baselines sampled by the instrumen
 
     When flattened, coefficients are ordered by transverse mode, with $\eta$ varying fastest.
 
-??? example "Code and example: define the grid"
+=== "Code"
 
     [build_fourier_geometry](api/geometry.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry) takes grid sizes and spacings, and returns the retained coordinates and integration weights. This example uses eight transverse pairs and three spectral modes.
 
@@ -60,9 +70,10 @@ These model coordinates are distinct from the baselines sampled by the instrumen
 
 ## 2. Reconstruct the frequency dependence
 
-At each transverse coordinate, combine the spectral modes to find the field at the observing frequencies. This is the role of the spectral Fourier operator, **F_z**. We now have a two-dimensional angular Fourier description at every frequency channel.
+At each transverse mode, the spectral Fourier operator, $\mathbf F_z$, combines
+the spectral modes into the field at each observing frequency.
 
-??? note "Mathematics: from spectral modes to frequency"
+=== "Maths"
 
     $$
     S_h(\nu_f)=\sum_e(F_z)_{fe}a_{he},
@@ -73,7 +84,7 @@ At each transverse coordinate, combine the spectral modes to find the field at t
 
     The configured builder uses the middle observing channel as $\nu_{\rm ref}$. The factor $\Delta\eta$ supplies the Fourier integration weight.
 
-??? example "Code and example: build the spectral operator"
+=== "Code"
 
     [build_spectral_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_spectral_fourier_operator) accepts spectral coordinates, frequency offsets in Hz and the spectral spacing. It returns a matrix shaped `(n_frequency, n_eta_mode)`.
 
@@ -93,11 +104,13 @@ At each transverse coordinate, combine the spectral modes to find the field at t
 
 ## 3. Reconstruct brightness at the sky pixels
 
-Next, the transverse Fourier operator, **F′**, maps those angular modes onto the selected HEALPix pixels. A Fourier coefficient contributes across the image; it is not an independent pixel amplitude.
+The transverse Fourier operator, $\mathbf F'$, maps the angular modes onto the
+HEALPix pixels of the model field. Each coefficient contributes across the whole
+image, rather than to a single pixel. The transform uses the pixel directions at
+the reference integration, and the same celestial pixels are then tracked as the
+Earth rotates.
 
-The transverse transform uses pixel directions at the reference integration. Those same celestial pixels are then tracked through the observation as Earth rotates.
-
-??? note "Mathematics: from angular modes to brightness"
+=== "Maths"
 
     $$
     I_{21,p}(\nu_f)=\sum_hF'_{ph}S_h(\nu_f),
@@ -108,7 +121,7 @@ The transverse transform uses pixel directions at the reference integration. Tho
 
     Here $(l_p,m_p)$ are the reference-time direction cosines of pixel $p$. The pixel set contains the union of directions entering the cosmological field during the observation.
 
-??? example "Code and example: build the image mapping"
+=== "Code"
 
     [build_image_geometry](api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) selects and tracks the sky pixels. [build_transverse_fourier_operator](api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator) maps the Fourier grid onto their reference-time coordinates, returning `(n_pixel, n_uv_mode)`.
 
@@ -136,9 +149,11 @@ The transverse transform uses pixel directions at the reference integration. Tho
 
 ## 4. Weight each pixel by the primary beam
 
-Not every sky direction contributes equally to the observation. The primary beam weights each pixel according to its direction and frequency, with zero response at or below the horizon. You can use an analytic beam or an interpolated beam model supplied with the [instrument configuration](instrument.md#primary-beam).
+The primary beam, $\mathbf P$, weights each pixel by its direction and frequency,
+with zero response at and below the horizon. See the
+[primary beam](instrument.md#primary-beam) for the supported models.
 
-??? note "Mathematics: beam-weighted brightness"
+=== "Maths"
 
     $$
     I^{\rm beam}_{tfp}=P_{tfp}\,I_{21,p}(\nu_f).
@@ -146,9 +161,9 @@ Not every sky direction contributes equally to the observation. The primary beam
 
     The beam operator is diagonal in image space. We apply its weights directly rather than constructing a dense diagonal matrix.
 
-??? example "Code and example: evaluate the beam"
+=== "Code"
 
-    [Beam_Model.get_beam_vals](api/geometry.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) takes azimuth/zenith-angle coordinates and frequencies in Hz. Its output order is `(frequency, time, pixel)`; the visibility operator expects `(time, frequency, pixel)`.
+    [Beam_Model.get_beam_vals](api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) takes azimuth/zenith-angle coordinates and frequencies in Hz. Its output order is `(frequency, time, pixel)`; the visibility operator expects `(time, frequency, pixel)`.
 
     ```python
     from bayeseor_jax.model.instrument.beam import Beam_Model
@@ -161,11 +176,13 @@ Not every sky direction contributes equally to the observation. The primary beam
 
 ## 5. Add each pixel's contribution to the visibilities
 
-Each baseline sees a different geometric phase for each pixel. Apply this full three-dimensional fringe response, then sum the beam-weighted contributions across the sky. This gives the cosmological visibility at each baseline, time and frequency.
+Finally, $\mathbf F^{-1}$ applies the three-dimensional fringe response of each
+baseline and sums over the pixels, giving the cosmological visibilities. In the
+code, the beam and fringe are combined into a single operator,
+$\mathbf R = \mathbf F^{-1}\mathbf P$, which already includes the pixel solid
+angle, so it must not be applied again.
 
-In the code, the beam and fringe response are combined into a single operator, **R**. Its pixel integration weight is already included, so it must not be applied a second time.
-
-??? note "Mathematics: the contribution of one pixel"
+=== "Maths"
 
     $$
     \delta m_{21,tfbp}
@@ -176,9 +193,9 @@ In the code, the beam and fringe response are combined into a single operator, *
     m_{21,tfb}=\sum_p\delta m_{21,tfbp}.
     $$
 
-    Here $\Delta\Omega$ is the pixel solid angle and $\boldsymbol u_b$ is the baseline in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` baseline convention. See the [shared response](model.md#shared-sky-to-visibility-response) for the convention and units.
+    Here $\Delta\Omega$ is the pixel solid angle and $\boldsymbol u_b$ is the baseline in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` baseline convention. See [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) for the convention and units.
 
-??? example "Code and example: construct the visibility response"
+=== "Code"
 
     [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) combines sky directions, baselines in wavelengths, beam weights and pixel area into an array shaped `(time, frequency, baseline, pixel)`.
 
@@ -198,20 +215,37 @@ In the code, the beam and fringe response are combined into a single operator, *
 
 ## 6. Put the steps together
 
-We can combine these mappings into one cosmological operator, **T_21**. Each column describes how one Fourier coefficient contributes to all the selected visibilities. Multiplying by the coefficient vector gives the same result as following the individual steps above.
+Combining these gives $\mathbf T_{21}$, whose columns describe how each Fourier
+coefficient contributes to every visibility. Applying it to $\boldsymbol a$ gives
+the same result as following the steps above.
 
-??? note "Mathematics: the complete operator"
+=== "Maths"
+
+    Combining the steps, the contribution of every coefficient $a_{he}$ to the
+    visibility measured by baseline $b$ at frequency $\nu_f$ and time $t$ is
 
     $$
-    (T_{21})_{(tfb),(he)}
-    =\left[\sum_pR_{tfbp}F'_{ph}\right](F_z)_{fe},
-    \qquad
-    \boldsymbol m_{21}=\mathbf T_{21}\boldsymbol a.
+    \begin{aligned}
+    m_{21,tfb}
+    ={}& \sum_{h,e}\sum_{p}
+    \Delta\Omega\,
+    \exp\!\left[+2\pi i\,\boldsymbol u_b(\nu_f)\cdot\hat{\boldsymbol s}_p(t)\right]
+    P_{tfp} \\
+    &\times \Delta u\,\Delta v\,
+    \exp\!\left[-2\pi i\,(u_h l_p + v_h m_p)\right] \\
+    &\times \Delta\eta\,
+    \exp\!\left[-2\pi i\,(\nu_f-\nu_{\rm ref})\,\eta_e\right]
+    a_{he}.
+    \end{aligned}
     $$
 
-    In compact notation, $\mathbf T_{21}=\mathbf F^{-1}\mathbf P\mathbf F'\mathbf F_z$. Rows are ordered by time, frequency and baseline, with baseline varying fastest; columns are ordered by transverse mode, then spectral mode.
+    Stacking over times, frequencies and baselines gives
+    $\boldsymbol m_{21} = \mathbf F^{-1}\mathbf P\mathbf F'\mathbf F_z\boldsymbol a
+    \equiv \mathbf T_{21}\boldsymbol a$. Rows are ordered by time, frequency and
+    baseline, with baseline varying fastest; columns are ordered by transverse
+    mode, then spectral mode.
 
-??? example "Code and example: assemble and check the operator"
+=== "Code"
 
     [build_T_21_core](api/operators.md#bayeseor_jax.model.operators.build_T_21_core) contracts the three supplied operators. [T_21](api/operators.md#bayeseor_jax.model.operators.T_21) provides the same calculation while constructing the beam-weighted response from geometry arrays.
 
@@ -229,64 +263,46 @@ We can combine these mappings into one cosmological operator, **T_21**. Each col
 
     For larger calculations, [T_21_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_21_build_save) evaluates CPU time-frequency blocks and saves `T_21.npy`. The [construction workflow](forward-model.md) changes how this operator is built and stored, not its mathematical definition.
 
-## From Fourier modes to the power spectrum
+## Configuration
 
-The goal is to recover how much cosmological power lies on each spatial scale, not the value of every Fourier coefficient. We group modes into spherical bins and infer their power-spectrum amplitudes. Those amplitudes set the coefficient prior; the individual coefficients are integrated out in [Inference](joint-inference.md).
+Setup builds the Fourier grid from the observation and these settings. A larger
+field of view or Fourier grid adds coefficients to the model, increasing the
+memory and computation required.
 
-??? note "Mathematics: cosmological scales and power"
+`fov_eor`
+:   The full angular diameter of the EoR model field.
 
-    At the reference redshift, the Fourier coordinates become comoving wavenumbers:
+    - **Default:** 10.
+    - **Units:** degrees.
+    - **Note:** the model covers every pixel that enters this field during the
+      observation.
 
-    $$
-    k_x=\frac{2\pi u}{D_M},\qquad
-    k_y=\frac{2\pi v}{D_M},\qquad
-    k_z=\frac{2\pi\eta}{|d\chi/d\nu|}.
-    $$
+`n_u_eor`, `n_v_eor`
+:   The number of transverse modes along $u$ and $v$.
 
-    Modes are binned by $k=(k_x^2+k_y^2+k_z^2)^{1/2}$, with power amplitude
+    - **Default:** inferred, so the grid covers the longest baseline at the
+      highest frequency, plus half the beam's aperture width on each side.
+    - **Note:** smaller values are kept, with a warning.
 
-    $$
-    \varphi_s=\Delta^2_{21}(k_s)=\frac{k_s^3}{2\pi^2}P_{21}(k_s).
-    $$
+`du_eor`, `dv_eor`
+:   The transverse mode spacings.
 
-    The coefficient covariance also includes the Fourier-volume normalisation. The implementation applies this conversion through [PhiInverse](api/inference.md#bayeseor_jax.inference.phi.PhiInverse); the power amplitude is not itself the raw coefficient variance.
+    - **Default:** the reciprocal of the model field's angular extent along each
+      axis.
+    - **Units:** inverse radians.
+    - **Note:** values that differ from the default by more than 5% produce a
+      warning.
 
-??? example "Code and example: find the scale of each mode"
+`n_eta`
+:   The number of line-of-sight modes.
 
-    `generate_k_modes_in_physical_coordinates` converts the retained grid to wavenumber magnitudes in the same order as the operator columns. Setup then assigns these to power-spectrum bins.
+    - **Default:** `n_freq`.
 
-    ```python
-    from bayeseor_jax.model.cosmology.transforms import Cosmology
-    from bayeseor_jax.model.cosmology.power_spectrum import (
-        generate_k_modes_in_physical_coordinates,
-    )
+`nside`
+:   The HEALPix resolution of the image grid, shared with the foreground model.
 
-    cosmology = Cosmology()
-    redshift = cosmology.f2z(jnp.mean(frequencies_hz))
-    k = generate_k_modes_in_physical_coordinates(
-        grid.uv, grid.eta,
-        float(cosmology.dL_dth(redshift)),
-        float(jnp.abs(cosmology.dL_df(redshift))),
-    )
-    assert k.shape == (T.shape[1],)
-    assert bool(jnp.all(k > 0))
-    ```
+    - **Default:** inferred from the longest baseline and highest frequency.
+    - **Note:** lower values are kept, with a warning.
 
-## Choose the model for your observation
-
-For an actual analysis, configure the field of view and let setup construct the corresponding geometry. Increasing the field or Fourier grid adds coefficients to the marginalised system, so it also increases the memory and computation required.
-
-??? example "Configuration: the EoR model settings"
-
-    | Setting | Role |
-    | --- | --- |
-    | `fov_eor` | Full angular field of view, in degrees. |
-    | `n_u_eor`, `n_v_eor` | Transverse grid sizes, inferred if omitted; undersized supplied values produce warnings. |
-    | `du_eor`, `dv_eor` | Optional transverse spacings; otherwise derived from the model field. |
-    | `n_eta` | Spectral grid size; defaults to `n_freq`. |
-    | `nside` | Shared HEALPix resolution for image quadrature; inferred if omitted. |
-    | `priors` | One `[min, max]` range per populated power-spectrum bin in logarithmic power coordinates. |
-
-    The `uniform_priors` setting selects bins with a linear-uniform physical power prior while retaining logarithmic sampler coordinates. See the [configuration reference](configuration.md) and the supplied configurations in `test_examples/eor/` and `test_examples/eor_fgs/` for complete runs.
-
-Continue to the [foreground model](foregrounds.md) to see the alternative image-domain parameterisation, or to [Inference](joint-inference.md) to combine both contributions with their priors.
+See the [configuration reference](configuration.md), and the configurations in
+`test_examples/eor/` and `test_examples/eor_fgs/` for complete runs.

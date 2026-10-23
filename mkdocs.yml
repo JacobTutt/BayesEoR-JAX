@@ -62,12 +62,17 @@ plugins:
             show_signature_annotations: true
             separate_signature: true
             heading_level: 2
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
 
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - def_list
   - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.highlight
   - pymdownx.superfences
   - pymdownx.arithmatex:
@@ -89,17 +94,21 @@ nav:
       - Installation: installation.md
       - Getting started: basics.md
   - Data:
-      - Visibilities: visibilities.md
-      - Instrument and observation: instrument.md
-      - Input preparation: data.md
+      - Interferometric data: visibilities.md
+      - Instrumental configuration: instrument.md
+      - Observation configuration: observation.md
+      - Visibility data: data.md
   - Model:
-      - Overview: model.md
+      - Bayesian forward model: model.md
       - EoR model: eor.md
       - Foreground model: foregrounds.md
       - KL Reduced Basis: kl-reduced-basis.md
       - Construction and execution: forward-model.md
   - Inference:
-      - Inference: joint-inference.md
+      - Overview: joint-inference.md
+      - Δ² parameterisation: power-spectrum.md
+      - Analytical marginalisation: marginalisation.md
+      - Maximum a posteriori: map.md
       - Running inference: inference.md
       - Posterior analysis: outputs-analysis.md
   - Examples:
@@ -107,9 +116,10 @@ nav:
       - Configuration reference: configuration.md
   - API:
       - Overview: api/index.md
-      - Configuration and setup: api/setup.md
-      - Geometry and instrument: api/geometry.md
-      - Linear operators: api/operators.md
+      - Setup: api/setup.md
+      - Data: api/data.md
+      - Geometry: api/geometry.md
+      - Operators: api/operators.md
       - Construction and KL reduction: api/construction.md
       - Inference: api/inference.md
-      - Data and analysis: api/data-analysis.md
+      - Analysis: api/analysis.md

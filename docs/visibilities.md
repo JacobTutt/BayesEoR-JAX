@@ -1,49 +1,50 @@
-# Interferometric visibilities
+# Interferometric data
 
-BayesEoR aims to detect the cosmological 21-cm contribution from the Epoch of
-Reionisation and recover its power spectrum from interferometric observations.
-These measurements also contain much brighter foreground emission, with both
-contributions coupled through the instrument's frequency-dependent response.
-We therefore begin with the measured visibilities, the instrument that samples
-them, and the inputs required to describe an observation.
+BayesEoR performs cosmological inference directly on radio-interferometric
+visibilities, the raw measurements of an interferometer, rather than on images or
+power spectra estimated from them.
 
-## From antenna voltages to visibilities
+## Visibilities
 
-An interferometer measures correlations between the electric fields received
-by pairs of antennas. For complex voltage vectors $\boldsymbol v_i$ and
-$\boldsymbol v_j$, containing the two polarisation channels, their
-cross-correlation defines the visibility coherency matrix
+An interferometer is an array of antennas whose signals are correlated in pairs.
+The visibility measured by antennas $i$ and $j$ is the time-averaged
+cross-correlation of their voltages,
 
 $$
-\mathbf V_{ij}(\nu,t)
-=\left\langle\boldsymbol v_i(\nu,t)
-\boldsymbol v_j^\dagger(\nu,t)\right\rangle.
+V_{ij}(\nu,t)=\left\langle v_i(\nu,t)\,v_j^{*}(\nu,t)\right\rangle.
 $$
 
-The brackets denote averaging over the integration time and frequency channel,
-and $\dagger$ denotes the conjugate transpose. BayesEoR's scalar sky model uses
-total-intensity visibilities derived from these correlations; the supported
-polarisation selection and pseudo-Stokes combination are described under
-[input preparation](data.md#selecting-and-preparing-raw-visibilities).
-
-Antennas at positions $\boldsymbol r_i$ and $\boldsymbol r_j$ define the physical
-baseline and its wavelength-scaled coordinate,
+Each pair forms a baseline, $\boldsymbol b_{ij}=\boldsymbol r_i-\boldsymbol r_j$,
+whose visibility measures a single Fourier mode of the beam-weighted sky. Measured
+in wavelengths, the baseline sets which mode is sampled,
 
 $$
-\boldsymbol b_{ij}=\boldsymbol r_i-\boldsymbol r_j,
-\qquad
-\boldsymbol u_{ij}(\nu)=\frac{\nu}{c}\boldsymbol b_{ij}
-=(u_{ij},v_{ij},w_{ij}).
+\boldsymbol u_{ij}(\nu)=\frac{\nu}{c}\,\boldsymbol b_{ij}.
 $$
 
-The baseline's length and orientation determine which angular structure it
-samples. Longer baselines resolve finer structure, while baselines with the
-same separation and orientation are redundant under an identical antenna
-response.
+Longer baselines respond to finer angular structure, and the baseline's
+orientation sets the direction of that structure. Because $\boldsymbol u_{ij}$
+scales with frequency, the same baseline samples a different angular scale in
+every channel, and as the Earth rotates, the sampled modes change over the
+course of an observation.
 
-To describe an observation, specify the [instrument and observation](instrument.md):
-baseline geometry, observing frequencies and times, telescope location and
-primary beam. Then follow [input preparation](data.md) to supply the measured
-or simulated visibilities in the required units and ordering. The
-[Model introduction](model.md#the-interferometric-measurement-equation)
-sets out how sky brightness is mapped into these measurements.
+## Why the instrument matters
+
+Each visibility only samples the modes set by its baseline, beam, frequency and
+time, so the forward model is only as accurate as its description of the
+instrument. BayesEoR therefore needs the array layout, primary beam, observing
+frequencies, times and telescope location of the data being analysed:
+
+- [Instrumental configuration](instrument.md): array layout and primary beam.
+- [Observation configuration](observation.md): frequencies, times and telescope
+  location.
+- [Visibility data](data.md): supported formats, units, ordering and noise.
+
+## Generating realistic data
+
+To simulate realistic visibilities, use
+[BayesEoR-Data-Generation](https://github.com/JacobTutt/BayesEoR-Data-Generation).
+From a single YAML configuration, it builds mock-EoR, diffuse (GSM) and
+point-source (GLEAM-like and A-team) sky models and simulates their visibilities
+with [pyuvsim](https://github.com/RadioAstronomySoftwareGroup/pyuvsim). The
+resulting UVH5 files can be passed directly to BayesEoR as `data_path`.

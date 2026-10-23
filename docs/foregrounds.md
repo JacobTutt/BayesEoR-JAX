@@ -1,21 +1,29 @@
 # Foreground model
 
-The foreground model starts with spectral amplitudes on a spherical HEALPix grid and follows each pixel through the primary beam and full three-dimensional fringe response to predict the visibilities.
+BayesEoR describes the foregrounds directly on the sky, as smooth spectra in each
+pixel of a spherical HEALPix grid. Working on the sphere, rather than a tangent
+plane, lets the model extend all the way to the horizon, while the spectral
+smoothness of the foregrounds is what separates them from the 21-cm signal.
 
 [![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow.png#only-light)](assets/diagrams/foreground-workflow.png)
 [![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow-dark.png#only-dark)](assets/diagrams/foreground-workflow-dark.png)
 
-Here we begin directly in image space, rather than on the Fourier grid used by the [EoR model](eor.md). Let's follow one pixel's spectrum into its contribution to the visibilities, then combine the contributions across the sky. The spherical geometry lets us include emission all the way to the horizon without a tangent-plane approximation to the foreground field.
+The amplitudes, $\boldsymbol q$, are mapped to the visibilities by a sequence of
+linear operators, read from right to left:
 
-Open the **Mathematics** or **Code and example** panels for the details of each step. The Python examples run in sequence using a small illustrative setup; use the [example scripts](examples.md) for a complete analysis.
+$$
+\boldsymbol m_{\rm FG} = \mathbf F^{-1}\,\mathbf P\,\mathbf Q_z\,\boldsymbol q
+\equiv \mathbf T_{\rm FG}\,\boldsymbol q.
+$$
 
 ## 1. Choose the sky pixels
 
-Start by selecting the foreground field of view. The model includes every celestial pixel that enters this field at any point during the observation, and tracks its direction relative to the instrument at each integration.
+The model covers every celestial pixel that enters the foreground field of view
+during the observation, and tracks its direction relative to the instrument at
+each integration. Each pixel carries its own spectral amplitudes, so a wider field
+adds coefficients without changing the construction.
 
-Each selected pixel carries its own set of spectral amplitudes. Expanding the field therefore adds pixels and coefficients, while keeping the same construction.
-
-??? note "Mathematics: the image-domain coefficients"
+=== "Maths"
 
     For spectral component $g$, collect the amplitudes of all selected pixels into
 
@@ -34,7 +42,7 @@ Each selected pixel carries its own set of spectral amplitudes. Expanding the fi
 
     Pixel identities stay fixed on the celestial sky, but their topocentric directions $\hat{\boldsymbol s}_p(t)=(l_p(t),m_p(t),n_p(t))$ change with observing time.
 
-??? example "Code and example: select and track the pixels"
+=== "Code"
 
     [build_image_geometry](api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) takes field extents, HEALPix resolution, telescope location and observing times. It returns the pixel directions, beam coordinates and pixel solid angle.
 
@@ -59,11 +67,12 @@ Each selected pixel carries its own set of spectral amplitudes. Expanding the fi
 
 ## 2. Reconstruct each pixel's spectrum
 
-The spectral operator, **Q_z**, turns the pixel amplitudes into brightness at each observing frequency. The configured model combines a constant spectrum with power laws whose slopes are shared across the sky; their amplitudes are independent for each pixel.
+The spectral operator, $\mathbf Q_z$, turns each pixel's amplitudes into its
+brightness at every observing frequency. The spectrum is a constant plus a set of
+power laws, whose slopes are shared across the sky and whose amplitudes are free
+in each pixel.
 
-We only need a small frequency-by-component matrix of spectral factors. The code applies it to every pixel without constructing a large pixel-by-pixel matrix.
-
-??? note "Mathematics: from amplitudes to brightness"
+=== "Maths"
 
     $$
     I_{{\rm FG},p}(\nu_f)=\sum_g Q_{fg}q_{g,p},
@@ -74,7 +83,7 @@ We only need a small frequency-by-component matrix of spectral factors. The code
 
     The full spectral operator is $\mathbf Q_z=\mathbf Q\otimes\mathbf I_{N_{\rm pix}}$ with component-major coefficient ordering. The builder uses the first observing channel as $\nu_0$.
 
-??? example "Code and example: build the spectral factors"
+=== "Code"
 
     [build_foreground_spectral_operator](api/operators.md#bayeseor_jax.model.operators.build_foreground_spectral_operator) takes frequencies in **MHz**, a reference frequency and signed power-law exponents. It returns `(n_frequency, n_component)`.
 
@@ -100,11 +109,12 @@ We only need a small frequency-by-component matrix of spectral factors. The code
 
 ## 3. Weight the brightness by the primary beam
 
-The primary beam determines how strongly each pixel contributes at each frequency and time. Its response is zero at or below the horizon, so pixels can move through the observation without contributing when they are no longer visible.
+The primary beam, $\mathbf P$, weights each pixel by its direction and frequency.
+Its response is zero at and below the horizon, so pixels stop contributing as
+they set. See the [primary beam](instrument.md#primary-beam) for the supported
+models.
 
-This is the same beam-weighting step used for the cosmological field, evaluated over the wider foreground pixel selection.
-
-??? note "Mathematics: beam-weighted brightness"
+=== "Maths"
 
     $$
     I^{\rm beam}_{{\rm FG},tfp}
@@ -113,9 +123,9 @@ This is the same beam-weighting step used for the cosmological field, evaluated 
 
     The weights act independently on each image pixel. There is no need to allocate a dense diagonal beam matrix.
 
-??? example "Code and example: evaluate the beam"
+=== "Code"
 
-    [Beam_Model.get_beam_vals](api/geometry.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) accepts azimuth/zenith-angle coordinates and frequencies in **Hz**. Reorder its `(frequency, time, pixel)` output for the forward operators.
+    [Beam_Model.get_beam_vals](api/data.md#bayeseor_jax.model.instrument.beam.Beam_Model.get_beam_vals) accepts azimuth/zenith-angle coordinates and frequencies in **Hz**. Reorder its `(frequency, time, pixel)` output for the forward operators.
 
     ```python
     from bayeseor_jax.model.instrument.beam import Beam_Model
@@ -133,11 +143,14 @@ This is the same beam-weighting step used for the cosmological field, evaluated 
 
 ## 4. Add the pixel contributions to each visibility
 
-For each baseline, apply the geometric fringe phase and sum the beam-weighted sky brightness. The full three-dimensional response retains the wide-field geometry, including directions close to the horizon.
+Finally, $\mathbf F^{-1}$ applies the full three-dimensional fringe response of
+each baseline and sums over the pixels. Keeping the $w$ term retains the
+wide-field geometry, including directions close to the horizon. As in the
+[EoR model](eor.md), the beam and fringe are combined in the code into
+$\mathbf R = \mathbf F^{-1}\mathbf P$, which already includes the pixel solid
+angle.
 
-As in the EoR model, the code combines the beam and fringe into **R**. This response already includes the pixel solid angle; multiplying by it again would double-count the integration weight.
-
-??? note "Mathematics: the contribution of one pixel"
+=== "Maths"
 
     $$
     \delta m_{{\rm FG},tfbp}
@@ -148,9 +161,9 @@ As in the EoR model, the code combines the beam and fringe into **R**. This resp
     m_{{\rm FG},tfb}=\sum_p\delta m_{{\rm FG},tfbp}.
     $$
 
-    Baselines $\boldsymbol u_b$ are expressed in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` convention, as described in the [shared response](model.md#shared-sky-to-visibility-response).
+    Baselines $\boldsymbol u_b$ are expressed in wavelengths. The positive fringe sign follows the code's `ant2 - ant1` convention, as implemented in [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator).
 
-??? example "Code and example: propagate brightness to visibilities"
+=== "Code"
 
     [build_sky_to_visibility_operator](api/operators.md#bayeseor_jax.model.operators.build_sky_to_visibility_operator) returns the beam-weighted response with shape `(time, frequency, baseline, pixel)`.
 
@@ -169,21 +182,31 @@ As in the EoR model, the code combines the beam and fringe into **R**. This resp
 
 ## 5. Put the steps together
 
-Combining these mappings gives the foreground operator, **T_fg**. Each column describes the visibility response to one spectral amplitude in one pixel. Applying it to all the coefficients reproduces the step-by-step calculation above.
+Combining these gives $\mathbf T_{\rm FG}$, whose columns describe how each
+spectral amplitude in each pixel contributes to every visibility.
 
-??? note "Mathematics: the complete operator"
+=== "Maths"
+
+    Combining the steps, the contribution of every amplitude $q_{g,p}$ to the
+    visibility measured by baseline $b$ at frequency $\nu_f$ and time $t$ is
 
     $$
-    (T_{\rm FG})_{(tfb),(gp)}=R_{tfbp}Q_{fg},
-    \qquad
-    \boldsymbol m_{\rm FG}=\mathbf T_{\rm FG}\boldsymbol q,
-    \qquad
-    \mathbf T_{\rm FG}=\mathbf F^{-1}\mathbf P\mathbf Q_z.
+    m_{{\rm FG},tfb}
+    = \sum_{p}
+    \Delta\Omega\,
+    \exp\!\left[+2\pi i\,\boldsymbol u_b(\nu_f)\cdot\hat{\boldsymbol s}_p(t)\right]
+    P_{tfp}
+    \left[q_{0,p} + \sum_{g\geq1} q_{g,p}
+    \left(\frac{\nu_f}{\nu_0}\right)^{-\beta_g}\right].
     $$
 
-    Rows are ordered by time, frequency and baseline, with baseline varying fastest. Columns are ordered by spectral component, then pixel, matching the flattened coefficient array.
+    Stacking over times, frequencies and baselines gives
+    $\boldsymbol m_{\rm FG} = \mathbf F^{-1}\mathbf P\mathbf Q_z\boldsymbol q
+    \equiv \mathbf T_{\rm FG}\boldsymbol q$. Rows are ordered by time, frequency
+    and baseline, with baseline varying fastest; columns are ordered by spectral
+    component, then pixel.
 
-??? example "Code and example: assemble and check the operator"
+=== "Code"
 
     [build_T_fg_core](api/operators.md#bayeseor_jax.model.operators.build_T_fg_core) combines the response and spectral factors. [T_fg](api/operators.md#bayeseor_jax.model.operators.T_fg) also constructs the response directly from the supplied geometry and beam arrays.
 
@@ -201,4 +224,29 @@ Combining these mappings gives the foreground operator, **T_fg**. Each column de
 
     For disk-backed construction, [T_fg_build_save](api/construction.md#bayeseor_jax.model.construction.operator_construction.T_fg_build_save) evaluates the same mapping in CPU time-frequency blocks and writes `T_fg.npy`. See the [construction workflow](forward-model.md) for execution and storage.
 
-The result is the modelled foreground visibility vector. Continue to the [KL Reduced Basis](kl-reduced-basis.md) or [Inference](joint-inference.md) for the next stage.
+## Configuration
+
+`fov_fg`
+:   The full angular diameter of the foreground model field.
+
+    - **Default:** `fov_eor`.
+    - **Units:** degrees.
+    - **Note:** bright foregrounds remain visible through the beam sidelobes, so
+      this is usually larger than `fov_eor`. Use `180` to model the full sky to
+      the horizon.
+
+`beta_fg`
+:   The power-law spectral indices, $\beta_g$, shared across the sky.
+
+    - **Default:** `[2.63, 2.82]`, for Galactic synchrotron and extragalactic
+      sources.
+    - **Sign:** positive values give spectra falling as
+      $(\nu/\nu_0)^{-\beta_g}$.
+    - **Note:** together with the constant term, this sets the number of spectral
+      components per pixel, $1 + N_\beta$.
+
+`nside`
+:   The HEALPix resolution, shared with the [EoR model](eor.md#configuration).
+
+See the [configuration reference](configuration.md) and the configuration in
+`test_examples/eor_fgs/` for a complete run.

@@ -1,112 +1,103 @@
-# Outputs And Analysis
+# Posterior analysis
 
-BayesEoR-JAX writes two broad classes of outputs: matrix caches from setup and posterior outputs from samplers.
+After sampling, the weighted MultiNest chains give the posterior on
+$\Delta^2_{21}(k)$ in each bin. `DataContainer` reads them together with the setup
+metadata and summarises each bin, while the plotting helpers produce the standard
+power-spectrum and posterior figures.
 
-## Matrix Cache
+## Output files
 
-The setup path writes dense arrays under `array_save_directory`, including:
+Setup and sampling write the following to the run's output directories.
 
-- `T.npy`
-- `Ninv.npy`
-- `T_Ninv_T.npy`
-- `dbar.npy`
-- `d_ninv_d.npy`
+`summary.json`
+:   The sampler settings, dimensions, output paths and evidence, `logZ` and
+    `logZerr`.
 
-These files encode the forward model, noise weighting, and data products for a specific configuration. They should not be reused across runs with different data selection, model grid, beam, foreground model, or noise settings unless that reuse is intentional.
+`data-*.txt`
+:   The standard MultiNest products. The weighted chain is usually `data-.txt`;
+    a shorter file root may be used to stay within MultiNest's path-length limit.
 
-Use `clobber: true` only when you explicitly want to rebuild existing products.
+`args.json`
+:   The full run configuration, used for prior ranges when plotting.
 
-## Run Metadata
+`k-vals.txt`, `k-vals-bins.txt`, `k-vals-nsamples.txt`
+:   The representative $k$, edges and number of modes of each
+    [power-spectrum bin](power-spectrum.md).
 
-The output directory records metadata needed by the analysis tools:
+    - **Note:** only written when the model includes the EoR.
 
-- `args.json`: serialized run arguments.
-- `version.txt`: optional package/version marker.
-- `k-vals.txt`: representative k values for compact non-empty bins.
-- `k-vals-bins.txt`: k-bin edges.
-- `k-vals-nsamples.txt`: number of modes in each bin.
+`map_coefficients.npy`
+:   The MAP foreground coefficients, written instead of a chain for `model: fg`.
 
-These files are written by `write_analysis_metadata` during setup when the
-cosmological model is included. Foreground-only setup writes configuration
-metadata but no cosmological k-bin files.
+## Reading results
 
-For standalone workflows, `write_log_files(config, out_dir=output_dir)` accepts
-a `RunConfig` or metadata dictionary. It writes `args.json` and, when supplied,
-`version.txt`, leaving existing files unchanged. No parser object is needed.
+=== "Code"
 
-## Sampler Outputs
+    ```python
+    from bayeseor_jax import DataContainer
 
-MultiNest writes its standard `data-*` products and a BayesEoR-JAX `summary.json`. The main weighted-chain file is usually `data-.txt`, though a shorter file root may be used to avoid MultiNest path-length limits.
+    dc = DataContainer(
+        ["outputs/run_a/multinest", "outputs/run_b/multinest"],
+        labels=["Run A", "Run B"],
+    )
+    dc.medians[0]          # posterior median of each bin, in mK²
+    dc.cred_intervals[0]   # {68: {"lo": ..., "hi": ...}, 95: {...}}
+    dc.uplims[0]           # 95% upper limits, in mK²
+    ```
 
-The `summary.json` file records sampler settings, dimensions, output paths, and evidence-related quantities where available.
+=== "Attributes"
 
-For `model: fg`, the inference runner instead writes an analytic `summary.json`
-and `map_coefficients.npy`. There is no posterior chain to analyse. Read these
-files directly; the evidence uses the same fixed-normalisation convention as
-the sampled likelihood (see [Inference](inference.md#evidence-normalisation)).
+    `samples`, `weights`
+    :   The sampled $\log_{10}$ powers and their normalised posterior weights.
 
-## Reading Results
+    `avgs`, `medians`, `uplims`
+    :   Weighted means, medians and upper limits of $\Delta^2_{21}(k)$, in mK².
 
-The example script and CSD3 Slurm scripts run a small analysis step after sampling. This writes `analysis/posterior_summary.json` and diagnostic plots under the run output directory.
+    `cred_intervals`
+    :   Central credible intervals, by percentage, then `lo` or `hi`.
 
-Use `DataContainer` directly for custom posterior analysis:
+    `k_vals`, `k_vals_bins`
+    :   The representative $k$ and bin edges, in Mpc⁻¹.
 
-```python
-from bayeseor_jax import DataContainer
+    `summaries`, `args`
+    :   Each run's `summary.json`, including its evidence, and `args.json`.
 
-dc = DataContainer(
-    ["outputs/nested_sampling"],
-)
-```
+    Each is a list with one entry per run.
 
-`DataContainer`, defined in `analyze/results.py`, reads k-bin metadata, weighted
-MultiNest chains and optional run metadata. It calculates means, medians, central
-credible intervals and upper limits in linear mK². `samples` retain the sampled
-log10 powers, `weights` contain normalised posterior weights, and
-`log_likelihoods` contain `-0.5` times MultiNest's second column—not the weights
-and not a joint posterior density. All are lists indexed by run.
+`DataContainer` takes the following options:
 
-The physical `k-vals.txt` file is required; missing scales are not replaced with
-bin indices. For comparisons, pass several directories and matching `labels`.
-Power-spectrum plots can compare different k grids. Posterior overlays accept
-grids that agree to numerical precision (`rtol=1e-10`), or explicitly confirmed
-corresponding bins as described below. An optional `expected_dmps` reference is given in mK², or
-`expected_ps` in mK² Mpc³ and converted separately on each grid.
+`labels`
+:   One label per run, used in the plots.
 
-### Separate setup metadata and field-of-view sweeps
+    - **Default:** the directory names.
 
-Archived Isambard sweeps place chains in `model_eor_foregrounds/multinest/`
-and the corresponding priors and k metadata in `setup/`. Read them directly
-without copying or modifying either directory:
+`metadata_dirs`
+:   A setup directory holding `k-vals*.txt` and `args.json`, if these are not
+    beside the chains.
 
-```python
-dc = DataContainer(
-    ["run_10/model_eor_foregrounds/multinest", "run_25/model_eor_foregrounds/multinest"],
-    metadata_dirs=["run_10/setup", "run_25/setup"],
-    labels=["10 degrees", "25 degrees"],
-    bins_correspond=True,
-)
-```
+    - **Format:** one directory shared by every run, or one per run.
 
-`metadata_dirs` accepts one shared directory or a directory per run. When omitted,
-metadata is read beside each chain, as before. The example's `run_output_analysis`
-also accepts `metadata_dir`; the current inference workflow supplies its setup
-directory directly, rather than duplicating metadata into the sampler directory.
+`cred_intervals`, `uplim_quantile`
+:   The central intervals and the upper-limit quantile.
 
-Set `bins_correspond=True` only after verifying that bin indices represent the
-same intended spherical shells across runs. Changing the cosmological Fourier
-grid can slightly change the mean k of each shell without changing that
-correspondence. The flag requires equal bin counts but does not itself establish
-physical equivalence, rebin samples or change the stored k values. Overlay panels
-then show approximate k labels using the first run's means; the spectrum panel
-still uses each run's own k values. Different numbers of bins remain unsupported
-in posterior overlays.
+    - **Default:** 68 and 95 per cent; 0.95.
 
-Plotting lives in `analyze/plotting.py` and returns Matplotlib figures and axes:
+`expected_dmps` or `expected_ps`
+:   A reference spectrum to plot against, as $\Delta^2(k)$ in mK² or $P(k)$ in
+    mK² Mpc³.
 
-Fonts, tick styling, colours and markers are defined in the packaged
-`analyze/bayeseor.mplstyle` file. The plotting helpers apply it locally without
-changing Matplotlib's global defaults.
+`bins_correspond`
+:   Allows posterior overlays between runs whose bins describe the same shells but
+    have slightly different mean $k$, for example after changing the Fourier grid.
+
+    - **Default:** `false`.
+    - **Note:** only set this after checking the bins correspond; it does not rebin
+      the samples.
+
+## Plotting
+
+The plotting helpers take a `DataContainer` and return Matplotlib figures and
+axes, styled for publication without changing global Matplotlib settings.
 
 ```python
 from bayeseor_jax.analyze import (
@@ -114,75 +105,41 @@ from bayeseor_jax.analyze import (
 )
 
 fig, ax = plot_power_spectra(dc, plot_priors=True)
-ax.set_title("Recovered cosmological power")
-fig.savefig("power_spectrum.pdf", bbox_inches="tight")
-
 fig, axes = plot_posteriors(dc, plot_priors=True)
 fig, (power_ax, posterior_axes) = plot_power_spectra_and_posteriors(dc)
+fig.savefig("power_spectrum.pdf", bbox_inches="tight")
 ```
 
-The defaults follow the compact publication layout: a seven-inch-wide combined
-figure, serif typography, a consistent colour/marker palette, small display-only
-offsets between power-spectrum constraints, and tightly stacked posterior panels
-with a shared logarithmic axis. The combined legend sits in the lower right of
-the spectrum panel. Styling is scoped to these plots and does not change global
-Matplotlib settings; Times New Roman falls back to installed serif fonts.
+`plot_priors`
+:   Shades the prior range of each bin.
 
-Prior shading requires `args.json`; power-spectrum shading also requires
-`k-vals-bins.txt`. Posterior histograms use shared log-power edges across runs,
-spanning the displayed prior support and all positive-weight samples. By default
-each curve is **peak-normalised**, for comparing shapes as in the publication
-figures; its height is not a probability density. Pass `normalisation="density"`
-to the posterior or combined plotting function for unit-integral densities per
-dex. Neither choice changes weighted medians, intervals or upper limits. No
-run-specific manual curve scaling is applied.
+    - **Requires:** `args.json`, and `k-vals-bins.txt` for the spectrum panel.
 
-Supply `uplim_inds` to the power-spectrum or
-combined plot to display selected bins as upper limits: either a shared boolean
-mask or one mask per run. The reader does not automatically classify detections.
+`cred_interval`
+:   The credible interval shown on the power spectrum.
 
-### Changes from the previous analysis interface
+    - **Default:** 68.
 
-- Import `DataContainer` from `bayeseor_jax` or `bayeseor_jax.analyze`, not the
-  removed `analyze.analyze` module.
-- Replace `dc.plot_*(...)` with `plot_*(dc, ...)`, unpacking the returned figure
-  and axes. Set labels when constructing `DataContainer`; customise layout,
-  legends and styles through the returned Matplotlib objects.
-- Weighted-chain analysis always uses the weights. `posterior_weighted`,
-  `store_samples`, histogram settings in the constructor, kurtosis, difference
-  panels and speculative unit-label switches have been removed. Samples are
-  always available; histogram bins are a plotting option.
-- Output spectra use Δ²(k) in mK². Standalone `ps_to_dmps` and `dmps_to_ps`
-  functions remain available for explicit conversions. `args` entries are
-  dictionaries, and the reference arrays are stored in `expected_spectra`.
-- Build directory paths directly instead of using `dir_prefix`. Upper limits
-  are always calculated at `uplim_quantile`; plotting masks choose how to show
-  them. Version information remains in the run's metadata files.
+`uplim_inds`
+:   Bins to show as upper limits rather than constraints.
 
-## Interpreting Power-Spectrum Outputs
+    - **Format:** one boolean mask shared by every run, or one per run.
+    - **Note:** bins are not classified automatically.
 
-The default output kind is the dimensionless power spectrum, `Delta^2(k)`. For each k bin, report:
+`normalisation`
+:   How the posterior curves are scaled.
 
-- representative k value;
-- posterior median or mean;
-- chosen credibility interval;
-- whether the bin is treated as a detection or upper limit;
-- sampler and stopping settings;
-- data/model configuration.
+    - **Default:** `peak`, normalising each curve to a peak of one for comparing
+      shapes.
+    - **Alternative:** `density`, for a unit-integral density per dex.
 
-For non-detections, report upper limits using a clearly stated quantile, commonly 95 percent.
+## Reporting results
 
-## Reproducibility Checklist
+For each bin, report its representative $k$, the posterior median, the credible
+interval used, and whether it is a constraint or an upper limit, with the quantile
+stated. To make a result reproducible, archive:
 
-Archive these items with any scientific result:
-
-- YAML configuration file.
-- Git commit hash.
-- installed JAX, JAXMg, and CUDA environment.
-- `args.json`.
-- `summary.json`.
-- k-bin metadata files.
-- sampler chain files.
-- matrix cache provenance or instructions to rebuild it.
-
-Large matrix caches do not always need to be archived permanently, but the exact configuration required to reproduce them should be.
+- the configuration file and `args.json`;
+- `summary.json`, the chains and the `k-vals*.txt` files;
+- the Git commit and the JAX, JAXMg and CUDA versions;
+- the configuration needed to rebuild the saved arrays.

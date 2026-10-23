@@ -39,3 +39,29 @@
   width: min(100%, 26rem);
   height: auto;
 }
+
+/* Shaded panels for tabbed content (Maths/Code, input-format tabs). */
+:root {
+  --bayeseor-panel-bg: #f6f7f9;
+  --bayeseor-panel-code-bg: #ffffff;
+}
+
+[data-md-color-scheme="slate"] {
+  --bayeseor-panel-bg: rgba(255, 255, 255, 0.04);
+  --bayeseor-panel-code-bg: var(--md-code-bg-color);
+}
+
+.md-typeset .tabbed-set {
+  background-color: var(--bayeseor-panel-bg);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+  padding: 0 1rem 0.2rem;
+}
+
+.md-typeset .tabbed-set > .tabbed-labels {
+  box-shadow: 0 -0.05rem var(--md-default-fg-color--lightest) inset;
+}
+
+.md-typeset .tabbed-set pre > code {
+  background-color: var(--bayeseor-panel-code-bg);
+}
