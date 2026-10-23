@@ -5,17 +5,20 @@
 % Top row: compare model and observation, then introduce the coefficient prior.
 \node[panel=infc,minimum width=6.42cm,minimum height=2.45cm] (data) at (0.45,0) {};
 \draw[infc!45!panelbg,dashed,line width=0.5pt] (3.66,-0.20)--(3.66,-2.25);
-\node[ttl,anchor=north] at (2.055,-0.12) {Modelled Data\ \mdseries\,$\bm m$};
-\node[ttl,anchor=north] at (5.265,-0.12) {Observation\ \mdseries\,$\bm d$};
-% The right-hand waterfall is noiseless; the left-hand waterfall includes noise.
-\node[thumb] at (2.055,-1.40) {\includegraphics[trim=1.219cm 0 0 0,clip,width=1.65cm]{icon_likelihood.pdf}};
-\node[thumb] at (5.265,-1.40) {\includegraphics[trim=0 0 1.219cm 0,clip,width=1.65cm]{icon_likelihood.pdf}};
+\node[ttl] at (2.055,-0.25) {Modelled Data};
+\node[lbl] at (2.055,-0.60) {$\bm m_{21}+\bm m_{\rm FG}$};
+\node[ttl] at (5.265,-0.25) {Observed Data};
+\node[lbl] at (5.265,-0.60) {$\bm d(\bm b_{ij},\nu,t)$};
+% Match the model-only waterfall and observed-array panels in the other workflows.
+\node[thumb] at (2.055,-1.58) {\includegraphics[trim=1.219cm 0 0 0,clip,width=1.65cm]{icon_likelihood.pdf}};
+\node[thumb] at (5.265,-1.56) {\includegraphics{icon_array.pdf}};
 
 \node[stage] (like) at (7.47,0) {};
-\node[ttl,anchor=north] at (8.925,-0.12) {Likelihood};
-\node[lbl] at (8.925,-0.70) {$\mathcal L(\bm d\mid\bm b)$};
-\node[lbl] at (8.925,-1.30) {$\propto\exp\!\left[-\tfrac12\bm r^\dagger\mathbf N^{-1}\bm r\right]$};
-\node[small] at (8.925,-1.95) {$\bm r=\bm d-\bm m,\quad\bm m=\mathbf T\bm b$};
+\node[ttl] at (8.925,-0.25) {Full Likelihood};
+\node[lbl] at (8.925,-0.59) {$\mathcal L(\bm d\mid\textcolor{eorc}{\bm a},\textcolor{fgc}{\bm q})$};
+\node[thumb] at (8.925,-1.53) {\includegraphics{icon_likelihood.pdf}};
+\node[font=\scriptsize,text=instc] at (8.315,-2.17) {$\bm d$};
+\node[font=\scriptsize] at (9.535,-2.17) {$\bm m$};
 
 \node[stage] (prior) at (10.98,0) {};
 \node[ttl,anchor=north] at (12.435,-0.12) {Prior\\Covariance\ \mdseries\,$\mathbf\Psi(\bm\varphi)$};
