@@ -10,7 +10,7 @@ fov_eor: 12.9
 ```
 
 ```bash
-python examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
+python -m examples.eor.run --n-u-eor 15 --fov-eor 12.9
 ```
 
 For reproducible analyses, prefer YAML files committed or archived with the outputs.

@@ -145,7 +145,7 @@ Each run writes:
 - `nested_sampling/`: posterior samples, evidence and run summary.
 
 The pipeline's `save_analysis` runs automatically after sampling, saving
-`posterior_summary.json` and three titled PNG/PDF figures in
+`posterior_summary.json` and one combined power-spectrum/posterior PNG in
 `examples/eor/plots/` or `examples/eor_fgs/plots/`, next to the corresponding
 configuration and input data. Plotting is not reimplemented in the examples.
 
@@ -172,7 +172,9 @@ save_analysis(
 ```
 
 This reads existing samples without rerunning inference. Pass `expected_ps`
-to include a known reference spectrum. The plot functions also accept a
+to include a known reference spectrum. Each example loads its supplied
+`data/injected_power_spectrum.npy`, a scalar array containing the flat
+injected dimensional power in mK² Mpc³. The plot functions also accept a
 multi-run `DataContainer` for posterior comparisons.
 See [posterior analysis](../inference/posterior-analysis.md) for comparing results.
 The `outputs/` directory is ignored by Git.

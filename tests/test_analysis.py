@@ -213,9 +213,9 @@ def test_pipeline_writes_summaries_and_titled_figures(tmp_path, monkeypatch):
     summary = save_analysis(sampler, output_dir=tmp_path / "plots", label="21-cm only")
     np.testing.assert_allclose(summary["medians"], np.sqrt(10.))
     assert (tmp_path / "plots" / "posterior_summary.json").exists()
-    assert len(list((tmp_path / "plots").glob("*.png"))) == 3
-    assert len(list((tmp_path / "plots").glob("*.pdf"))) == 3
-    assert len(titles) == 6 and all("21-cm only" in title for title in titles)
+    assert [p.name for p in (tmp_path / "plots").glob("*.png")] == ["power_spectrum_and_posteriors.png"]
+    assert not list((tmp_path / "plots").glob("*.pdf"))
+    assert len(titles) == 1 and all("21-cm only" in title for title in titles)
     assert (sampler / 'data-.txt').read_bytes() == before
 
 

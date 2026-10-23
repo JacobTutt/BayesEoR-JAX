@@ -73,41 +73,51 @@ def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
     assert np.all(refined.eor_fg_shared_axis)
     assert refined.pixel_area_sr == pytest.approx(4*np.pi/(12*fine_nside**2))
 
-def test_injected_spectrum_uses_simulation_resolution():
-    from examples.run_analysis_example import injected_power_spectrum
+@pytest.mark.parametrize("name", ["eor", "eor_fgs"])
+def test_injected_spectrum_is_supplied_as_an_array(name):
+    from bayeseor_jax.model.cosmology.transforms import Cosmology
 
-    metadata = json.loads(Path("examples/eor/data/simulation.json").read_text())
-    power = injected_power_spectrum(metadata)
-    assert power == pytest.approx(8.84e4, rel=.005)
-    metadata["signal_nside"] *= 2
-    assert injected_power_spectrum(metadata) == pytest.approx(power/4)
+    folder = Path("examples") / name / "data"
+    metadata = json.loads((folder / "simulation.json").read_text())
+    frequencies = np.asarray(metadata["frequency_hz"])
+    cosmology = Cosmology()
+    z = cosmology.f2z(frequencies.mean())
+    volume = (4*np.pi/(12*metadata["signal_nside"]**2)
+              * (frequencies[1]-frequencies[0]) * cosmology.inst_to_cosmo_vol(z))
+    power = np.load(folder / "injected_power_spectrum.npy", allow_pickle=False)
+    assert power.shape == ()
+    assert power.item() == pytest.approx(metadata["signal_pixel_std_mk"]**2 * volume)
 
 
 @pytest.mark.parametrize("name", ["eor", "eor_fgs"])
 def test_independent_entrypoint_selects_own_inputs(name, monkeypatch):
-    import runpy
-    from examples import run_analysis_example as example
+    import importlib
+    import sys
 
+    example = importlib.import_module(f"examples.{name}.run")
     calls = []
-    monkeypatch.setattr(example, "main", lambda *args, **kwargs: calls.append((args, kwargs)))
-    runpy.run_module(f"examples.{name}.run", run_name="__main__")
-    (config,), options = calls.pop()
-    assert Path(config).resolve() == Path(f"examples/{name}/config.yaml").resolve()
-    assert options.get("prepare_foreground", False) == (name == "eor_fgs")
-    assert options["expected_ps"] == pytest.approx(8.84e4, rel=.005)
+    monkeypatch.setattr(example, "run_example", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(sys, "argv", ["run.py", "--sample"])
+    example.main()
+    options = calls.pop()
+    assert Path(options["config_path"]).resolve() == Path(f"examples/{name}/config.yaml").resolve()
+    assert options["prepare_foreground"] == (name == "eor_fgs")
+    assert options["do_sampling"] is True
     assert not calls
 
 
-def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name", ["eor", "eor_fgs"])
+def test_example_orchestrates_pipeline_and_preserves_saved_results(name, tmp_path, monkeypatch):
     from types import SimpleNamespace
     import bayeseor_jax
-    from examples import run_analysis_example as example
+    import importlib
+    example = importlib.import_module(f"examples.{name}.run")
 
     steps = []
     data = np.array([1+2j, 1-2j])
     noise = np.array([.1+.2j, .1-.2j])
     def setup(config, *, build_foreground_kl):
-        assert build_foreground_kl is True
+        assert build_foreground_kl == (name == "eor_fgs")
         steps.append(('setup', config))
         return SimpleNamespace(vis_dict={'vis_noisy':data+noise, 'noise':noise})
     def sample(**kwargs):
@@ -122,18 +132,19 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, mon
     monkeypatch.setattr(example, 'save_analysis', lambda **kwargs:steps.append(('analysis', kwargs)))
     overrides = ['--output-dir', str(tmp_path), '--array-save-directory', str(tmp_path/'matrices'),
                  '--foreground-kl-path', str(tmp_path/'kl/T_fg_reduced.npy')]
-    example.run_example('examples/eor_fgs/config.yaml', do_sampling=True,
-                        prepare_foreground=True, extra_bayeseor_args=overrides)
+    example.run_example(f"examples/{name}/config.yaml", do_sampling=True,
+                        extra_bayeseor_args=overrides)
     assert [name for name, _ in steps] == ['setup','sample','analysis']
     assert steps[0][1].nside == 128 and steps[0][1].footprint_nside == 64
     assert steps[1][1]['center_likelihood'] is True
-    assert steps[2][1]['output_dir'] == Path('examples/eor_fgs/plots').resolve()
+    assert steps[2][1]['output_dir'] == Path(f"examples/{name}/plots").resolve()
+    assert steps[2][1]["expected_ps"] == pytest.approx(88429.76350405652)
     np.testing.assert_array_equal(np.load(tmp_path/'data/visibilities_noisy.npy'), data+noise)
     np.testing.assert_array_equal(np.load(tmp_path/'data/noise.npy'), noise)
     with pytest.raises(FileExistsError, match='Sampler output already exists'):
-        example.run_example('examples/eor_fgs/config.yaml', do_sampling=True,
+        example.run_example(f"examples/{name}/config.yaml", do_sampling=True,
                             extra_bayeseor_args=overrides)
     with pytest.raises(ValueError, match='configuration changed'):
-        example.run_example('examples/eor_fgs/config.yaml',
+        example.run_example(f"examples/{name}/config.yaml",
                             extra_bayeseor_args=overrides+['--nside','64'])
     assert len(steps) == 3

@@ -117,8 +117,8 @@ The example script runs setup, and with `--sample`, nested sampling followed by 
 short posterior analysis:
 
 ```bash
-python examples/run_analysis_example.py --config examples/eor/config.yaml
-python examples/run_analysis_example.py --config examples/eor/config.yaml --sample
+python -m examples.eor.run
+python -m examples.eor.run --sample
 ```
 
 For scientific runs, use a dedicated configuration and output directory, and

@@ -33,8 +33,8 @@ Setup and sampling write the following to the run's output directories.
 
 The example pipeline calls `save_analysis` automatically after sampling. It
 uses the same weighted statistics and plotting functions described below,
-writing a JSON summary and titled PNG/PDF versions of the power spectrum,
-marginal posteriors and combined figure.
+writing a JSON summary and a single titled PNG combining the power spectrum
+and marginal posteriors.
 
 ```python
 from bayeseor_jax.analyze import save_analysis
@@ -128,7 +128,7 @@ from bayeseor_jax.analyze import (
 fig, ax = plot_power_spectra(dc, plot_priors=True)
 fig, axes = plot_posteriors(dc, plot_priors=True)
 fig, (power_ax, posterior_axes) = plot_power_spectra_and_posteriors(dc)
-fig.savefig("power_spectrum.pdf", bbox_inches="tight")
+fig.savefig("power_spectrum.png", dpi=300, bbox_inches="tight")
 ```
 
 `plot_priors`

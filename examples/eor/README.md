@@ -21,11 +21,16 @@ eor/
 ├── config.yaml
 ├── run.py
 └── data/
+    ├── injected_power_spectrum.npy
     ├── visibilities.npy
     ├── uvw_model.npy
     ├── redundancy_model.npy
     └── simulation.json
 ```
+
+`data/injected_power_spectrum.npy` stores the injected flat dimensional power,
+`P(k)`, as a scalar NumPy array in mK² Mpc³. The runner loads it for the reference
+curve; no power-spectrum calculation or data simulation is needed.
 
 ## Supplied observation
 
@@ -65,7 +70,7 @@ uniform density in linear power. These are not the manuscript's bin-dependent pr
 Outputs go to `outputs/laptop_eor_nside128/`: the noisy data and noise draw,
 matrices, posterior samples and evidence summary. The pipeline's
 `bayeseor_jax.analyze.save_analysis` runs automatically after sampling and writes
-the posterior summary and three titled figures (PNG and PDF) to this example's
+the posterior summary and one combined power-spectrum/posterior PNG to this example's
 `plots/` folder. No separate plotting script is required.
 Existing sampler outputs are protected; use `--resume` for the same run or
 fresh output and matrix paths for changed settings.

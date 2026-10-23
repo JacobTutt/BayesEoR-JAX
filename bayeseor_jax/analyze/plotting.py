@@ -258,14 +258,14 @@ def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None
 @style.context(_STYLE_PATH)
 def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=None,
                   expected_ps=None):
-    """Save weighted posterior summaries and the three standard analysis figures.
+    """Save weighted posterior summaries and the combined analysis PNG.
 
     Parameters
     ----------
     sampler_dir : pathlib.Path or str
         Completed MultiNest output directory. Samples and weights are read only.
     output_dir : pathlib.Path or str
-        Destination for posterior_summary.json and PNG/PDF figures. Existing
+        Destination for posterior_summary.json and the combined PNG. Existing
         analysis products with these names are replaced, not sampler outputs.
     label : str, optional
         Model description included in every figure title and legend.
@@ -297,16 +297,10 @@ def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=Non
         "upper_limits": data.uplims[0].tolist(),
     }
     (output_dir / "posterior_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    for plot, stem, title in (
-        (plot_power_spectra, "power_spectrum", "21-cm power spectrum"),
-        (plot_posteriors, "posteriors", "Marginal power-spectrum posteriors"),
-        (plot_power_spectra_and_posteriors, "power_spectrum_and_posteriors", "21-cm power-spectrum inference"),
-    ):
-        fig, _ = plot(data, plot_priors=True)
-        try:
-            fig.suptitle(f"{title}\n{label}", fontsize=10, y=1.03, va="bottom")
-            for extension in ("png", "pdf"):
-                fig.savefig(output_dir / f"{stem}.{extension}", dpi=300, bbox_inches="tight")
-        finally:
-            plt.close(fig)
+    fig, _ = plot_power_spectra_and_posteriors(data, plot_priors=True)
+    try:
+        fig.suptitle(f"21-cm power-spectrum inference\n{label}", fontsize=10, y=1.03, va="bottom")
+        fig.savefig(output_dir / "power_spectrum_and_posteriors.png", dpi=300, bbox_inches="tight")
+    finally:
+        plt.close(fig)
     return summary

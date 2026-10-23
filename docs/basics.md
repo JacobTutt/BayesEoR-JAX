@@ -45,14 +45,14 @@ The repository includes two small test datasets:
 Run setup for either example with:
 
 ```bash
-python examples/run_analysis_example.py --config examples/eor/config.yaml
-python examples/run_analysis_example.py --config examples/eor_fgs/config.yaml
+python -m examples.eor.run
+python -m examples.eor_fgs.run
 ```
 
 Run nested sampling by adding `--sample`:
 
 ```bash
-python examples/run_analysis_example.py --config examples/eor/config.yaml --sample
+python -m examples.eor.run --sample
 ```
 
 The setup-only mode is designed as a quick installation and configuration check. Sampling should be treated as the scientific run.
