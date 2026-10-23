@@ -192,7 +192,10 @@ class DataContainer:
             self.avgs.append(np.average(powers, axis=0, weights=weights))
             self.samples.append(chain[:, 2:])
             self.weights.append(weights)
-            self.log_likelihoods.append(-0.5 * chain[:, 1])
+            offset = float(summary.get("log_likelihood_offset", 0.0))
+            if not np.isfinite(offset):
+                raise ValueError("Saved log-likelihood offset must be finite")
+            self.log_likelihoods.append(-0.5 * chain[:, 1] + offset)
             self.k_vals.append(k)
             self.k_vals_bins.append(edges)
             self.args.append(args)

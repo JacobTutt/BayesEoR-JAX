@@ -112,3 +112,40 @@ def test_multinest_analysis_preserves_weights_and_log_power(tmp_path, file_root)
     np.testing.assert_allclose(result.avgs[0], expected)
     np.testing.assert_allclose(result.weights[0], samples[:, 0])
     np.testing.assert_allclose(result.log_likelihoods[0], -.5 * samples[:, 1])
+
+
+def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, monkeypatch):
+    from bayeseor_jax.inference.run_ns import run_multinest
+
+    offset = 7e11
+    def solve(**kwargs):
+        assert kwargs['LogLikelihood'](np.array([1.])) == -.5
+        assert 'center_likelihood' not in kwargs
+        return {'logZ':-2., 'logZerr':.1, 'samples':np.array([[1.]])}
+    monkeypatch.setitem(sys.modules, 'pymultinest.solve', SimpleNamespace(solve=solve))
+    setup = SimpleNamespace(model='eor+fg', prior_class=Prior(np.array([[-2.,2.]])),
+        likelihood_class=SimpleNamespace(intrinsic_noise_fitting=False,
+                                         log_likelihood=lambda theta:offset-.5*np.sum(theta**2)))
+    summary = run_multinest(setup, tmp_path, center_likelihood=True, print_rate=0)
+    assert summary['logZ'] == offset-2.
+    assert summary['logZ_centered'] == -2.
+    assert summary['log_likelihood_offset'] == offset
+    assert summary['logZerr'] == .1
+    np.savetxt(tmp_path/'data-.txt', [[1.,1.,1.]])
+    np.savetxt(tmp_path/'k-vals.txt', [.1])
+    data = DataContainer([tmp_path])
+    np.testing.assert_array_equal(data.log_likelihoods[0], [offset-.5])
+    (tmp_path/'data-resume.dat').touch()
+    with pytest.raises(ValueError, match='centring setting'):
+        run_multinest(setup, tmp_path, resume=True, center_likelihood=False)
+    resumed = run_multinest(setup, tmp_path, resume=True, center_likelihood=True, print_rate=0)
+    assert resumed['log_likelihood_offset'] == offset
+
+
+def test_centred_sampler_rejects_nonfinite_reference(tmp_path, monkeypatch):
+    from bayeseor_jax.inference.run_ns import run_multinest
+    monkeypatch.setitem(sys.modules, 'pymultinest.solve', SimpleNamespace(solve=lambda **kwargs:pytest.fail('must not sample')))
+    setup = SimpleNamespace(model='eor', prior_class=Prior(np.array([[-2.,2.]])),
+        likelihood_class=SimpleNamespace(intrinsic_noise_fitting=False, log_likelihood=lambda theta:np.nan))
+    with pytest.raises(ValueError, match='offset must be finite'):
+        run_multinest(setup, tmp_path, center_likelihood=True)
