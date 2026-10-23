@@ -67,10 +67,12 @@ supports comparison and validation of competing models.
 - [Foreground model](foregrounds.md): from image-domain spectral amplitudes to wide-field visibilities.
 - [KL Reduced Basis](kl-reduced-basis.md): from physical foreground uncertainty to a reduced operator.
 - [Inference](joint-inference.md): parameterisation, marginalisation, posterior sampling and evidence evaluation.
+- [Data](data.md): supported visibility inputs, observation metadata and noise handling.
+- [Examples](examples.md): runnable scripts for setup and inference.
 
 ## Get started
 
-Begin with [installation](installation.md) and the [getting-started guide](basics.md),
+Begin with [installation](installation.md) and the [example scripts](examples.md),
 then use the [configuration reference](configuration.md) to define an analysis.
 The [Python API](api/index.md) links the mathematical steps to their implementations.
 

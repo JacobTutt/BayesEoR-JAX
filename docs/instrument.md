@@ -2,47 +2,9 @@
 
 The instrument model describes how sky emission is sampled into interferometric visibilities. In BayesEoR-JAX this includes baseline coordinates, time and frequency selection, the primary beam, redundancy, and noise.
 
-## Visibility Inputs
-
-Visibility ingestion and noise preparation live in `bayeseor_jax/data/`:
-
-- `vis.py`: loading, selection, unit/polarisation conversion and vector ordering.
-- `noise.py`: simulated noise realisations.
-
-The diagonal noise covariance used by the model and likelihood is defined
-separately in `bayeseor_jax/model/instrument/noise.py`.
-
-`get_vis_data` accepts these lowercase `data_path` suffixes:
-
-- `.uvh5` or `.uvfits` files, or `.ms` Measurement Set directories, read through
-  pyuvdata with its corresponding reader dependencies installed. Raw inputs
-  must be calibrated in Jy or K sr and are converted to mK sr.
-- `.npy` visibility arrays, either plain arrays or trusted BayesEoR dictionary
-  payloads with a `data` entry. These must already be in mK sr and require
-  `inst_model`, `n_freq`, `f0_mhz`, `df_mhz`, `n_t`, `d_t` and a `jd_min` or
-  `jd_center`. Stored dictionary metadata do not replace these arguments.
-
-Raw pyuvdata ingestion supports selection and preprocessing controls including:
-
-- `antenna_selection`
-- `bl_cutoff`
-- `freq_idx_min`, `freq_min`, `freq_center`, `n_freqs_select`
-- `jd_idx_min`, `jd_min`, `jd_center`, `n_times_select`
-- `form_pi` and `pi_norm`
-- `redundant_avg`
-- `calc_noise`
-
-Vectors are flattened with time slowest, frequency next and baseline fastest.
-Each time/frequency block contains the original baselines followed by conjugate
-copies at reversed baselines. These copies are not independent observations.
-NumPy inputs bypass preprocessing and must already follow this convention.
-Fully flagged raw baselines are removed; partial flags are not propagated into
-per-visibility likelihood weights by this loader.
-
-Use `from bayeseor_jax.data import get_vis_data, generate_gaussian_noise` for data
-preparation and `from bayeseor_jax.model.instrument.noise import build_noise_variance`
-for likelihood weights. Existing top-level visibility helpers remain available;
-direct imports from `bayeseor_jax.vis` should now use `bayeseor_jax.data.vis`.
+Visibility loading, supported file formats, row ordering and noise injection
+are described in [Data](data.md). This page describes the observation axes,
+primary beam and instrument metadata used by the forward model.
 
 ## Frequency And Time
 
@@ -100,22 +62,11 @@ telescope_latlonalt: [-30.72152777777791, 21.428305555555557, 1073.0000000093132
 
 Beam sidelobes are scientifically important. If the beam has non-negligible response outside the EoR model FoV, the foreground FoV may need to be larger than the EoR FoV.
 
-## Noise
+## Noise covariance
 
-Noise can be supplied or generated through:
-
-- `sigma`: visibility-noise standard deviation.
-- `noise_seed`: random seed used when generating Gaussian noise.
-- `noise_data_path`: preprocessed noise vector.
-- `effective_noise_path`: per-visibility effective noise array.
-- `calc_noise`: empirical noise estimate from even/odd differencing.
-
-The marginalised likelihood uses noise weighting through `N^{-1}`. Document whether a run used simulated Gaussian noise, precomputed noise, or an empirical noise estimate.
-
-Supplied or estimated noise is returned alongside the existing data, not added
-again. Without either, `get_vis_data` treats its input as noiseless and adds a
-synthetic realisation using `sigma`. `build_noise_variance` constructs covariance
-diagonal entries separately and never generates or adds noise.
+The likelihood uses a diagonal visibility-noise covariance, defined separately
+from noise-realisation generation. See [noise handling](data.md#noise-already-present-versus-noise-to-add)
+for how supplied, estimated and simulated noise enter the pipeline.
 
 ## Instrument Model Files
 
