@@ -1,12 +1,12 @@
 \input{style.tex}
 \begin{document}
 \begin{tikzpicture}[x=1cm,y=1cm]
-% Match the canvas and row spacing of the two-row model diagrams.
-\path[use as bounding box] (0,0.18) rectangle (17.65,-6.70);
+% Keep the model diagrams' display scale, with a tighter inference row gap.
+\path[use as bounding box] (0,0.18) rectangle (17.65,-5.43);
 \begin{scope}[xshift=1.78cm]
-\draw[instc,dashed,line width=0.7pt] (0.2,0.08) rectangle (13.97,-6.05);
+\draw[instc,dashed,line width=0.7pt] (0.2,0.08) rectangle (13.97,-5.33);
 \node[fill=panelbg,draw=instc,font=\footnotesize\bfseries,
-  inner xsep=3pt,inner ysep=2pt,rotate=90] at (0.2,-2.985) {Inference};
+  inner xsep=3pt,inner ysep=2pt,rotate=90] at (0.2,-2.625) {Inference};
 
 % Top row: compare model and observation, then introduce the coefficient prior.
 \node[panel=infc,minimum width=6.42cm,minimum height=2.45cm] (data) at (0.45,0) {};
@@ -35,7 +35,7 @@
 \draw[flow] (like.east)--(prior.west);
 
 % Bottom row runs right to left, completing the inference workflow.
-\begin{scope}[yshift=-0.27cm]
+\begin{scope}[yshift=0.45cm]
 \node[stage] (marg) at (10.98,-3.25) {};
 \node[ttl,anchor=north] at (12.435,-3.37) {Marginalised\\Likelihood\ \mdseries\,$\mathcal L(\bm d\mid\bm\varphi)$};
 \node[thumb] at (12.435,-4.90) {\includegraphics{icon_marginal.pdf}};

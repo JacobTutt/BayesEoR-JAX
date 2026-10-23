@@ -7,8 +7,9 @@ inference. The Modelled Data panel uses the right-hand, noiseless waterfall
 from `icon_likelihood.pdf`. `inference_workflow.tex` contains the two-row
 inference-only workflow, with modelled data and observation in a shared input
 panel. All diagrams share `style.tex` and the thumbnails in `plots/`.
-The two-row model and inference diagrams share a fixed canvas and row spacing
-so their panels and text remain the same size when displayed at the same width.
+The two-row model and inference diagrams share a fixed canvas width so their
+panels and text remain the same size when displayed at the same width. The
+inference rows use a tighter gap because they need no intervening operator labels.
 
 The diagrams are schematic illustrations, not numerical outputs of a common
 model realisation. The cosmological cube thumbnails originate from supplied
