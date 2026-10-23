@@ -8,9 +8,6 @@ towards the horizon without a tangent-plane approximation to the foreground sky.
 [![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow.png#only-light)](assets/diagrams/foreground-workflow.png)
 [![Foreground-only forward model: image-domain coefficients pass through Q_z, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/foreground-workflow-dark.png#only-dark)](assets/diagrams/foreground-workflow-dark.png)
 
-*The component-only schematic contains no cosmological or inference branch.
-A single illustrative visibility plot represents the modelled output.*
-
 The complete mapping is
 
 $$

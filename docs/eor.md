@@ -8,10 +8,6 @@ distinguish the signal from spectrally smooth foreground emission.
 [![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow.png#only-light)](assets/diagrams/eor-workflow.png)
 [![EoR-only forward model: Fourier coefficients pass through F_z, F prime, the primary beam and the three-dimensional fringe response to modelled data.](assets/diagrams/eor-workflow-dark.png#only-dark)](assets/diagrams/eor-workflow-dark.png)
 
-*The component-only schematic ends at modelled visibilities; inference is a
-separate stage. The thumbnails illustrate the spaces, not a numerical evaluation
-of one shared realisation.*
-
 The complete mapping is
 
 $$
