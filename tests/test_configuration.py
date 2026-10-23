@@ -11,7 +11,7 @@ from bayeseor_jax.io import write_log_files
 
 def test_parser_returns_typed_settings_and_applies_overrides():
     config = BayesEoRParser().parse_args([
-        "--config", "test_examples/eor/config.yaml",
+        "--config", "examples/eor/config.yaml",
         "--model", "fg", "--fov-fg", "180", "--nside", "64",
         "--no-form-pi", "--run", "--random-key", "42",
     ])
@@ -29,7 +29,7 @@ def test_parser_returns_typed_settings_and_applies_overrides():
 
 def test_explicit_dictionary_parser_remains_available():
     values = BayesEoRParser(parse_as_dict=True).parse_args([
-        "--config", "test_examples/eor/config.yaml",
+        "--config", "examples/eor/config.yaml",
     ])
     assert isinstance(values, dict)
     assert "config" not in values
@@ -54,7 +54,7 @@ def test_parser_allows_automatic_image_and_fourier_resolution():
 
 def test_config_metadata_serializes_without_parser_namespace(tmp_path):
     parser = BayesEoRParser()
-    config = parser.parse_args(["--config", "test_examples/eor/config.yaml"])
+    config = parser.parse_args(["--config", "examples/eor/config.yaml"])
     write_log_files(config, out_dir=tmp_path)
     saved = json.loads((tmp_path / "args.json").read_text())
     assert saved["nside"] == config.nside

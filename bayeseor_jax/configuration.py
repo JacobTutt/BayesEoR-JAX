@@ -31,7 +31,7 @@ class BayesEoRParser(ArgumentParser):
     Examples
     --------
     >>> config = BayesEoRParser().parse_args([
-    ...     "--config", "test_examples/eor/config.yaml",
+    ...     "--config", "examples/eor/config.yaml",
     ... ])
     >>> isinstance(config, RunConfig)
     True

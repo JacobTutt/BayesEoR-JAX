@@ -93,7 +93,7 @@ def run_output_analysis(
 
 
 def run_example(
-    config_path: str = "test_examples/eor/config.yaml",
+    config_path: str = "examples/eor/config.yaml",
     do_sampling: bool = False,
     extra_bayeseor_args: list[str] | None = None,
     nested_sampling_dirname: str = "nested_sampling",
@@ -178,7 +178,7 @@ def run_example(
     return setup_result, summary, analysis_summary
 
 
-def main(default_config="test_examples/eor/config.yaml", *, prepare_foreground=False,
+def main(default_config="examples/eor/config.yaml", *, prepare_foreground=False,
          label="BayesEoR-JAX", expected_ps=None) -> None:
     """Run one example, with defaults supplied by its independent entry point."""
     parser = argparse.ArgumentParser(description=__doc__)

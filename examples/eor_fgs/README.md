@@ -10,7 +10,7 @@ example does not need to be run first. No sky simulation or Slurm is required.
 From the repository root, after installing the CPU environment and MultiNest:
 
 ```bash
-python -m test_examples.eor_fgs.run --sample
+python -m examples.eor_fgs.run --sample
 ```
 
 Omit `--sample` to stop after KL preparation, data loading, noise generation

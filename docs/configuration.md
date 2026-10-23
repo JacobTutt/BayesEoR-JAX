@@ -10,7 +10,7 @@ fov_eor: 12.9
 ```
 
 ```bash
-python test_examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
+python examples/run_analysis_example.py --n-u-eor 15 --fov-eor 12.9
 ```
 
 For reproducible analyses, prefer YAML files committed or archived with the outputs.
@@ -38,7 +38,7 @@ from dataclasses import replace
 from bayeseor_jax import BayesEoRParser, RunConfig, run_setup
 
 config = BayesEoRParser().parse_args([
-    "--config", "test_examples/eor_fgs/config.yaml",
+    "--config", "examples/eor_fgs/config.yaml",
 ])
 result = run_setup(config)
 
@@ -116,8 +116,8 @@ Most runs need these groups:
 
 ```yaml
 model: eor
-data_path: test_examples/eor/data/visibilities.npy
-inst_model: test_examples/eor/data
+data_path: examples/eor/data/visibilities.npy
+inst_model: examples/eor/data
 array_save_directory: outputs/my_example/matrices
 output_dir: outputs/my_example
 
@@ -143,8 +143,8 @@ priors: [[-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6]]
 
 The complete shipped examples are:
 
-- `test_examples/eor/config.yaml`
-- `test_examples/eor_fgs/config.yaml`
+- `examples/eor/config.yaml`
+- `examples/eor_fgs/config.yaml`
 
 ## General And Output
 

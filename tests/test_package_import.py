@@ -64,7 +64,7 @@ def test_foreground_example_uses_spherical_model_options_only():
     from bayeseor_jax.configuration import BayesEoRParser
 
     args = BayesEoRParser().parse_args(
-        ["--config", "test_examples/eor_fgs/config.yaml"]
+        ["--config", "examples/eor_fgs/config.yaml"]
     )
 
     assert args.beta_fg == [2.63, 2.82]
@@ -79,7 +79,7 @@ def test_parser_accepts_preconstructed_kl_operator():
     from bayeseor_jax.configuration import BayesEoRParser
 
     args = BayesEoRParser().parse_args([
-        '--config', 'test_examples/eor_fgs/config.yaml',
+        '--config', 'examples/eor_fgs/config.yaml',
         '--foreground-kl-path', 'arrays/T_fg_reduced.npy',
     ])
     assert args.foreground_kl_path == 'arrays/T_fg_reduced.npy'
@@ -89,6 +89,6 @@ def test_parser_selects_model_components():
     from bayeseor_jax.configuration import BayesEoRParser
 
     parser = BayesEoRParser()
-    assert parser.parse_args(["--config", "test_examples/eor/config.yaml"]).model == "eor"
-    assert parser.parse_args(["--config", "test_examples/eor_fgs/config.yaml"]).model == "eor+fg"
-    assert parser.parse_args(["--config", "test_examples/eor/config.yaml", "--model", "fg"]).model == "fg"
+    assert parser.parse_args(["--config", "examples/eor/config.yaml"]).model == "eor"
+    assert parser.parse_args(["--config", "examples/eor_fgs/config.yaml"]).model == "eor+fg"
+    assert parser.parse_args(["--config", "examples/eor/config.yaml", "--model", "fg"]).model == "fg"

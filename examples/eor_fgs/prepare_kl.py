@@ -66,5 +66,5 @@ if __name__ == "__main__":
     import sys
     arguments = sys.argv[1:]
     if "--config" not in arguments:
-        arguments = ["--config", "test_examples/eor_fgs/config.yaml", *arguments]
+        arguments = ["--config", "examples/eor_fgs/config.yaml", *arguments]
     prepare_kl(BayesEoRParser().parse_args(arguments))

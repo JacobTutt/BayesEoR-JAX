@@ -1,4 +1,4 @@
-"""Run the signal-only example: python -m test_examples.eor.run --sample."""
+"""Run the signal-only example: python -m examples.eor.run --sample."""
 import json
 import os
 from pathlib import Path

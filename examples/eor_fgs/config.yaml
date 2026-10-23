@@ -1,9 +1,13 @@
 # Run from the repository root. All input rows are already selected.
-model: eor
-data_path: test_examples/eor/data/visibilities.npy
-inst_model: test_examples/eor/data
-array_save_directory: outputs/laptop_eor_nside128/matrices
-output_dir: outputs/laptop_eor_nside128
+model: eor+fg
+data_path: examples/eor_fgs/data/visibilities.npy
+inst_model: examples/eor_fgs/data
+array_save_directory: outputs/laptop_eor_fgs_nside128/matrices
+output_dir: outputs/laptop_eor_fgs_nside128
+# The example entry point constructs this basis; latent coefficients have unit variance.
+foreground_kl_path: outputs/laptop_eor_fgs_nside128/kl/T_fg_reduced.npy
+fov_fg: 10.0
+beta_fg: [2.63, 2.82]
 
 # All 30 signed baseline groups; central 15 integrations and channels.
 n_freq: 15

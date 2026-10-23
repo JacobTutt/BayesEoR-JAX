@@ -39,20 +39,20 @@ Choose `model: eor`, `fg`, or `eor+fg` in the configuration to fit either compon
 
 The repository includes two small test datasets:
 
-- `test_examples/eor/config.yaml`: EoR-only visibility data.
-- `test_examples/eor_fgs/config.yaml`: EoR plus foreground visibility data.
+- `examples/eor/config.yaml`: EoR-only visibility data.
+- `examples/eor_fgs/config.yaml`: EoR plus foreground visibility data.
 
 Run setup for either example with:
 
 ```bash
-python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml
-python test_examples/run_analysis_example.py --config test_examples/eor_fgs/config.yaml
+python examples/run_analysis_example.py --config examples/eor/config.yaml
+python examples/run_analysis_example.py --config examples/eor_fgs/config.yaml
 ```
 
 Run nested sampling by adding `--sample`:
 
 ```bash
-python test_examples/run_analysis_example.py --config test_examples/eor/config.yaml --sample
+python examples/run_analysis_example.py --config examples/eor/config.yaml --sample
 ```
 
 The setup-only mode is designed as a quick installation and configuration check. Sampling should be treated as the scientific run.

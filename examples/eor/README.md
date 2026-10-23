@@ -9,7 +9,7 @@ independent of the foreground example and requires no sky simulation or Slurm.
 From the repository root, after installing the CPU environment and MultiNest:
 
 ```bash
-python -m test_examples.eor.run --sample
+python -m examples.eor.run --sample
 ```
 
 Omit `--sample` for data loading, noise generation and matrix construction only.

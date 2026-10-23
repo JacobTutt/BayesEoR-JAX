@@ -12,9 +12,9 @@ Choose either example, including noise generation, matrix construction, inferenc
 and plots:
 
 ```bash
-python -m test_examples.eor.run --sample
+python -m examples.eor.run --sample
 # Or, independently:
-python -m test_examples.eor_fgs.run --sample
+python -m examples.eor_fgs.run --sample
 ```
 
 Omit `--sample` to load the supplied data, add noise and build the matrices without
@@ -76,7 +76,7 @@ pixels before integration through the beam and full three-dimensional fringe
 response. It does not select a new circular boundary at the simulation resolution.
 
 ```bash
-python -m test_examples.eor.run --sample
+python -m examples.eor.run --sample
 ```
 
 Omit `--sample` to build the matrices and likelihood without running MultiNest.
@@ -97,7 +97,7 @@ First build the prior- and noise-weighted foreground operator and reduce it
 using native CPU JAX. Then run joint inference:
 
 ```bash
-python -m test_examples.eor_fgs.run --sample
+python -m examples.eor_fgs.run --sample
 ```
 
 The reduced operator is saved under `outputs/laptop_eor_fgs_nside128/kl/`; the
@@ -155,7 +155,7 @@ constants remain omitted, as in the underlying likelihood.
 To compare both completed posteriors with the injected ensemble spectrum:
 
 ```bash
-python test_examples/plot_recoveries.py --output outputs/recovery_plots
+python examples/plot_recoveries.py --output outputs/recovery_plots
 ```
 
 This writes individual and overlaid PNG/PDF figures without rerunning inference.

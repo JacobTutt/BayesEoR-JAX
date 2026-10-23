@@ -249,4 +249,4 @@ spectral amplitude in each pixel contributes to every visibility.
 :   The HEALPix resolution, shared with the [EoR model](eor.md#configuration).
 
 See the [configuration reference](configuration.md) and the configuration in
-`test_examples/eor_fgs/` for a complete run.
+`examples/eor_fgs/` for a complete run.

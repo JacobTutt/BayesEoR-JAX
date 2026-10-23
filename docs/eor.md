@@ -305,4 +305,4 @@ memory and computation required.
     - **Note:** lower values are kept, with a warning.
 
 See the [configuration reference](configuration.md), and the configurations in
-`test_examples/eor/` and `test_examples/eor_fgs/` for complete runs.
+`examples/eor/` and `examples/eor_fgs/` for complete runs.

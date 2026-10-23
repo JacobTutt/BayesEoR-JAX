@@ -195,7 +195,7 @@ def test_prior_boxes_use_each_bins_saved_bounds(tmp_path):
 
 
 def test_example_writes_summaries_and_figures(tmp_path):
-    from test_examples.run_analysis_example import run_output_analysis
+    from examples.run_analysis_example import run_output_analysis
     sampler = write_run(tmp_path / "nested_sampling")
     summary = run_output_analysis(sampler, output_dir=tmp_path)
     np.testing.assert_allclose(summary["medians"], np.sqrt(10.))
@@ -204,7 +204,7 @@ def test_example_writes_summaries_and_figures(tmp_path):
 
 
 def test_separate_setup_metadata_and_example(tmp_path):
-    from test_examples.run_analysis_example import run_output_analysis
+    from examples.run_analysis_example import run_output_analysis
     run = write_run(tmp_path / "multinest")
     metadata = tmp_path / "setup"
     metadata.mkdir()

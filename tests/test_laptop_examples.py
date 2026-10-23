@@ -12,9 +12,9 @@ from bayeseor_jax.model.observation.image_geometry import required_healpix_nside
 
 @pytest.mark.parametrize("name", ["eor", "eor_fgs"])
 def test_shipped_laptop_data_match_config(name):
-    config = BayesEoRParser().parse_args(["--config", f"test_examples/{name}/config.yaml"])
+    config = BayesEoRParser().parse_args(["--config", f"examples/{name}/config.yaml"])
     instrument = Path(config.inst_model)
-    assert instrument == Path(f"test_examples/{name}/data")
+    assert instrument == Path(f"examples/{name}/data")
     assert Path(config.data_path).parent == instrument
     metadata = json.loads((instrument / "simulation.json").read_text())
     uvw = np.load(instrument / "uvw_model.npy", allow_pickle=False)
@@ -46,7 +46,7 @@ def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
     from astropy.time import Time
     from bayeseor_jax.model.observation.image_geometry import build_image_geometry, HERA_LOCATION
 
-    metadata = json.loads(Path("test_examples/eor/data/simulation.json").read_text())
+    metadata = json.loads(Path("examples/eor/data/simulation.json").read_text())
     theta, phi = hp.pix2ang(fine_nside, np.arange(12*fine_nside**2))
     parent = np.asarray(hp.ang2pix(64, theta, phi))
     mask = np.zeros(12*64**2, dtype=bool)
@@ -74,9 +74,9 @@ def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
     assert refined.pixel_area_sr == pytest.approx(4*np.pi/(12*fine_nside**2))
 
 def test_injected_spectrum_uses_simulation_resolution():
-    from test_examples.plot_recoveries import injected_power_spectrum
+    from examples.plot_recoveries import injected_power_spectrum
 
-    metadata = json.loads(Path("test_examples/eor/data/simulation.json").read_text())
+    metadata = json.loads(Path("examples/eor/data/simulation.json").read_text())
     power = injected_power_spectrum(metadata)
     assert power == pytest.approx(8.84e4, rel=.005)
     metadata["signal_nside"] *= 2
@@ -86,13 +86,13 @@ def test_injected_spectrum_uses_simulation_resolution():
 @pytest.mark.parametrize("name", ["eor", "eor_fgs"])
 def test_independent_entrypoint_selects_own_inputs(name, monkeypatch):
     import runpy
-    from test_examples import run_analysis_example as example
+    from examples import run_analysis_example as example
 
     calls = []
     monkeypatch.setattr(example, "main", lambda *args, **kwargs: calls.append((args, kwargs)))
-    runpy.run_module(f"test_examples.{name}.run", run_name="__main__")
+    runpy.run_module(f"examples.{name}.run", run_name="__main__")
     (config,), options = calls.pop()
-    assert Path(config).resolve() == Path(f"test_examples/{name}/config.yaml").resolve()
+    assert Path(config).resolve() == Path(f"examples/{name}/config.yaml").resolve()
     assert options.get("prepare_foreground", False) == (name == "eor_fgs")
     assert options["expected_ps"] == pytest.approx(8.84e4, rel=.005)
     assert not calls
@@ -101,8 +101,8 @@ def test_independent_entrypoint_selects_own_inputs(name, monkeypatch):
 def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import bayeseor_jax
-    from test_examples.eor_fgs import prepare_kl as preparation
-    from test_examples import run_analysis_example as example
+    from examples.eor_fgs import prepare_kl as preparation
+    from examples import run_analysis_example as example
 
     steps = []
     data = np.array([1+2j, 1-2j])
@@ -123,7 +123,7 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, mon
     monkeypatch.setattr(example, 'run_output_analysis', lambda **kwargs:steps.append(('analysis', kwargs)))
     overrides = ['--output-dir', str(tmp_path), '--array-save-directory', str(tmp_path/'matrices'),
                  '--foreground-kl-path', str(tmp_path/'kl/T_fg_reduced.npy')]
-    example.run_example('test_examples/eor_fgs/config.yaml', do_sampling=True,
+    example.run_example('examples/eor_fgs/config.yaml', do_sampling=True,
                         prepare_foreground=True, extra_bayeseor_args=overrides)
     assert [name for name, _ in steps] == ['kl','setup','sample','analysis']
     assert steps[0][1] is steps[1][1]
@@ -132,9 +132,9 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, mon
     np.testing.assert_array_equal(np.load(tmp_path/'data/visibilities_noisy.npy'), data+noise)
     np.testing.assert_array_equal(np.load(tmp_path/'data/noise.npy'), noise)
     with pytest.raises(FileExistsError, match='Sampler output already exists'):
-        example.run_example('test_examples/eor_fgs/config.yaml', do_sampling=True,
+        example.run_example('examples/eor_fgs/config.yaml', do_sampling=True,
                             extra_bayeseor_args=overrides)
     with pytest.raises(ValueError, match='configuration changed'):
-        example.run_example('test_examples/eor_fgs/config.yaml',
+        example.run_example('examples/eor_fgs/config.yaml',
                             extra_bayeseor_args=overrides+['--nside','64'])
     assert len(steps) == 4

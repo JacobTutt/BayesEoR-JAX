@@ -1,4 +1,4 @@
-"""Run joint inference: python -m test_examples.eor_fgs.run --sample."""
+"""Run joint inference: python -m examples.eor_fgs.run --sample."""
 import json
 import os
 from pathlib import Path

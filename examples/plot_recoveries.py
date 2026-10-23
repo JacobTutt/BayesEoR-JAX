@@ -55,7 +55,7 @@ def export_recoveries(output):
     list of pathlib.Path
         Paths to the three PNG previews; matching vector PDFs are also saved.
     """
-    configs = [BayesEoRParser().parse_args(["--config", f"test_examples/{name}/config.yaml"])
+    configs = [BayesEoRParser().parse_args(["--config", f"examples/{name}/config.yaml"])
                for name in ("eor", "eor_fgs")]
     metadata = json.loads((Path(configs[0].inst_model)/"simulation.json").read_text())
     power = injected_power_spectrum(metadata)

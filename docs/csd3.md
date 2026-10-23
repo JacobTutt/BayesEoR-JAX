@@ -141,14 +141,14 @@ On a login node, JAX may report CPU only. GPU visibility should be checked insid
 The test examples live in:
 
 ```text
-test_examples/
+examples/
 ```
 
 By default the example script runs setup only. Add `--sample` to run MultiNest and then run the analysis step:
 
 ```bash
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor/config.yaml \
+python examples/run_analysis_example.py \
+  --config examples/eor/config.yaml \
   --sample \
   --nested-sampling-dirname ns \
   --analysis-label "EoR" \
