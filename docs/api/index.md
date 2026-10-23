@@ -22,7 +22,7 @@ $$
 
 ---
 
-## Geometry
+## Sky and Fourier grids
 
 Define the sky pixels, the cosmological Fourier grid and the conversion of its
 modes to wavenumbers and power-spectrum bins.
@@ -32,7 +32,7 @@ $$
 \frac{2\pi\eta}{|\mathrm d\chi/\mathrm d\nu|}\right)
 $$
 
-[Geometry API](geometry.md)
+[Sky and Fourier grids API](grids.md)
 
 ---
 

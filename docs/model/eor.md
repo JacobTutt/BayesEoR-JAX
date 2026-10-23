@@ -45,7 +45,7 @@ three-dimensional sky directions.
 
 === "Code"
 
-    [build_fourier_geometry](../api/geometry.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry) takes grid sizes and spacings, and returns the retained coordinates and integration weights. This example uses eight transverse pairs and three spectral modes.
+    [build_fourier_geometry](../api/grids.md#bayeseor_jax.model.cosmology.fourier_geometry.build_fourier_geometry) takes grid sizes and spacings, and returns the retained coordinates and integration weights. This example uses eight transverse pairs and three spectral modes.
 
     ```python
     import jax
@@ -123,7 +123,7 @@ Earth rotates.
 
 === "Code"
 
-    [build_image_geometry](../api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) selects and tracks the sky pixels. [build_transverse_fourier_operator](../api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator) maps the Fourier grid onto their reference-time coordinates, returning `(n_pixel, n_uv_mode)`.
+    [build_image_geometry](../api/grids.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) selects and tracks the sky pixels. [build_transverse_fourier_operator](../api/operators.md#bayeseor_jax.model.operators.build_transverse_fourier_operator) maps the Fourier grid onto their reference-time coordinates, returning `(n_pixel, n_uv_mode)`.
 
     ```python
     from bayeseor_jax.model.observation.image_geometry import build_image_geometry
@@ -304,5 +304,4 @@ memory and computation required.
     - **Default:** inferred from the longest baseline and highest frequency.
     - **Note:** lower values are kept, with a warning.
 
-See the [configuration reference](../examples/configuration.md), and the configurations in
-`examples/eor/` and `examples/eor_fgs/` for complete runs.
+See the [examples](../examples/index.md) for complete, commented configurations.

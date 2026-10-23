@@ -1,8 +1,8 @@
 # 21-cm only
 
-This example infers the power spectrum of a simulated 21-cm signal observed by a
-small HERA-like array, with no foregrounds. It is the simplest end-to-end use of
-BayesEoR, and recovers a known, injected power spectrum.
+With no foregrounds in the data, this example isolates the EoR model: a
+simulated 21-cm signal, observed by a compact HERA-like array, is recovered as a
+power spectrum and compared directly with the spectrum that was injected.
 
 === "Data"
 

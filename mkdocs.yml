@@ -93,7 +93,8 @@ nav:
   - Home:
       - Overview: index.md
       - Installation: installation.md
-      - Getting started: basics.md
+      - Getting started: getting-started.md
+      - Citing BayesEoR: citing.md
   - Data:
       - Interferometric data: data/index.md
       - Instrumental configuration: data/instrument.md
@@ -120,7 +121,7 @@ nav:
       - Overview: api/index.md
       - Setup: api/setup.md
       - Data: api/data.md
-      - Geometry: api/geometry.md
+      - Sky and Fourier grids: api/grids.md
       - Operators: api/operators.md
       - Construction and KL reduction: api/construction.md
       - Inference: api/inference.md

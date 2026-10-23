@@ -1,9 +1,9 @@
 # Examples
 
-Two self-contained examples demonstrate the full BayesEoR workflow on a laptop,
-from loading simulated visibilities to recovering the 21-cm power spectrum. Both
-use the same simulated HERA-like observation, a reduced version of the one
-analysed in Tutt et al. (2026), and run on CPU in a few minutes.
+The examples take BayesEoR through its full workflow, from noiseless simulated
+visibilities to a recovered 21-cm power spectrum. Both use the same HERA-like
+observation, a reduced version of the one analysed in Tutt et al. (2026), and each
+runs on a laptop CPU in a few minutes.
 
 ## Overview
 

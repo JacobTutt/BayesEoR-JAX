@@ -44,7 +44,7 @@ adds coefficients without changing the construction.
 
 === "Code"
 
-    [build_image_geometry](../api/geometry.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) takes field extents, HEALPix resolution, telescope location and observing times. It returns the pixel directions, beam coordinates and pixel solid angle.
+    [build_image_geometry](../api/grids.md#bayeseor_jax.model.observation.image_geometry.build_image_geometry) takes field extents, HEALPix resolution, telescope location and observing times. It returns the pixel directions, beam coordinates and pixel solid angle.
 
     ```python
     import jax
@@ -248,5 +248,5 @@ spectral amplitude in each pixel contributes to every visibility.
 `nside`
 :   The HEALPix resolution, shared with the [EoR model](eor.md#configuration).
 
-See the [configuration reference](../examples/configuration.md) and the configuration in
-`examples/eor_fgs/` for a complete run.
+See the [21-cm and foregrounds](../examples/eor-fgs.md) example for a complete,
+commented configuration.

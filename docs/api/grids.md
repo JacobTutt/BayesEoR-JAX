@@ -1,4 +1,4 @@
-# Geometry
+# Sky and Fourier grids
 
 `build_image_geometry` selects the HEALPix pixels of each model field and tracks
 their directions through the observation. `build_fourier_geometry` defines the

@@ -11,8 +11,9 @@ config = BayesEoRParser().parse_args(["--config", "config.yaml"])
 setup = run_setup(config)
 ```
 
-See [construction and execution](../model/construction.md) for what setup does, and the
-[configuration reference](../examples/configuration.md) for every option.
+See [construction and execution](../model/construction.md) for what setup does.
+Each setting is documented on the guide page it affects, and the
+[examples](../examples/index.md) show complete, commented configurations.
 
 ## Main interface
 

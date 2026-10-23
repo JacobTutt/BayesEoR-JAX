@@ -43,12 +43,12 @@ and allows the framework to be rigorously validated against spurious detections.
 
 ## Using these docs
 
-- [Installation](installation.md) and [Getting started](basics.md): set up the
+- [Installation](installation.md) and [Getting started](getting-started.md): set up the
   package and run a first analysis.
 - [Data](data/index.md): the visibilities, instrument and observation inputs.
 - [Model](model/index.md): how the 21-cm signal and foregrounds are mapped into
   visibilities.
 - [Inference](inference/index.md): marginalisation, sampling, and recovering the
   power spectrum and evidence.
-- [Examples](examples/index.md): runnable scripts and the configuration reference.
+- [Examples](examples/index.md): two worked analyses, with commented configurations.
 - [API](api/index.md): the Python reference, generated from the source.

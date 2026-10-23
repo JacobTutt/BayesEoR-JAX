@@ -1,10 +1,10 @@
 # 21-cm and foregrounds
 
-This example adds bright Galactic and extragalactic foregrounds to the same
-simulated 21-cm signal. The foregrounds are compressed into a
-[KL reduced basis](../model/kl-reduced-basis.md) during setup, and the power
-spectrum is inferred jointly with them, recovering the injected spectrum despite
-emission orders of magnitude brighter.
+This example adds diffuse Galactic emission and bright point sources to the same
+21-cm signal and observation. The foregrounds are compressed into a
+[KL reduced basis](../model/kl-reduced-basis.md) during setup and inferred jointly
+with the signal, so their uncertainty is carried into the recovered power
+spectrum.
 
 === "Data"
 
