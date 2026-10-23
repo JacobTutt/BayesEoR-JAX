@@ -1,89 +1,99 @@
-# BayesEoR-JAX
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/wordmark-dark.svg">
+    <img src="docs/assets/branding/wordmark-light.svg" alt="BayesEoR" width="420">
+  </picture>
+</h1>
 
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [Citation](#citation)
+**BayesEoR** is a physically motivated forward-modelling framework for Bayesian
+recovery of the 21-cm power spectrum from interferometric visibilities. Every
+contribution to the data is modelled jointly and propagated through the instrument
+response, so the recovered power spectrum and Bayesian evidence reflect their
+combined uncertainty.
 
-BayesEoR-JAX is a JAX-compatible implementation and extension of [BayesEoR](https://github.com/PSims/BayesEoR), a Bayesian framework for estimating the redshifted 21-cm Epoch of Reionization power spectrum from interferometric visibilities.
+This version is written in JAX and runs on CPU or GPU, with optional distributed
+GPU linear algebra through [JAXMg](https://flatironinstitute.github.io/jaxmg/latest/).
 
-The package keeps the BayesEoR modelling philosophy: jointly forward model the cosmological signal, spherical image-domain foreground emission, instrumental response, and noise, then infer the posterior distribution of the dimensionless power spectrum, `Delta^2(k)`. Standard JAX supports single-device CPU or GPU inference; the optional HPC installation uses JAXMG for distributed inference and GPU KL reduction.
-
-## What This Version Adds
-
-BayesEoR-JAX is not a drop-in documentation refresh of the original code. It is a downstream implementation focused on:
-
-- JAX/XLA execution for matrix construction, likelihood evaluation, and sampler integration.
-- A marginalised likelihood with native JAX Cholesky on one CPU or GPU and JAXMG solves and log determinants across GPUs.
-- MultiNest for nested sampling, posterior recovery and Bayesian-evidence evaluation.
-- A spherical image-domain foreground model propagated through the full beam and fringe response.
-- A configuration-first workflow using YAML files and `jsonargparse`.
-- Test datasets for EoR-only and EoR-plus-foreground runs.
-
-The Python package is installed as `bayeseor-jax` and imported as `bayeseor_jax`.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/workflow-dark.png">
+  <img src="docs/assets/diagrams/workflow.png" alt="The BayesEoR workflow: cosmological and foreground coefficients are mapped through the instrument into visibilities, followed by marginalisation, nested sampling, power-spectrum recovery and evidence evaluation.">
+</picture>
 
 ## Documentation
 
-The documentation uses MkDocs Material with a generated Python API reference.
-For a local preview, run `python -m pip install -e ".[docs]"` followed by
-`python -m mkdocs serve`. Check the site with `python -m mkdocs build --strict`.
+The full documentation is at
+**[jacobtutt.github.io/BayesEoR-JAX](https://jacobtutt.github.io/BayesEoR-JAX/)**:
 
-- [Installation](docs/installation.md): CPU and GPU environments, JAX checks, and MultiNest setup.
-- [Basics](docs/basics.md): the scientific and workflow overview for new users.
-- [Model](docs/model/index.md): step-by-step cosmological and foreground mappings, with diagrams, equations and implementation links.
-- [KL Reduced Basis](docs/model/kl-reduced-basis.md): prior/noise weighting, mode selection and reduced-operator construction.
-- [Forward Model](docs/model/construction.md): how visibility data are modelled through the linear operator `T`.
-- [EoR Model](docs/model/eor.md): k-space grids, spherical bins, priors, and `Delta^2(k)`.
-- [Foregrounds](docs/model/foregrounds.md): spherical image-domain foreground modelling and distributed operator construction.
-- [Instrument Model](docs/data/instrument.md): visibility inputs, beam models, time/frequency selection, and noise.
-- [Inference](docs/inference/running.md): marginalised likelihood, MultiNest, and MAP helpers.
-- [Configuration](docs/examples/configuration.md): grouped reference for YAML and CLI parameters.
-- [Outputs and Analysis](docs/inference/posterior-analysis.md): cached matrices, sampler outputs, metadata, and plotting helpers.
+- **[Home](docs/index.md):** how BayesEoR works, installation, getting started and
+  citing BayesEoR.
+- **[Data](docs/data/index.md):** interferometric visibilities, and the instrument
+  and observation settings that describe them.
+- **[Model](docs/model/index.md):** the Bayesian forward model, the EoR and
+  foreground models, and the KL reduced basis.
+- **[Inference](docs/inference/index.md):** the power-spectrum parameterisation,
+  analytical marginalisation, nested sampling and posterior analysis.
+- **[Examples](docs/examples/index.md):** two worked analyses, 21-cm only and
+  21-cm with foregrounds.
+- **[API](docs/api/index.md):** the Python reference.
 
-## Quick Start
+## Installation
 
-Clone the repository and choose one installation. Use Miniforge/Conda so the
-native MultiNest library is installed alongside its Python interface.
-Both installations use Python 3.12+ and JAX 0.11.1+.
+Through JAX and JAXMg, BayesEoR scales from a single desktop computer to multi-GPU
+HPC clusters. The models, likelihood and sampler are the same in every case; only
+the linear-algebra backend changes.
+
+Clone the repository, then create the environment matching your system:
 
 ```bash
 git clone https://github.com/JacobTutt/BayesEoR-JAX.git
 cd BayesEoR-JAX
 ```
 
-**Laptop / CPU:** no CUDA or JAXMG dependencies.
+**Desktop or CPU workstation**
 
 ```bash
 conda env create -f environment.yml
 conda activate bayeseor
 ```
 
-**HPC / NVIDIA GPU:** Python 3.12 and `jaxmg[cuda12]` from PyPI.
+**Linux NVIDIA GPU cluster**
 
 ```bash
 conda env create -f environment-hpc.yml
 conda activate bayeseor-hpc
 ```
 
-Check the installation:
+> [!NOTE]
+> Conda is used to install the native MultiNest library alongside its Python
+> interface, PyMultiNest. `pip install pymultinest` alone installs only the
+> wrapper. We recommend [Miniforge](https://github.com/conda-forge/miniforge).
+
+Both environments use Python 3.12 or newer and JAX 0.11.1 or newer. On GPU clusters,
+the dense linear algebra is distributed across devices with JAXMg, which is built on
+NVIDIA's cuSOLVERMp, so the GPU environment is restricted to NVIDIA systems. See the
+[installation guide](docs/installation.md) for details.
+
+## Getting started
+
+The quickest way to get started is to run one of the two examples. Each infers a
+21-cm power spectrum from a small simulated observation, and takes a few minutes
+on a laptop. From the repository root:
 
 ```bash
-python -c "import jax, bayeseor_jax, pymultinest; print(jax.devices())"
+# 21-cm only
+python -m examples.eor.run --sample
+
+# 21-cm and foregrounds
+python -m examples.eor_fgs.run --sample
 ```
 
-The HPC installation supports Linux x86_64 and aarch64 with a compatible NVIDIA
-driver. See [Installation](docs/installation.md) for requirements,
-existing environments and running the examples. Laptop KL
-construction uses native JAX SVD; larger distributed decompositions use JAXMG.
-Both produce the same reduced-operator format for inference.
+Without `--sample`, each example stops after setup, which is a quick check that
+the installation works. Each writes its power-spectrum and posterior figure to its
+`plots/` folder, for example `examples/eor/plots/power_spectrum_and_posteriors.png`,
+and its full outputs under `outputs/`. See the
+[examples](docs/examples/index.md) for a walkthrough of each.
 
-## Citation
+## Citing BayesEoR
 
-Please cite the relevant BayesEoR methodology and software papers when using this
-package: [Sims et al. (2016)](https://arxiv.org/abs/1607.07628),
-[Sims et al. (2017)](https://arxiv.org/abs/1701.03384),
-[Sims & Pober (2019)](https://arxiv.org/abs/1907.02608),
-[Burba, Sims & Pober (2023)](https://arxiv.org/abs/2302.04058), and
-[Sims, Burba & Pober (2025)](https://arxiv.org/abs/2501.12928).
-For MultiNest, cite [Feroz, Hobson & Bridges (2009)](https://arxiv.org/abs/0809.3437).
-
----
-
-**Navigation:** [README](README.md) · [Installation](docs/installation.md) · [Basics](docs/basics.md) · [Forward Model](docs/model/construction.md) · [Inference](docs/inference/running.md) · [Citation](#citation)
+If you use BayesEoR-JAX, please cite the papers listed in
+[Citing BayesEoR](docs/citing.md).
