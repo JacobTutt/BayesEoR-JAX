@@ -6,8 +6,8 @@
 </h1>
 
 **BayesEoR** is a physically motivated forward-modelling framework for Bayesian
-recovery of the 21-cm power spectrum from interferometric visibilities. Every
-contribution to the data is modelled jointly and propagated through the instrument
+recovery of the 21-cm power spectrum from interferometric visibilities. Contributions to
+the data are modelled jointly and propagated through the instrument
 response, so the recovered power spectrum and Bayesian evidence reflect their
 combined uncertainty.
 
@@ -24,17 +24,17 @@ GPU linear algebra through [JAXMg](https://flatironinstitute.github.io/jaxmg/lat
 The full documentation is at
 **[jacobtutt.github.io/BayesEoR-JAX](https://jacobtutt.github.io/BayesEoR-JAX/)**:
 
-- **[Home](docs/index.md):** how BayesEoR works, installation, getting started and
-  citing BayesEoR.
+- **[Home](docs/index.md):** how BayesEoR works, installation, getting started
+  and citations.
 - **[Data](docs/data/index.md):** interferometric visibilities, and the instrument
-  and observation settings that describe them.
-- **[Model](docs/model/index.md):** the Bayesian forward model, the EoR and
-  foreground models, and the KL reduced basis.
-- **[Inference](docs/inference/index.md):** the power-spectrum parameterisation,
-  analytical marginalisation, nested sampling and posterior analysis.
+  and observation that describe them.
+- **[Model](docs/model/index.md):** the EoR and foreground forward models, and the
+  KL reduced basis.
+- **[Inference](docs/inference/index.md):** the power-spectrum prior, analytical
+  marginalisation, nested sampling and posterior analysis.
 - **[Examples](docs/examples/index.md):** two worked analyses, 21-cm only and
   21-cm with foregrounds.
-- **[API](docs/api/index.md):** the Python reference.
+- **[API](docs/api/index.md):** the Python reference, generated from the source.
 
 ## Installation
 
@@ -63,11 +63,6 @@ conda env create -f environment-hpc.yml
 conda activate bayeseor-hpc
 ```
 
-> [!NOTE]
-> Conda is used to install the native MultiNest library alongside its Python
-> interface, PyMultiNest. `pip install pymultinest` alone installs only the
-> wrapper. We recommend [Miniforge](https://github.com/conda-forge/miniforge).
-
 Both environments use Python 3.12 or newer and JAX 0.11.1 or newer. On GPU clusters,
 the dense linear algebra is distributed across devices with JAXMg, which is built on
 NVIDIA's cuSOLVERMp, so the GPU environment is restricted to NVIDIA systems. See the
@@ -95,5 +90,6 @@ and its full outputs under `outputs/`. See the
 
 ## Citing BayesEoR
 
-If you use BayesEoR-JAX, please cite the papers listed in
-[Citing BayesEoR](docs/citing.md).
+If you use BayesEoR-JAX, please cite the papers relevant to your analysis,
+together with the software paper. See [Citing BayesEoR](docs/citing.md) for each
+reference and its BibTeX.

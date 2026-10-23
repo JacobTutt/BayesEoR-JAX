@@ -8,8 +8,8 @@ title: BayesEoR
 </h1>
 
 **BayesEoR** is a physically motivated forward-modelling framework for Bayesian
-recovery of the 21-cm power spectrum from interferometric visibilities. Every
-contribution to the data is modelled jointly and propagated through the instrument
+recovery of the 21-cm power spectrum from interferometric visibilities. Contributions to
+the data are modelled jointly and propagated through the instrument
 response, so the recovered power spectrum and Bayesian evidence reflect their
 combined uncertainty.
 

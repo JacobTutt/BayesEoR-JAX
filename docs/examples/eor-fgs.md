@@ -2,9 +2,9 @@
 
 This example adds diffuse Galactic emission and bright point sources to the same
 21-cm signal and observation. The foregrounds are compressed into a
-[KL reduced basis](../model/kl-reduced-basis.md) during setup and inferred jointly
-with the signal, so their uncertainty is carried into the recovered power
-spectrum.
+[KL reduced basis](../model/kl-reduced-basis.md) during setup, and the joint
+posterior of the signal and foregrounds is evaluated, so their uncertainty is
+carried into the recovered power spectrum.
 
 === "Data"
 
