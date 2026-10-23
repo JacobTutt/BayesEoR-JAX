@@ -1,8 +1,8 @@
-# Visibilities and input preparation
+# Input preparation
 
-BayesEoR analyses complex interferometric visibilities indexed by baseline,
-frequency and observing time. The data preparation stage loads these measurements
-and the corresponding observation metadata, then arranges them in the same order
+With the [instrument and observation](instrument.md) specified,
+the data preparation stage loads the complex visibilities
+and corresponding observation metadata, then arranges them in the same order
 as the rows of the forward operator. It does not calibrate the observations or
 construct a sky simulation.
 

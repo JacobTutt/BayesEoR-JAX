@@ -56,14 +56,14 @@ supports comparison and validation of competing models.
 5. **Infer and assess the model.** Recover the power-spectrum posterior and Bayesian
    evidence, and inspect the reconstructed visibilities and residuals.
 
-## Follow the model
+## Follow the workflow
 
+- [Data](visibilities.md): interferometric measurements, instrument configuration and visibility inputs.
 - [Model overview](model.md): the shared measurement equation and operator conventions.
 - [EoR model](eor.md): from $(u,v,\eta)$ coefficients to cosmological visibilities.
 - [Foreground model](foregrounds.md): from image-domain spectral amplitudes to wide-field visibilities.
 - [KL Reduced Basis](kl-reduced-basis.md): from physical foreground uncertainty to a reduced operator.
 - [Inference](joint-inference.md): parameterisation, marginalisation, posterior sampling and evidence evaluation.
-- [Data](data.md): supported visibility inputs, observation metadata and noise handling.
 - [Examples](examples.md): runnable scripts for setup and inference.
 
 ## Get started

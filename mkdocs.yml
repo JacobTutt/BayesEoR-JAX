@@ -87,19 +87,20 @@ nav:
       - Overview: index.md
       - Installation: installation.md
       - Getting started: basics.md
+  - Data:
+      - Visibilities: visibilities.md
+      - Instrument and observation: instrument.md
+      - Input preparation: data.md
   - Model:
       - Overview: model.md
       - EoR model: eor.md
       - Foreground model: foregrounds.md
       - KL Reduced Basis: kl-reduced-basis.md
-      - Instrument response: instrument.md
       - Construction and execution: forward-model.md
   - Inference:
       - Inference: joint-inference.md
       - Running inference: inference.md
       - Posterior analysis: outputs-analysis.md
-  - Data:
-      - Visibilities and input preparation: data.md
   - Examples:
       - Running the example scripts: examples.md
       - Configuration reference: configuration.md
