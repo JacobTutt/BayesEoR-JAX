@@ -59,6 +59,7 @@ def export_recoveries(output):
     power = injected_power_spectrum(metadata)
     roots = [Path("outputs/laptop_eor"), Path("outputs/laptop_eor_fgs")]
     labels = ["21-cm only", "21-cm + foregrounds"]
+    summaries = [json.loads((root/"nested_sampling/summary.json").read_text()) for root in roots]
     output.mkdir(parents=True, exist_ok=True)
     previews = []
     for name, indices in (("21cm_only", [0]), ("21cm_and_foregrounds", [1]),
@@ -86,8 +87,8 @@ def export_recoveries(output):
         for ax in posterior_axes:
             ax.tick_params(axis="x", labelsize=9)
         note = "Central 68% credible intervals; dashed: injected ensemble spectrum; grey: prior support."
-        if 1 in indices:
-            note += "\nJoint run is diagnostic only: its evidence uncertainty is non-finite."
+        if any(not np.isfinite(summaries[i].get("logZerr", np.nan)) for i in indices):
+            note += "\nDiagnostic only: at least one run has a non-finite evidence uncertainty."
         fig.text(.5, .04, note, ha="center", va="center", fontsize=9)
         for extension in ("png", "pdf"):
             fig.savefig(output/f"{name}.{extension}", dpi=250, bbox_inches="tight")
@@ -97,11 +98,10 @@ def export_recoveries(output):
         f"Injected dimensional power: {power:.8g} mK^2 Mpc^3.\n"
         "Figures use the completed 15-time, 15-channel, 30-signed-baseline runs.\n"
         "Both model fields are 10 degrees, with Nside=64 inference grids.\n"
-        "The signal-only prior metadata was corrected from five to six [-1, 6] log10 bounds,\n"
-        "matching the configuration used for the six-dimensional sampling run.\n"
-        "No posterior samples or weights were modified and no sampling was rerun.\n"
-        "The joint posterior shows excess low-k power; its evidence uncertainty is NaN.\n"
-        "These plots do not establish validated recovery or reliable joint evidence.\n"
+        f"Simulation footprint: {metadata.get('mask_definition', 'Independent angular selection at each resolution')}.\n"
+        "Plot generation did not modify samples or weights, or rerun inference.\n"
+        f"Reported evidence uncertainties: {[summary.get('logZerr') for summary in summaries]}.\n"
+        "These plots alone do not establish validated recovery or reliable evidence.\n"
     )
     return previews
 

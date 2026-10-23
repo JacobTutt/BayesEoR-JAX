@@ -42,8 +42,10 @@ outputs are stored in Git.
 
 The input is an independent-pixel, zero-mean Gaussian 21-cm brightness field
 with a pixel standard deviation of 6.4 mK, simulated at `Nside=256`.
-Its contribution is restricted to the 10° time-union field before integration
-through the beam and full three-dimensional fringe response.
+The time-union footprint is selected on the inference grid at `Nside=64`.
+The simulation includes all finer pixels belonging to those selected coarse
+pixels before integration through the beam and full three-dimensional fringe
+response. It does not select a new circular boundary at the simulation resolution.
 
 ```bash
 export JAX_PLATFORMS=cpu
@@ -59,7 +61,11 @@ Outputs are written to `outputs/laptop_eor/`.
 This dataset adds GSM2008 diffuse emission and a statistical extragalactic/
 catalogued bright-source population within the same 10° field. The local
 GSM input is sampled at `Nside=128`; point sources retain their individual
-positions. The inference image grid remains `Nside=64`.
+positions. Both inherit the same `Nside=64` footprint: every selected coarse
+pixel contributes its four `Nside=128` children, and sources are included only
+when they lie inside a selected coarse pixel. The inference image grid remains
+`Nside=64`. Matching the footprint removes a boundary-selection mismatch but
+does not guarantee exact representation of subpixel brightness structure.
 
 First build the prior- and noise-weighted foreground operator and reduce it
 using native CPU JAX. Then run joint inference:

@@ -8,7 +8,10 @@ import pytest
 
 from bayeseor_jax import BayesEoRParser, Beam_Model, build_sky_to_visibility_operator
 from bayeseor_jax.model.observation.image_geometry import required_healpix_nside
-from test_examples.generate_data import BASELINES, FREQUENCIES, TIMES, integrate
+from test_examples.generate_data import (
+    BASELINES, FREQUENCIES, TIMES, MASK_NSIDE,
+    build_footprint, healpix_sky, select_directions, integrate,
+)
 
 
 @pytest.mark.parametrize("name", ["eor", "eor_fgs"])
@@ -33,6 +36,35 @@ def test_shipped_laptop_data_match_config(name):
     np.testing.assert_allclose(metadata["jd"], TIMES, rtol=0, atol=1e-9)
     assert config.fov_eor == metadata["field_diameter_deg"] == 10
     assert len(config.priors) == 6
+    assert metadata["mask_nside"] == config.nside
+
+
+@pytest.mark.parametrize("fine_nside", [128, 256])
+def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
+    import jax_healpy as hp
+    from bayeseor_jax.model.observation.image_geometry import build_image_geometry, HERA_LOCATION
+
+    mask = build_footprint()
+    fine_sky = healpix_sky(fine_nside)
+    selected, _ = select_directions(fine_sky, mask)
+    parent = np.asarray(hp.ang2pix(MASK_NSIDE, np.pi/2-fine_sky.dec.rad, fine_sky.ra.rad))
+    np.testing.assert_array_equal(np.unique(parent[selected]), np.flatnonzero(mask))
+    counts = np.bincount(parent[selected], minlength=mask.size)
+    np.testing.assert_array_equal(counts, (fine_nside//MASK_NSIDE)**2*mask.astype(int))
+
+    # Cross-check the selected coarse centres against production model geometry.
+    coarse_indices, coarse_lmn = select_directions(healpix_sky(64), mask)
+    geometry = build_image_geometry(fov_eor=10, fov_fg=10, nside=64,
+                                   telescope_latlonalt=HERA_LOCATION,
+                                   jd_center=TIMES[len(TIMES)//2], n_t=len(TIMES),
+                                   d_t=21.511369943618774)
+    assert len(coarse_indices) == geometry.n_pix_fg
+    np.testing.assert_allclose(coarse_lmn.transpose(0, 2, 1), geometry.lmn_fg, atol=1e-12)
+
+    # Point sources use the same membership rule, with no separate circular cut.
+    points = fine_sky[[selected[0], np.flatnonzero(~mask[parent])[0]]]
+    point_indices, _ = select_directions(points, mask)
+    np.testing.assert_array_equal(point_indices, [0])
 
 
 def test_independent_simulator_matches_visibility_operator():

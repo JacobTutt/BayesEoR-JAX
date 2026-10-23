@@ -31,32 +31,56 @@ BASELINES = np.array([
     [1, 1, 0], [3, 1, 0], [5, 1, 0], [2, -2, 0], [4, -2, 0],
     [0, 2, 0], [2, 2, 0], [4, 2, 0], [1, -3, 0], [1, 3, 0],
 ]) * [7.3, 7.3*np.sqrt(3), 1]
+MASK_NSIDE = 64
 
 
-def select_directions(sky):
-    """Return time-union pixel indices and their (time, source, ENU) directions.
+def observation_frames():
+    """Return the topocentric coordinate frame at each integration centre."""
+    iers.conf.auto_download = False
+    lat, lon, height = HERA_LOCATION
+    return AltAz(obstime=Time(TIMES, format="jd"),
+                 location=EarthLocation.from_geodetic(lon*u.deg, lat*u.deg, height*u.m))
+
+
+def build_footprint():
+    """Select Nside=64 pixel centres within 5 degrees of zenith at any time.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean RING-ordered mask on the inference grid. All higher-resolution
+        pixels and point sources inherit the footprint of these coarse pixels;
+        no additional angular cut is applied at their own resolution.
+    """
+    centres = SkyCoord(az=np.zeros(len(TIMES))*u.deg,
+                       alt=np.full(len(TIMES), 90)*u.deg, frame=observation_frames()).icrs
+    coarse_sky = healpix_sky(MASK_NSIDE)
+    return np.any(coarse_sky.cartesian.xyz.value.T @ centres.cartesian.xyz.value
+                  >= np.cos(np.deg2rad(5)), axis=1)
+
+
+def select_directions(sky, footprint):
+    """Select directions by their coarse parent pixels and transform to ENU.
 
     Parameters
     ----------
     sky : astropy.coordinates.SkyCoord
         Fixed ICRS directions of pixels or point sources.
+    footprint : numpy.ndarray
+        Boolean Nside=64 RING mask from build_footprint.
 
     Returns
     -------
     indices, lmn : numpy.ndarray
-        Selected source indices and topocentric unit vectors within the 10-degree
-        drift-scan field. Celestial source identities are fixed across time.
+        Selected source indices and topocentric unit vectors in the shared
+        coarse-pixel footprint. Celestial identities remain fixed across time.
     """
-    iers.conf.auto_download = False
-    lat, lon, height = HERA_LOCATION
-    frames = AltAz(obstime=Time(TIMES, format="jd"),
-                   location=EarthLocation.from_geodetic(lon*u.deg, lat*u.deg, height*u.m))
-    centres = SkyCoord(az=np.zeros(len(TIMES))*u.deg,
-                       alt=np.full(len(TIMES), 90)*u.deg, frame=frames).icrs
-    selected = np.any(sky.cartesian.xyz.value.T @ centres.cartesian.xyz.value
-                      >= np.cos(np.deg2rad(5)), axis=1)
-    indices = np.flatnonzero(selected)
-    horizontal = sky[indices][None, :].transform_to(frames[:, None])
+    footprint = np.asarray(footprint)
+    if footprint.shape != (12*MASK_NSIDE**2,) or footprint.dtype != bool:
+        raise ValueError("footprint must be a boolean Nside=64 RING mask")
+    parent = np.asarray(hp.ang2pix(MASK_NSIDE, np.pi/2-sky.icrs.dec.rad, sky.icrs.ra.rad))
+    indices = np.flatnonzero(footprint[parent])
+    horizontal = sky[indices][None, :].transform_to(observation_frames()[:, None])
     az, alt = horizontal.az.rad, horizontal.alt.rad
     lmn = np.stack((np.cos(alt)*np.sin(az), np.cos(alt)*np.cos(az), np.sin(alt)), axis=-1)
     return indices, lmn
@@ -102,12 +126,13 @@ def integrate(lmn, brightness_sr):
 
 def generate(gsm_path, point_path, output):
     """Write noiseless 21-cm and joint datasets plus shared observation metadata."""
+    footprint = build_footprint()
     with h5py.File(gsm_path) as sky:
         assert sky['Header/hpx_frame/frame'][()] == b'icrs'
         assert sky['Header/hpx_order'][()] == b'ring'
         assert sky['Data/stokes'].attrs['unit'] == 'K'
         nside = int(sky['Header/nside'][()])
-        indices, directions = select_directions(healpix_sky(nside))
+        indices, directions = select_directions(healpix_sky(nside), footprint)
         stored_pixels = sky['Header/hpx_inds'][:]
         assert np.array_equal(stored_pixels, np.arange(12*nside**2))
         channels = np.array([np.argmin(abs(sky['Header/freq_array'][:]-f)) for f in FREQUENCIES])
@@ -121,7 +146,7 @@ def generate(gsm_path, point_path, output):
         assert sky['Data/stokes'].attrs['unit'] == 'Jy'
         coords = SkyCoord(ra=sky['Header/skycoord/ra'][:]*u.deg,
                           dec=sky['Header/skycoord/dec'][:]*u.deg)
-        indices, directions = select_directions(coords)
+        indices, directions = select_directions(coords, footprint)
         flux = sky['Data/stokes'][0, 0, indices]
         reference = sky['Header/reference_frequency'][:][indices]
         alpha = sky['Header/spectral_index'][:][indices]
@@ -131,7 +156,7 @@ def generate(gsm_path, point_path, output):
         point_history = sky['Header/history'][()].decode()
 
     nside_21, seed, sigma_21 = 256, 92381923, 6.4
-    indices, directions = select_directions(healpix_sky(nside_21))
+    indices, directions = select_directions(healpix_sky(nside_21), footprint)
     rng = np.random.default_rng(seed)
     # Draw one full-sky channel at a time so the generation stays small in memory.
     brightness = []
@@ -152,6 +177,8 @@ def generate(gsm_path, point_path, output):
     metadata = dict(
         description="Local 10-degree time-union simulation; no horizon/full-sky recovery claim.",
         frequency_hz=FREQUENCIES.tolist(), jd=TIMES.tolist(), field_diameter_deg=10,
+        mask_nside=MASK_NSIDE, mask_ring_pixels=np.flatnonzero(footprint).tolist(),
+        mask_definition="Select coarse pixel centres within 5 degrees of zenith at any integration; retain all child pixels and point sources inside those coarse pixels.",
         beam="14.2-m Airy power beam", telescope_latlonalt=list(HERA_LOCATION),
         units="mK sr", row_order="time, frequency, baseline; positive then conjugate",
         noiseless=True, gsm_nside=nside, signal_nside=nside_21,
