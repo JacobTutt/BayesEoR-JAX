@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bayeseor-jax"
 version = "0.1.0"
-description = "JAX-accelerated BayesEoR pipeline"
+description = "Bayesian 21-cm power-spectrum estimation from interferometric visibilities, in JAX."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
