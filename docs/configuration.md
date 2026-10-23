@@ -116,13 +116,14 @@ Most runs need these groups:
 
 ```yaml
 model: eor
-data_path: test_examples/eor/visibilities.npy
-inst_model: test_examples/instrument
+data_path: test_examples/eor/data/visibilities.npy
+inst_model: test_examples/eor/data
 array_save_directory: outputs/my_example/matrices
 output_dir: outputs/my_example
 
 fov_eor: 10.0
-nside: 64
+nside: 128
+footprint_nside: 64
 
 n_freq: 15
 f0_mhz: 158.3984375

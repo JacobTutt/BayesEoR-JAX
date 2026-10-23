@@ -168,65 +168,14 @@ The analysis outputs are written under:
 ../r/manual_eor/o/analysis/
 ```
 
-## 9. Submit The CSD3 Slurm Examples
+## 9. Example Entry Points
 
-The Slurm scripts are thin wrappers around the example script. They set the CSD3 environment and output paths, then call `test_examples/run_analysis_example.py`. They do not duplicate the setup, sampler, or analysis code inline.
+The supplied examples are independent local runs; scheduler-specific scripts
+are not included. See [Examples](examples.md) for their data, configurations
+and commands. On allocated HPC resources, use the installed environment and
+select the desired JAX platform explicitly.
 
-Submit the EoR-only test:
-
-```bash
-sbatch -A <project-account> --qos=<gpu-qos> test_examples/slurm/csd3_nested_eor.sbatch
-```
-
-Submit the EoR + foregrounds test:
-
-```bash
-sbatch -A <project-account> --qos=<gpu-qos> test_examples/slurm/csd3_nested_eor_fgs.sbatch
-```
-
-The account and QOS are deliberately not hardcoded in the repository scripts.
-
-Each script requests one GPU and writes to a unique run directory:
-
-```text
-../r/eor_<job-id>/
-../r/fgs_<job-id>/
-```
-
-The compact `r/`, `m`, `o`, and `ns` directory names keep MultiNest output paths short.
-
-If your working directory is not `/rds/user/$USER/hpc-work/BAYESEOR`, pass it when submitting:
-
-```bash
-sbatch -A <project-account> --qos=<gpu-qos> \
-  --export=ALL,BAYESEOR_PROJECT_ROOT=/path/to/BAYESEOR \
-  test_examples/slurm/csd3_nested_eor.sbatch
-```
-
-## 10. Inspect The Results
-
-Watch queued or running jobs:
-
-```bash
-squeue -u $USER
-```
-
-Check the MultiNest summaries after completion:
-
-```bash
-cat ../r/eor_<job-id>/o/ns/summary.json
-cat ../r/fgs_<job-id>/o/ns/summary.json
-```
-
-Check the analysis outputs:
-
-```text
-../r/eor_<job-id>/o/analysis/posterior_summary.json
-../r/eor_<job-id>/o/analysis/power_spectrum.png
-../r/eor_<job-id>/o/analysis/posteriors.png
-../r/eor_<job-id>/o/analysis/power_spectrum_and_posteriors.png
-```
-
-Repeat with `fgs_<job-id>` for the foreground run.
-
-The setup logs should show that JAX uses a CUDA device. CPU fallback is a configuration error for production analyses.
+Each run writes its evidence summary under `nested_sampling/summary.json`
+and its posterior summary and plots under `analysis/` within the configured
+output directory. Give independent configurations separate output and matrix
+directories.

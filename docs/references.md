@@ -19,6 +19,15 @@ Burba, Sims & Pober (2023), "All Sky Modelling Requirements for Bayesian 21 cm P
 Sims, Burba & Pober (2025), "BayesEoR: Bayesian 21-cm Power Spectrum Estimation from Interferometric Visibilities"  
 [arXiv:2501.12928](https://arxiv.org/abs/2501.12928)
 
+## Wide-field Foreground Compression
+
+Tutt, J. L., Sims, P. H., Burba, J. & de Lera Acedo, E. (2026),
+"A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
+Evidence Evaluation in Interferometric Visibilities" (manuscript).
+
+The laptop examples use a reduced observation inspired by this study, rather
+than reproducing its full-sky inference configuration.
+
 ## Samplers And Inference Software
 
 Feroz, Hobson & Bridges (2009), "MultiNest: an efficient and robust Bayesian inference tool for cosmology and particle physics"  

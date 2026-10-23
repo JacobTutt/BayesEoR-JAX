@@ -1,4 +1,5 @@
 {
+  "components": ["21cm"],
   "description": "Local 10-degree time-union simulation; no horizon/full-sky recovery claim.",
   "frequency_hz": [
     158398437.5,

@@ -1,10 +1,10 @@
 # Run from the repository root. All input rows are already selected.
 model: eor+fg
-data_path: test_examples/eor_fgs/visibilities.npy
-inst_model: test_examples/instrument
+data_path: test_examples/eor_fgs/data/visibilities.npy
+inst_model: test_examples/eor_fgs/data
 array_save_directory: outputs/laptop_eor_fgs_nside128/matrices
 output_dir: outputs/laptop_eor_fgs_nside128
-# Use --prepare-kl to construct this basis; latent coefficients have unit variance.
+# The example entry point constructs this basis; latent coefficients have unit variance.
 foreground_kl_path: outputs/laptop_eor_fgs_nside128/kl/T_fg_reduced.npy
 fov_fg: 10.0
 beta_fg: [2.63, 2.82]

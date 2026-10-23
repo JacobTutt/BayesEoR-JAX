@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
-import os
 from pathlib import Path
 
-import jax
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -180,19 +178,13 @@ def run_example(
     return setup_result, summary, analysis_summary
 
 
-def main() -> None:
-    """Small runnable example with optional CLI overrides."""
-    if os.environ.get("SLURM_PROCID") is not None and int(os.environ.get("SLURM_NTASKS", "1")) > 1:
-        # Multi-node GH200 runs on Isambard currently need PXN disabled for the
-        # distributed collectives used by JAX/XLA to avoid NCCL failures.
-        os.environ.setdefault("NCCL_PXN_DISABLE", "1")
-        os.environ.setdefault("NCCL_P2P_PXN_LEVEL", "0")
-        jax.distributed.initialize()
-
+def main(default_config="test_examples/eor/config.yaml", *, prepare_foreground=False,
+         label="BayesEoR-JAX", expected_ps=None) -> None:
+    """Run one example, with defaults supplied by its independent entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default="test_examples/eor/config.yaml",
+        default=default_config,
         help="Path to YAML config file.",
     )
     parser.add_argument(
@@ -200,8 +192,8 @@ def main() -> None:
         action="store_true",
         help="Enable nested sampling (default is setup-only).",
     )
-    parser.add_argument("--prepare-kl", action="store_true", help="Build the configured foreground KL basis before setup.")
-    parser.add_argument("--expected-ps", type=float, help="Optional injected flat P(k), in mK^2 Mpc^3, for reference curves.")
+    parser.add_argument("--prepare-kl", action="store_true", default=prepare_foreground, help="Build the configured foreground KL basis before setup.")
+    parser.add_argument("--expected-ps", type=float, default=expected_ps, help="Optional injected flat P(k), in mK^2 Mpc^3, for reference curves.")
     parser.add_argument(
         "--nested-sampling-dirname",
         default="nested_sampling",
@@ -209,7 +201,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--analysis-label",
-        default="BayesEoR-JAX",
+        default=label,
         help="Label used in the analysis plots.",
     )
     args, extra_bayeseor_args = parser.parse_known_args()

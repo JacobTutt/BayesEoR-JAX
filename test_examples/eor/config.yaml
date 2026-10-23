@@ -1,7 +1,7 @@
 # Run from the repository root. All input rows are already selected.
 model: eor
-data_path: test_examples/eor/visibilities.npy
-inst_model: test_examples/instrument
+data_path: test_examples/eor/data/visibilities.npy
+inst_model: test_examples/eor/data
 array_save_directory: outputs/laptop_eor_nside128/matrices
 output_dir: outputs/laptop_eor_nside128
 

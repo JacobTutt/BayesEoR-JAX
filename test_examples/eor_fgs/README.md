@@ -1,26 +1,88 @@
 # Cosmological signal and foregrounds
 
-From the repository root, in the installed CPU environment:
+Load supplied noiseless signal-plus-foreground visibilities, add thermal noise,
+construct the foreground KL basis and jointly infer the 21-cm power spectrum.
+This is a separate run with its own data and configuration; the signal-only
+example does not need to be run first. No sky simulation or Slurm is required.
+
+## Run
+
+From the repository root, after installing the CPU environment and MultiNest:
 
 ```bash
-export JAX_PLATFORMS=cpu
-python test_examples/run_analysis_example.py --config test_examples/eor_fgs/config.yaml --prepare-kl --sample
+python -m test_examples.eor_fgs.run --sample
 ```
 
-This builds and reduces the foreground operator with native JAX, loads the
-saved data and adds seeded noise through setup, then performs joint inference,
-analytically marginalising the cosmological
-and latent foreground coefficients. Only six power-spectrum amplitudes are sampled.
+Omit `--sample` to stop after KL preparation, data loading, noise generation
+and matrix construction. The entry point defaults to CPU JAX and performs KL
+preparation automatically, using the same configuration as inference.
 
-Both components occupy 10° fields with the same global `Nside=128` inference grid.
-The `footprint_nside=64` setting preserves the sky boundary of the saved data;
-it does not set either model's resolution. The input
-contains the same signal as the signal-only example, plus GSM2008 and point-source
-emission. Results go to `outputs/laptop_eor_fgs_nside128/`, including the noisy
-data, noise, matrices, KL diagnostics, posterior samples, evidence and plots.
+```text
+eor_fgs/
+├── config.yaml
+├── run.py
+├── prepare_kl.py
+└── data/
+    ├── visibilities.npy
+    ├── uvw_model.npy
+    ├── redundancy_model.npy
+    └── simulation.json
+```
 
-For both examples and comparison plots, run `python -m test_examples.run_laptop_examples`.
-Use its `--setup-only` option to stop before sampling.
+## Supplied observation and sky
 
-See [the examples guide](../../docs/examples.md) for the observation, regeneration
-and limitations. This restricted-field example is not a full-sky validation.
+The setup follows [Tutt et al. (2026, manuscript)](../../docs/references.md#wide-field-foreground-compression),
+*A Karhunen–Loève Latent Space for Bayesian Uncertainty Quantification and
+Evidence Evaluation in Interferometric Visibilities*, with reduced time,
+frequency and sky coverage for a local demonstration.
+
+| Setting | Value |
+| --- | --- |
+| Instrument | 37-antenna HERA-like hexagonal layout, 14.6-m spacing |
+| Baselines | All 30 signed groups below 40 m; 15 independent plus conjugates |
+| Beam | 14.2-m Airy power beam |
+| Frequencies | 15 channels, 158.3984375–159.765625 MHz, spaced by 97.65625 kHz |
+| Times | 15 integrations spaced by 21.51137 s, centred on JD 2459999.097166265 |
+| Data | 6,750 complex entries in mK sr; 3,375 independent measurements |
+| Both sky components | 10° time-union footprint selected at HEALPix `Nside=64` |
+| Added noise | Complex RMS 0.006464 mK sr; seed 742123 |
+
+The cosmological contribution is the same independent-pixel Gaussian realisation
+as in the signal-only example: standard deviation 6.4 mK at `Nside=256`, with
+flat ensemble dimensional power `P ≈ 8.84 × 10⁴ mK² Mpc³`. Foregrounds add
+GSM2008 diffuse emission at `Nside=128` and a statistical extragalactic plus
+catalogued A-team source population at their individual positions. All components
+were integrated through the beam and full three-dimensional fringe response.
+
+Sky membership was defined on the `Nside=64` grid: finer pixels inherit their
+parent's selection, and point sources must lie inside a selected parent pixel.
+`data/simulation.json` records the exact footprint, times, frequencies, seeds
+and source provenance. No external sky files are needed to run inference.
+
+## Inference configuration and results
+
+Both model components share `Nside=128`, while `footprint_nside=64` preserves
+the data's sky boundary. The foreground model has three spectral coefficients
+per pixel, using a constant and power laws with indices 2.63 and 2.82.
+The physical prior and noise weights enter a native-JAX KL construction with
+discarded-RMS threshold `f=0.1`, retaining 179 modes from 1,248 coefficients.
+The retained foreground coefficients have standard-normal priors.
+
+Combined with 1,680 cosmological coefficients, the likelihood marginalises
+1,859 coefficients and samples six power-spectrum amplitudes. MultiNest uses
+60 live points and seed 42. Each bin currently has the **same** independent
+prior, `log10(Δ² / mK²) ~ Uniform(-1, 6)`. Grey boxes show these actual bounds,
+not a uniform density in linear power or the manuscript's bin-dependent priors.
+
+Outputs go to `outputs/laptop_eor_fgs_nside128/`: noisy data, noise draw, KL
+diagnostics, matrices, posterior samples, evidence and three analysis plots.
+Use `--resume` only for the same run; changed settings require fresh output,
+matrix and KL paths to avoid stale results.
+
+These 15 times and channels are central subsets of the manuscript's 47-time,
+39-channel observation. Both simulated components are restricted to 10°, so
+this is not a full-sky validation or a demonstration of horizon recovery.
+The shared footprint does not guarantee exact representation of point-source
+subpixel structure. The small live-point budget illustrates the workflow,
+not validated scientific constraints. See the [examples guide](../../docs/examples.md)
+for output conventions and optional comparisons of completed runs.

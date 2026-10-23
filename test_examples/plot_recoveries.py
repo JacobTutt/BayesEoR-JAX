@@ -25,7 +25,7 @@ def injected_power_spectrum(metadata):
     Parameters
     ----------
     metadata : dict
-        The generator's simulation.json, including frequencies, simulation
+        The supplied simulation.json, including frequencies, simulation
         HEALPix resolution and brightness-temperature standard deviation.
 
     Returns
@@ -55,10 +55,10 @@ def export_recoveries(output):
     list of pathlib.Path
         Paths to the three PNG previews; matching vector PDFs are also saved.
     """
-    metadata = json.loads(Path("test_examples/instrument/simulation.json").read_text())
-    power = injected_power_spectrum(metadata)
     configs = [BayesEoRParser().parse_args(["--config", f"test_examples/{name}/config.yaml"])
                for name in ("eor", "eor_fgs")]
+    metadata = json.loads((Path(configs[0].inst_model)/"simulation.json").read_text())
+    power = injected_power_spectrum(metadata)
     roots = [Path(config.output_dir) for config in configs]
     labels = ["21-cm only", "21-cm + foregrounds"]
     summaries = [json.loads((root/"nested_sampling/summary.json").read_text()) for root in roots]
@@ -81,14 +81,12 @@ def export_recoveries(output):
         handles, legend_labels = power_ax.get_legend_handles_labels()
         power_ax.legend(handles, ["Injected spectrum" if label == "Reference" else label
                                   for label in legend_labels], loc="lower right", frameon=False)
-        # Preserve the stored prior support, with consistent axes across figures.
-        power_ax.set_ylim(0.1, 1e6)
         power_ax.xaxis.set_major_locator(FixedLocator(data.k_vals[0]))
         power_ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:.2g}"))
         power_ax.xaxis.set_minor_formatter(NullFormatter())
         for ax in posterior_axes:
             ax.tick_params(axis="x", labelsize=9)
-        note = "Central 68% credible intervals; dashed: injected ensemble spectrum; grey: prior support."
+        note = "Central 68% credible intervals; dashed: injected ensemble spectrum; grey: log-uniform prior support."
         if any(not np.isfinite(summaries[i].get("logZerr", np.nan)) for i in indices):
             note += "\nDiagnostic only: at least one run has a non-finite evidence uncertainty."
         fig.text(.5, .04, note, ha="center", va="center", fontsize=9)

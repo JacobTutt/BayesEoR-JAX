@@ -1,25 +1,34 @@
 # Examples
 
-These two examples run locally on CPU: first infer the cosmological power
-spectrum without foregrounds, then add foreground emission and construct its
-KL representation before joint inference. Run the commands from the repository
+These two independent examples run locally on CPU using supplied noiseless data:
+infer the cosmological power spectrum alone, or construct a foreground KL basis
+and perform joint inference. Each has its own data, configuration and entry point.
+Run the commands from the repository
 root after following [installation](installation.md). Nested sampling requires
 the native MultiNest library as well as PyMultiNest; the supplied Conda
 environment installs both.
 
-To run both examples, including matrix construction, inference and plots:
+Choose either example, including noise generation, matrix construction, inference
+and plots:
 
 ```bash
-python -m test_examples.run_laptop_examples
+python -m test_examples.eor.run --sample
+# Or, independently:
+python -m test_examples.eor_fgs.run --sample
 ```
 
-Use `--setup-only` to load the data, add noise and build the matrices without
-sampling. This entry point selects CPU JAX and runs the standard pipeline; it
-does not use the separate-resolution diagnostic scripts.
+Omit `--sample` to load the supplied data, add noise and build the matrices without
+sampling. Both entry points select CPU JAX by default and use the standard pipeline.
+No sky-simulation script, external sky files or scheduler scripts are required.
 
 ## Observation and inputs
 
-Both examples share the same HERA-like instrument and noise prescription:
+The observing setup follows the wide-field study of
+[Tutt et al. (2026, manuscript)](references.md#wide-field-foreground-compression),
+using the same HERA-like baseline selection, Airy beam and noise prescription.
+These are reduced-observation demonstrations, not reproductions of its full-sky
+results: they use 15 rather than 47 integrations, 15 rather than 39 channels,
+and restrict both simulated components to a 10° field.
 
 | Setting | Value |
 | --- | --- |
@@ -49,10 +58,12 @@ and **six sampled power-spectrum amplitudes**. The joint example adds
 selected parent contributes all four of its `Nside=128` children. This avoids
 changing the sky coverage when refining the model. It is not a separate
 foreground or cosmological resolution setting.
+The shared `Nside=128` used here is finer than the manuscript's `Nside=64`
+inference grid; the simulated signal remains at `Nside=256`.
 
-The checked-in inputs contain only two noiseless visibility vectors and shared
-baseline/redundancy metadata. Setup generates reproducible thermal noise using
-the same seed for both examples. No full-sky maps, model matrices or sampler
+Each example's `data/` folder contains its own noiseless visibility vector,
+baseline/redundancy arrays and `simulation.json` provenance record. Setup generates
+reproducible thermal noise using the same seed for both examples. No full-sky maps, model matrices or sampler
 outputs are stored in Git.
 
 ## 1. Cosmological signal only
@@ -65,9 +76,7 @@ pixels before integration through the beam and full three-dimensional fringe
 response. It does not select a new circular boundary at the simulation resolution.
 
 ```bash
-export JAX_PLATFORMS=cpu
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor/config.yaml --sample
+python -m test_examples.eor.run --sample
 ```
 
 Omit `--sample` to build the matrices and likelihood without running MultiNest.
@@ -88,9 +97,7 @@ First build the prior- and noise-weighted foreground operator and reduce it
 using native CPU JAX. Then run joint inference:
 
 ```bash
-export JAX_PLATFORMS=cpu
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor_fgs/config.yaml --prepare-kl --sample
+python -m test_examples.eor_fgs.run --sample
 ```
 
 The reduced operator is saved under `outputs/laptop_eor_fgs_nside128/kl/`; the
@@ -99,10 +106,26 @@ uses the same physical prior widths and noise covariance as inference.
 The joint model marginalises 1,859 coefficients while sampling the six
 power-spectrum amplitudes.
 
-For a separate KL-preparation step, run
-`python test_examples/eor_fgs/prepare_kl.py --config test_examples/eor_fgs/config.yaml`
-and omit `--prepare-kl` from the inference command. Both steps read the same
+The joint entry point includes KL preparation automatically; no separate run of
+the signal-only example is needed. Preparation and inference read the same
 configuration, including the shared image resolution and footprint.
+
+## Power-spectrum priors
+
+Both supplied configurations currently assign **the same bounds to each of the
+six independent amplitudes**:
+
+\[
+\rho_s=\log_{10}(\Delta_{21}^2(k_s)/\mathrm{mK}^2)
+\sim\mathcal U(-1,6).
+\]
+
+These are log-uniform priors on power, not uniform densities in linear power.
+The shaded boxes show each bin's support, read from the completed run's
+`args.json`; their equal heights reflect the actual configuration. They are not
+the bin-dependent priors used in the manuscript. To use different bounds, edit
+each pair in `config.yaml` and run inference into a fresh output directory;
+changing a plot cannot change the prior used to obtain its posterior.
 
 These are workflow examples with 60 live points, not validated scientific
 constraints. Both simulated components are restricted to 10°: these inputs
@@ -121,8 +144,7 @@ Each run writes:
 - `analysis/`: posterior summaries and power-spectrum/posterior figures.
 
 The joint example additionally writes the weighted foreground operator, KL
-spectrum and truncation diagnostics. The combined entry point saves overlaid
-PNG/PDF figures under `outputs/laptop_recovery_plots_nside128/`.
+spectrum and truncation diagnostics. Each entry point produces its own figures.
 
 The example runner centres the log likelihood before passing it to MultiNest
 to avoid numerical loss of precision in the evidence uncertainty. The offset
@@ -147,20 +169,6 @@ The runner refuses to replace existing sampler products. Use `--resume` with
 the individual run command to continue the same run, or choose fresh output,
 matrix and KL paths for another configuration.
 
-## Regenerating the inputs locally
-
-Running the examples needs no external sky files. Regeneration uses the local
-ICRS GSM and point-source `skyh5` files from the sky-generation workflow:
-
-```bash
-python test_examples/generate_data.py \
-  --gsm-sky /path/to/gsm/fov-360.skyh5 \
-  --point-sky /path/to/gleam_ateam/fov-360.skyh5 \
-  --output test_examples
-```
-
-This replaces the two visibility vectors and shared instrument files. It
-selects only the required channels and sky directions, integrates their
-visibilities locally, and records the input histories, units, observation
-coordinates and simulation seed in `test_examples/instrument/simulation.json`.
-No HPC connection or job submission is involved.
+Sky simulation is outside the scope of these examples. The supplied
+`data/simulation.json` records the sky construction, seeds, footprint, units,
+channel frequencies and integration times needed to interpret each dataset.
