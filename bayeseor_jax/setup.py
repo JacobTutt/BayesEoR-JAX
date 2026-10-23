@@ -360,6 +360,32 @@ def run_setup(config: RunConfig) -> SetupResult:
             k_vals_full=k_vals_full, counts=counts,
             bin_id_per_k_mode=bid_full, valid_mask=valid_full,
         )
+    # Reject invalid priors before persisting metadata from an incomplete setup.
+    if include_eor and config.priors is None:
+        raise ValueError("priors must be provided")
+    bounds_log = jnp.asarray(config.priors, dtype=jnp.float64) if include_eor else jnp.empty((0, 2))
+    if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
+        raise ValueError("priors must have shape (n_power_params, 2)")
+    n_power_params = int(k_vals.shape[0])
+    if bounds_log.shape[0] != n_power_params:
+        raise ValueError(
+            f"priors has {bounds_log.shape[0]} bins, but k binning produced {n_power_params} non-empty bins"
+        )
+    if config.uniform_priors is None or not include_eor:
+        uniform_priors_mask = jnp.zeros((n_power_params,), dtype=bool)
+    else:
+        uniform_priors_mask = jnp.asarray(config.uniform_priors, dtype=bool)
+        if uniform_priors_mask.shape != (n_power_params,):
+            raise ValueError(
+                "uniform_priors must have shape "
+                f"({n_power_params},), got {uniform_priors_mask.shape}"
+            )
+    prior_class = Prior(
+        bounds_log=bounds_log,
+        power_param_start=0,
+        n_power_params=n_power_params,
+    )
+
     if jax.process_index() == 0:
         if include_eor:
             write_analysis_metadata(
@@ -442,37 +468,7 @@ def run_setup(config: RunConfig) -> SetupResult:
     n_params = int(np.load(t_path, mmap_mode="r").shape[1])
     setup_args_dict["n_pix_fg_final"] = int(bm.image_geometry.n_pix_fg)
 
-    # Assemble sampler-space prior and latent-space precision configs.
-    # `Prior` now works directly in log10(power) sampler coordinates.
-    # `PhiInverse` maps linearized power amplitudes to latent precision diag.
-    if include_eor and config.priors is None:
-        raise ValueError("priors must be provided")
-
-    bounds_log = jnp.asarray(config.priors, dtype=jnp.float64) if include_eor else jnp.empty((0, 2))
-    if bounds_log.ndim != 2 or bounds_log.shape[1] != 2:
-        raise ValueError("priors must have shape (n_power_params, 2)")
-    n_power_params = int(k_vals.shape[0])
-    if bounds_log.shape[0] != n_power_params:
-        raise ValueError(
-            f"priors has {bounds_log.shape[0]} bins, but k binning produced {n_power_params} non-empty bins"
-        )
-
-    if config.uniform_priors is None or not include_eor:
-        uniform_priors_mask = jnp.zeros((n_power_params,), dtype=bool)
-    else:
-        uniform_priors_mask = jnp.asarray(config.uniform_priors, dtype=bool)
-        if uniform_priors_mask.shape != (n_power_params,):
-            raise ValueError(
-                "uniform_priors must have shape "
-                f"({n_power_params},), got {uniform_priors_mask.shape}"
-            )
-
-    prior_class = Prior(
-        bounds_log=bounds_log,
-        power_param_start=0,
-        n_power_params=n_power_params,
-    )
-
+    # Map sampled power amplitudes into the latent coefficient precision.
     phi_inverse_class = PhiInverse(
         bin_id_per_k_mode=bid_compact,
         valid_mask=valid_compact,

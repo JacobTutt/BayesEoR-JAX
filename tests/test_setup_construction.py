@@ -62,6 +62,17 @@ def setup_case(tmp_path, monkeypatch):
     return setup, arguments, vis
 
 
+def test_invalid_prior_count_does_not_save_analysis_metadata(setup_case, monkeypatch):
+    setup, arguments, _ = setup_case
+    saved = []
+    monkeypatch.setattr(setup, "write_analysis_metadata", lambda **kwargs: saved.append(kwargs))
+    arguments["priors"] = [[-1., 1.], [-1., 1.]]
+    with pytest.raises(ValueError, match="k binning produced 1 non-empty bins"):
+        setup.run_setup(RunConfig(**arguments, sigma=.5))
+    assert saved == []
+    assert not (Path(arguments["array_save_directory"]) / "T_21.npy").exists()
+
+
 def test_setup_preserves_requested_settings_and_resolves_observation(setup_case):
     setup, arguments, vis = setup_case
     requested = dict(arguments, n_freq=99, f0_mhz=1., df_mhz=.01, n_t=20,

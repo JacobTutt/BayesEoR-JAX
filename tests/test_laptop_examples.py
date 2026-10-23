@@ -48,3 +48,13 @@ def test_independent_simulator_matches_visibility_operator():
     brightness = np.arange(len(FREQUENCIES)*3).reshape(-1, 3) + 1.
     expected = np.einsum("tfbp,fp->tfb", response, brightness).reshape(-1)
     np.testing.assert_allclose(integrate(lmn, brightness*.002), expected, rtol=1e-11, atol=1e-12)
+
+
+def test_injected_spectrum_uses_simulation_resolution():
+    from test_examples.plot_recoveries import injected_power_spectrum
+
+    metadata = json.loads(Path("test_examples/instrument/simulation.json").read_text())
+    power = injected_power_spectrum(metadata)
+    assert power == pytest.approx(8.84e4, rel=.005)
+    metadata["signal_nside"] *= 2
+    assert injected_power_spectrum(metadata) == pytest.approx(power/4)

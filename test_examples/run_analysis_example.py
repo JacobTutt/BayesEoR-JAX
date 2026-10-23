@@ -41,9 +41,13 @@ def run_output_analysis(
     output_dir: Path | str | None = None,
     label: str = "BayesEoR-JAX",
     metadata_dir: Path | str | None = None,
+    expected_ps: float | None = None,
 ) -> dict:
     """
     Read sampler output and optional separate setup metadata, then save summaries and plots.
+
+    expected_ps optionally supplies a flat injected dimensional power spectrum
+    in mK² Mpc³ for the reference curves; it does not alter posterior samples.
     """
     sampler_dir = Path(sampler_dir)
     output_dir = Path(output_dir) if output_dir is not None else sampler_dir.parent
@@ -54,6 +58,7 @@ def run_output_analysis(
         [sampler_dir],
         labels=[label],
         metadata_dirs=metadata_dir,
+        expected_ps=expected_ps,
     )
     summary = {
         "sampler": "multinest",

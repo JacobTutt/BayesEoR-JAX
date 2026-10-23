@@ -92,6 +92,13 @@ Each run writes:
 - `analysis/`: posterior summaries and power-spectrum/posterior figures.
 
 The joint example additionally writes the KL spectrum and truncation diagnostics.
+To compare both completed posteriors with the injected ensemble spectrum:
+
+```bash
+python test_examples/plot_recoveries.py --output outputs/recovery_plots
+```
+
+This writes individual and overlaid PNG/PDF figures without rerunning inference.
 See [posterior analysis](outputs-analysis.md) for comparing results.
 The `outputs/` directory is ignored by Git.
 
