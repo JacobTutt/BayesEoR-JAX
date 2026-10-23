@@ -108,25 +108,29 @@ estimate in `args.json`, without modifying the input configuration.
 Most runs need these groups:
 
 ```yaml
-data_path: test_examples/eor/eor.uvh5
+model: eor
+data_path: test_examples/eor/visibilities.npy
+inst_model: test_examples/instrument
+array_save_directory: outputs/my_example/matrices
+output_dir: outputs/my_example
 
-n_u_eor: 15
-fov_eor: 12.9080728652
-nside: 128
+fov_eor: 10.0
+nside: 64
 
-n_freq: 38
-f0_mhz: 158.304048743
-df_mhz: 0.23761898685801028
+n_freq: 15
+f0_mhz: 158.3984375
+df_mhz: 0.09765625
+n_t: 15
+d_t: 21.511369943618774
+jd_center: 2459999.097166265
 
 telescope_latlonalt: [-30.72152777777791, 21.428305555555557, 1073.0000000093132]
-beam_type: gaussian
-fwhm_deg: 9.306821090681533
+beam_type: airy
+diam: 14.2
 
-sigma: 0.00615864342588761
+sigma: 0.006464
 
-priors:
-  - [-2.0, 2.0]
-  - [-1.2, 2.8]
+priors: [[-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6]]
 ```
 
 The complete shipped examples are:

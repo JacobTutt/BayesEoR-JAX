@@ -1,94 +1,118 @@
-# Running the example scripts
+# Examples
 
-The repository includes a single analysis runner and two simulated visibility
-datasets. Run the commands below from the repository root after following
-[installation](installation.md).
+These two examples run locally on CPU: first infer the cosmological power
+spectrum without foregrounds, then add foreground emission and construct its
+KL representation before joint inference. Run the commands from the repository
+root after following [installation](installation.md). Nested sampling requires
+the native MultiNest library as well as PyMultiNest; the supplied Conda
+environment installs both.
 
-| Example | Configuration | Data |
-| --- | --- | --- |
-| Cosmological signal only | [eor/config.yaml](https://github.com/JacobTutt/BayesEoR-JAX/blob/main/test_examples/eor/config.yaml) | `test_examples/eor/eor.uvh5` |
-| Cosmological signal and foregrounds | [eor_fgs/config.yaml](https://github.com/JacobTutt/BayesEoR-JAX/blob/main/test_examples/eor_fgs/config.yaml) | `test_examples/eor_fgs/eor_and_fgs.uvh5` |
+## Observation and inputs
 
-Both use [run_analysis_example.py](https://github.com/JacobTutt/BayesEoR-JAX/blob/main/test_examples/run_analysis_example.py).
-The input simulations are noiseless; their configurations specify `sigma` so
-the loader adds synthetic noise. These are scientific examples, not minimal
-memory benchmarks: matrix construction can still be expensive on a laptop.
+Both examples share the same HERA-like instrument and noise prescription:
 
-## 1. Prepare an analysis without sampling
+| Setting | Value |
+| --- | --- |
+| Array | 37 antennas on a 14.6-m hexagonal grid |
+| Baselines | All 30 signed baseline groups shorter than 40 m |
+| Primary beam | 14.2-m Airy power beam |
+| Frequency channels | 15 consecutive channels, 158.398–159.766 MHz |
+| Channel spacing | 97.65625 kHz |
+| Integrations | 15, separated by 21.51137 s |
+| Foreground and cosmological fields | 10° diameter, selected over the drift scan |
+| Inference image grid | HEALPix `Nside=64` for both components |
+| Complex noise RMS | 0.006464 mK sr |
 
-```bash
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor/config.yaml \
-  --array-save-directory outputs/eor/matrices \
-  --output-dir outputs/eor
-```
+The times and frequencies are the central subsets of the 47-integration,
+39-channel observation. There are **6,750 stored complex entries**, including
+conjugate baselines, corresponding to **3,375 independent complex measurements**.
+The conjugates do not provide additional independent data.
 
-The default runs `run_setup`: it loads the data, constructs or reuses the
-model matrices, and prepares the prior and marginalised likelihood. It does
-not start MultiNest. Separate matrix and output directories keep distinct
-analyses from overwriting or reusing incompatible products.
+The cosmological model uses an automatically sized 11 × 11 transverse Fourier
+grid and 14 nonzero line-of-sight modes: **1,680 marginalised coefficients**
+and **six sampled power-spectrum amplitudes**. The joint example adds
+**165 KL modes**, reduced from 312 foreground coefficients using `f=0.1`.
 
-## 2. Recover the cosmological power spectrum
+The checked-in inputs contain only two noiseless visibility vectors and shared
+baseline/redundancy metadata. Setup generates reproducible thermal noise using
+the same seed for both examples. No full-sky maps, model matrices or sampler
+outputs are stored in Git.
 
-Add `--sample` to evaluate the posterior and Bayesian evidence:
+## 1. Cosmological signal only
 
-```bash
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor/config.yaml \
-  --array-save-directory outputs/eor/matrices \
-  --output-dir outputs/eor \
-  --sample
-```
-
-Sampling requires both the native MultiNest library and PyMultiNest. The script
-then writes posterior summaries and power-spectrum/posterior plots automatically.
-
-## 3. Run joint cosmological and foreground inference
-
-```bash
-python test_examples/run_analysis_example.py \
-  --config test_examples/eor_fgs/config.yaml \
-  --model eor+fg \
-  --array-save-directory outputs/joint/matrices \
-  --output-dir outputs/joint \
-  --sample
-```
-
-This uses the foreground model alongside the cosmological component while
-sampling only the remaining hyperparameters. To use a preconstructed KL basis,
-add `--foreground-kl-path path/to/T_fg_reduced.npy`; that operator must match
-the observation, row ordering and foreground prior. Setup does not construct
-the KL basis automatically. See [KL Reduced Basis](kl-reduced-basis.md).
-
-## 4. Evaluate a foreground-only hypothesis
-
-The same runner can analyse the joint dataset using only a foreground model:
+The input is an independent-pixel, zero-mean Gaussian 21-cm brightness field
+with a pixel standard deviation of 6.4 mK, simulated at `Nside=256`.
+Its contribution is restricted to the 10° time-union field before integration
+through the beam and full three-dimensional fringe response.
 
 ```bash
+export JAX_PLATFORMS=cpu
 python test_examples/run_analysis_example.py \
-  --config test_examples/eor_fgs/config.yaml \
-  --model fg \
-  --array-save-directory outputs/foreground_only/matrices \
-  --output-dir outputs/foreground_only \
-  --sample
+  --config test_examples/eor/config.yaml --sample
 ```
 
-Here `--sample` enables the inference stage, but with fixed foreground priors
-and noise no sampled parameters remain. The runner evaluates the evidence and
-MAP coefficients analytically, without calling MultiNest or producing a
-power-spectrum posterior. This example changes the hypothesis, not the dataset:
-the input still contains a cosmological signal.
+Omit `--sample` to build the matrices and likelihood without running MultiNest.
+Outputs are written to `outputs/laptop_eor/`.
 
-## Outputs and custom configurations
+## 2. Cosmological signal and foregrounds
 
-Sampler or analytic results are written under `output_dir/nested_sampling/`.
-Sampled runs additionally produce `output_dir/analysis/`, containing
-`posterior_summary.json`, `power_spectrum.png`, `posteriors.png` and
-`power_spectrum_and_posteriors.png`. See [posterior analysis](outputs-analysis.md)
-for reading and comparing results.
+This dataset adds GSM2008 diffuse emission and a statistical extragalactic/
+catalogued bright-source population within the same 10° field. The local
+GSM input is sampled at `Nside=128`; point sources retain their individual
+positions. The inference image grid remains `Nside=64`.
 
-Copy an example YAML file to start a new analysis. Use the
-[configuration reference](configuration.md) for available settings and
-[Data](data.md) for input conventions. Give changed physical models, priors,
-observations or datasets their own matrix/output directories; use `--clobber`
-only when intentionally replacing existing products.
+First build the prior- and noise-weighted foreground operator and reduce it
+using native CPU JAX. Then run joint inference:
+
+```bash
+export JAX_PLATFORMS=cpu
+python test_examples/eor_fgs/prepare_kl.py
+python test_examples/run_analysis_example.py \
+  --config test_examples/eor_fgs/config.yaml --sample
+```
+
+The reduced operator is saved under `outputs/laptop_eor_fgs/kl/`; the
+configuration uses it with a standard-normal foreground prior. Preparation
+uses the same physical prior widths and noise covariance as inference.
+The joint model marginalises 1,845 coefficients while sampling the six
+power-spectrum amplitudes.
+
+These are workflow examples with 60 live points, not validated scientific
+constraints. Both simulated components are restricted to 10°: these inputs
+do not demonstrate recovery from unmodelled emission outside the field or
+from the horizon. The reduced bandwidth also probes different bins from
+the full observing band.
+
+## Results and rerunning
+
+Each run writes:
+
+- `matrices/`: forward operators and marginal-likelihood products.
+- `nested_sampling/`: posterior samples, evidence and run summary.
+- `analysis/`: posterior summaries and power-spectrum/posterior figures.
+
+The joint example additionally writes the KL spectrum and truncation diagnostics.
+See [posterior analysis](outputs-analysis.md) for comparing results.
+The `outputs/` directory is ignored by Git.
+
+Give changed observations or models their own output and matrix directories.
+Rebuild the KL basis if its instrument, field, foreground prior or noise changes;
+it is not interchangeable between configurations.
+
+## Regenerating the inputs locally
+
+Running the examples needs no external sky files. Regeneration uses the local
+ICRS GSM and point-source `skyh5` files from the sky-generation workflow:
+
+```bash
+python test_examples/generate_data.py \
+  --gsm-sky /path/to/gsm/fov-360.skyh5 \
+  --point-sky /path/to/gleam_ateam/fov-360.skyh5 \
+  --output test_examples
+```
+
+This replaces the two visibility vectors and shared instrument files. It
+selects only the required channels and sky directions, integrates their
+visibilities locally, and records the input histories, units, observation
+coordinates and simulation seed in `test_examples/instrument/simulation.json`.
+No HPC connection or job submission is involved.
