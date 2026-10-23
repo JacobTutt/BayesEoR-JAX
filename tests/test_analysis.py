@@ -178,6 +178,22 @@ def test_plot_validation(tmp_path):
         plot_posteriors(data, plot_priors=True)
 
 
+def test_prior_boxes_use_each_bins_saved_bounds(tmp_path):
+    from matplotlib.patches import Rectangle
+
+    data = DataContainer([write_run(tmp_path)])
+    data.args[0]["priors"] = [[-1., 2.], [0., 3.]]
+    fig, ax = plot_power_spectra(data, plot_priors=True)
+    boxes = [patch for patch in ax.patches if isinstance(patch, Rectangle)]
+    assert len(boxes) == 2
+    for column, (box, lo, hi) in enumerate(zip(boxes, [.1, 1.], [100., 1000.])):
+        assert box.get_y() == pytest.approx(lo)
+        assert box.get_height() == pytest.approx(hi-lo)
+        assert box.get_x() == pytest.approx(data.k_vals_bins[0][column])
+        assert box.get_width() == pytest.approx(np.diff(data.k_vals_bins[0])[column])
+    fig.canvas.draw()
+
+
 def test_example_writes_summaries_and_figures(tmp_path):
     from test_examples.run_analysis_example import run_output_analysis
     sampler = write_run(tmp_path / "nested_sampling")

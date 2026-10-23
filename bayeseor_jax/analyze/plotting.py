@@ -4,6 +4,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib import style
+from matplotlib.patches import Rectangle
 import numpy as np
 
 
@@ -94,8 +95,13 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
             edges = data.k_vals_bins[i]
             if not any(np.array_equal(bounds, old) and np.array_equal(edges, old_edges)
                        for old, old_edges in shaded):
-                ax.stairs(bounds[:, 1], edges, baseline=bounds[:, 0], fill=True,
-                          color="0.85", alpha=.35, zorder=0, label="Prior" if not shaded else None)
+                for column, (lo, hi) in enumerate(bounds):
+                    ax.add_patch(Rectangle(
+                        (edges[column], lo), edges[column+1]-edges[column], hi-lo,
+                        facecolor="0.85", edgecolor="0.55", linewidth=.6,
+                        alpha=.35, zorder=0,
+                        label="Prior support" if not shaded and column == 0 else None,
+                    ))
                 shaded.append((bounds, edges))
     ax.set(xscale="log", yscale="log", xlabel=r"$k$ [Mpc$^{-1}$]",
            ylabel=r"$\Delta^2(k)$ [mK$^2$]")
