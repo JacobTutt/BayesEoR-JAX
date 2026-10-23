@@ -46,6 +46,21 @@ def test_statistics_and_units(tmp_path):
     np.testing.assert_allclose(dmps_to_ps(data.expected_spectra[0], data.k_vals[0]), 10.)
 
 
+@pytest.mark.parametrize("model, expected", [("eor", "#2468a2"), ("eor+fg", "#b43c43")])
+@pytest.mark.parametrize("override", [None, "#228833"])
+def test_model_colors_match_in_both_panels(tmp_path, model, expected, override):
+    from matplotlib.colors import to_rgba
+
+    data = DataContainer([write_run(tmp_path)])
+    data.args[0]["model"] = model
+    colors = None if override is None else [override]
+    _, (power, posteriors) = plot_power_spectra_and_posteriors(data, colors=colors)
+    expected = to_rgba(override or expected)
+    assert to_rgba(power.containers[0].lines[0].get_color()) == expected
+    for ax in posteriors:
+        assert to_rgba(ax.patches[0].get_edgecolor()) == expected
+
+
 def test_zero_weight_points_do_not_change_quantiles(tmp_path):
     path = write_run(tmp_path, k=(.1,), chain=[[0., 1., -5.], [.25, 1., 0.], [.75, 1., 1.]])
     data = DataContainer([path])
@@ -201,6 +216,10 @@ def test_pipeline_writes_summaries_and_titled_figures(tmp_path, monkeypatch):
     titles = []
     original_savefig = Figure.savefig
     def capture_savefig(fig, *args, **kwargs):
+        power = fig.axes[0]
+        assert len(power.containers) == 2
+        assert power.containers[1].lines[0].get_ydata()[0] == pytest.approx(
+            np.interp(.95, [.2, .5, 1.], [1., np.sqrt(10.), 10.]))
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         title_box = fig._suptitle.get_window_extent(renderer)
@@ -210,7 +229,8 @@ def test_pipeline_writes_summaries_and_titled_figures(tmp_path, monkeypatch):
     monkeypatch.setattr(Figure, "savefig", capture_savefig)
     sampler = write_run(tmp_path / "nested_sampling")
     before = (sampler / 'data-.txt').read_bytes()
-    summary = save_analysis(sampler, output_dir=tmp_path / "plots", label="21-cm only")
+    summary = save_analysis(sampler, output_dir=tmp_path / "plots", label="21-cm only",
+                            uplim_inds=[True, False])
     np.testing.assert_allclose(summary["medians"], np.sqrt(10.))
     assert (tmp_path / "plots" / "posterior_summary.json").exists()
     assert [p.name for p in (tmp_path / "plots").glob("*.png")] == ["power_spectrum_and_posteriors.png"]
@@ -296,7 +316,7 @@ def test_publication_layout_and_peak_normalisation(tmp_path):
 def test_packaged_style_preserves_run_colours_and_markers(tmp_path):
     data = DataContainer([write_run(tmp_path / str(i)) for i in range(6)])
     fig, (power, axes) = plot_power_spectra_and_posteriors(data)
-    colours = ["#153b5c", "#2b83ba", "#6f5596", "#d6604d", "#8b1e2d", "#153b5c"]
+    colours = ["#2468a2", "#b43c43", "#6f5596", "#2b83ba", "#8b1e2d", "#2468a2"]
     markers = ["s", "^", "D", "v", "P", "s"]
     for container, colour, marker in zip(power.containers, colours, markers):
         line = container.lines[0]

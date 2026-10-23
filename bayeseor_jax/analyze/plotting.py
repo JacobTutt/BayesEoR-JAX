@@ -43,7 +43,8 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     plot_priors : bool, optional
         Shade the prior support, requiring prior bounds and physical bin edges.
     colors : sequence of colors, optional
-        One Matplotlib color per run; defaults to the publication palette.
+        One Matplotlib color per run. Defaults to blue for 21-cm-only models
+        and red for joint 21-cm + foreground models.
     ax : matplotlib.axes.Axes, optional
         Existing axes; otherwise create a new figure.
 
@@ -59,6 +60,8 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     """
     if colors is not None and len(colors) != data.Ndirs:
         raise ValueError("colors must contain one entry per run")
+    if colors is None:
+        colors = _default_colors(data)
     if ax is None:
         _, ax = plt.subplots(figsize=(3.5, 2.8), layout="constrained")
     offsets = 10.0**np.linspace(-.025, .025, data.Ndirs) if data.Ndirs > 1 else [1.]
@@ -67,7 +70,7 @@ def plot_power_spectra(data, *, cred_interval=68, uplim_inds=None,
     cycle = list(plt.rcParams["axes.prop_cycle"])
     for i, k in enumerate(data.k_vals):
         properties = cycle[i % len(cycle)]
-        color = colors[i] if colors is not None else properties["color"]
+        color = colors[i]
         marker = properties["marker"]
         plotted_k = k * offsets[i]
         upper = np.zeros(k.size, dtype=bool)
@@ -132,7 +135,8 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
     plot_priors : bool, optional
         Shade each run's prior support from args.json.
     colors : sequence of colors, optional
-        One Matplotlib color per run.
+        One Matplotlib color per run. Defaults to blue for 21-cm-only models
+        and red for joint 21-cm + foreground models.
     axes : sequence of matplotlib.axes.Axes, optional
         One existing axis per k bin; otherwise create a vertical stack.
     normalisation : {"peak", "density"}, optional
@@ -153,6 +157,8 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
         raise ValueError("bins must be a positive integer")
     if colors is not None and len(colors) != data.Ndirs:
         raise ValueError("colors must contain one entry per run")
+    if colors is None:
+        colors = _default_colors(data)
     count = data.k_vals[0].size
     if axes is None:
         fig, axes = plt.subplots(count, 1, figsize=(3.5, max(1.5, count * .283)),
@@ -163,7 +169,6 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
         raise ValueError("Supply one axis per k bin, all in the same figure")
     priors = [_prior_bounds(data, i) for i in range(data.Ndirs)] if plot_priors else []
     all_edges = []
-    cycle = list(plt.rcParams["axes.prop_cycle"])
     for column, ax in enumerate(axes):
         # Shared edges make histogram heights comparable between different runs.
         support = np.concatenate([s[w > 0, column] for s, w in zip(data.samples, data.weights)])
@@ -173,7 +178,7 @@ def plot_posteriors(data, *, bins=31, plot_priors=False, colors=None, axes=None,
         all_edges.extend([edges[0], edges[-1]])
         shaded = []
         for i, samples in enumerate(data.samples):
-            color = colors[i] if colors is not None else cycle[i % len(cycle)]["color"]
+            color = colors[i]
             density, _ = np.histogram(samples[:, column], bins=edges, weights=data.weights[i], density=True)
             height = density / density.max() if normalisation == "peak" else density
             ax.stairs(height, 10.0**edges, color=color, linewidth=1.15, label=data.labels[i])
@@ -222,7 +227,8 @@ def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None
     plot_priors : bool, optional
         Shade the stored prior bounds in both panels.
     colors : sequence of colors, optional
-        One color per run, shared by both panels.
+        One color per run, shared by both panels. Defaults to blue for
+        21-cm-only models and red for joint 21-cm + foreground models.
     bins : int, optional
         Number of logarithmic histogram bins per marginal posterior.
     normalisation : {"peak", "density"}, optional
@@ -257,7 +263,7 @@ def plot_power_spectra_and_posteriors(data, *, cred_interval=68, uplim_inds=None
 
 @style.context(_STYLE_PATH)
 def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=None,
-                  expected_ps=None):
+                  expected_ps=None, uplim_inds=None):
     """Save weighted posterior summaries and the combined analysis PNG.
 
     Parameters
@@ -275,6 +281,9 @@ def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=Non
     expected_ps : float or array-like, optional
         Reference dimensional spectrum in mK² Mpc³, displayed without changing
         posterior constraints. Omit for observations without a known reference.
+    uplim_inds : sequence of bool, optional
+        True for bins displayed as 95% upper limits instead of central credible
+        intervals. The marginal posterior panels and summaries remain unchanged.
 
     Returns
     -------
@@ -297,10 +306,17 @@ def save_analysis(sampler_dir, *, output_dir, label="BayesEoR", metadata_dir=Non
         "upper_limits": data.uplims[0].tolist(),
     }
     (output_dir / "posterior_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    fig, _ = plot_power_spectra_and_posteriors(data, plot_priors=True)
+    fig, _ = plot_power_spectra_and_posteriors(data, plot_priors=True, uplim_inds=uplim_inds)
     try:
         fig.suptitle(f"21-cm power-spectrum inference\n{label}", fontsize=10, y=1.03, va="bottom")
         fig.savefig(output_dir / "power_spectrum_and_posteriors.png", dpi=300, bbox_inches="tight")
     finally:
         plt.close(fig)
     return summary
+
+
+def _default_colors(data):
+    """Select the style's blue/red entries from each run's saved model type."""
+    palette = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    return [palette[{"eor": 0, "eor+fg": 1}.get(args.get("model"), i) % len(palette)]
+            for i, args in enumerate(data.args)]

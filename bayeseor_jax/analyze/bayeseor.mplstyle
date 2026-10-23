@@ -14,4 +14,5 @@ xtick.top: False
 ytick.right: False
 savefig.dpi: 300
 # Hex colours omit the hash because it starts a comment in style files.
-axes.prop_cycle: cycler('color', ['153b5c', '2b83ba', '6f5596', 'd6604d', '8b1e2d']) + cycler('marker', ['s', '^', 'D', 'v', 'P'])
+# The first two colours identify 21-cm-only and 21-cm + foreground models.
+axes.prop_cycle: cycler('color', ['2468a2', 'b43c43', '6f5596', '2b83ba', '8b1e2d']) + cycler('marker', ['s', '^', 'D', 'v', 'P'])

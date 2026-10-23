@@ -94,6 +94,7 @@ def run_example(
         label=analysis_label,
         metadata_dir=out_dir,
         expected_ps=np.load(Path(__file__).parent / "data/injected_power_spectrum.npy", allow_pickle=False).item(),
+        uplim_inds=[True, False, False, False, False, False],
     )
     return setup_result, summary, analysis_summary
 
