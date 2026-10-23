@@ -1,19 +1,5 @@
 # API reference
 
-Most analyses only need a handful of functions:
-
-- [`run_setup`](setup.md#bayeseor_jax.setup.run_setup): build the operators and
-  likelihood from a configuration.
-- [`run_multinest`](inference.md#bayeseor_jax.inference.run_ns.run_multinest),
-  also available as `run_nestedsampling`: sample the power spectrum and evaluate
-  the evidence.
-- [`DataContainer`](analysis.md#bayeseor_jax.analyze.results.DataContainer) and the
-  [plotting functions](analysis.md#plotting): summarise and plot the posterior.
-- [`T_fg_svd_build_save`](construction.md#bayeseor_jax.model.construction.kl_reduction.T_fg_svd_build_save):
-  construct a KL reduced basis.
-
----
-
 ## Setup
 
 Parse a YAML or command-line configuration into a typed `RunConfig`, and turn it
