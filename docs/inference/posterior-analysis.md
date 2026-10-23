@@ -13,6 +13,13 @@ Setup and sampling write the following to the run's output directories.
 :   The sampler settings, dimensions, output paths and evidence, `logZ` and
     `logZerr`.
 
+    The reported `logZ` includes the automatically restored likelihood offset;
+    native MultiNest files retain centred values.
+
+`likelihood_offset.json`
+:   The fixed numerical offset used by the sampler. Required when resuming;
+    the analysis loader restores log likelihoods using the copy in `summary.json`.
+
 `data-*.txt`
 :   The standard MultiNest products. The weighted chain is usually `data-.txt`;
     a shorter file root may be used to stay within MultiNest's path-length limit.

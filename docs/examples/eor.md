@@ -132,7 +132,6 @@ power spectrum and compared directly with the spectrum that was injected.
         out_dir="outputs/laptop_eor_nside128/nested_sampling",
         random_key=config.random_key,
         n_live_scale_factor=config.n_live_scale_factor,
-        center_likelihood=True,   # numerical offset, restored in the evidence
     )
     ```
 

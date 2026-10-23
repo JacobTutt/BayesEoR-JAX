@@ -43,6 +43,12 @@ kept apart.
 `run_nestedsampling` runs MultiNest on a completed setup, or evaluates the
 foreground-only evidence directly when there is nothing to sample.
 
+For numerical stability, the sampler automatically centres the log likelihood
+using a fixed reference value. This leaves the posterior unchanged, and the
+offset is restored in the reported `logZ`. Use `summary.json` for evidence
+comparisons: native MultiNest files retain centred values. Keep
+`likelihood_offset.json` with the sampler checkpoints when resuming a run.
+
 === "Maths"
 
     With the coefficients marginalised, the remaining posterior and evidence are

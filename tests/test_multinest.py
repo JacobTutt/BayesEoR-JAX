@@ -114,10 +114,12 @@ def test_multinest_analysis_preserves_weights_and_log_power(tmp_path, file_root)
     np.testing.assert_allclose(result.log_likelihoods[0], -.5 * samples[:, 1])
 
 
-def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, monkeypatch):
+@pytest.mark.parametrize("offset", [0., 7e11])
+def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, monkeypatch, offset):
     from bayeseor_jax.inference.run_ns import run_multinest
+    import inspect
 
-    offset = 7e11
+    assert 'center_likelihood' not in inspect.signature(run_multinest).parameters
     def solve(**kwargs):
         assert kwargs['LogLikelihood'](np.array([1.])) == -.5
         assert 'center_likelihood' not in kwargs
@@ -126,7 +128,7 @@ def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, mo
     setup = SimpleNamespace(model='eor+fg', prior_class=Prior(np.array([[-2.,2.]])),
         likelihood_class=SimpleNamespace(intrinsic_noise_fitting=False,
                                          log_likelihood=lambda theta:offset-.5*np.sum(theta**2)))
-    summary = run_multinest(setup, tmp_path, center_likelihood=True, print_rate=0)
+    summary = run_multinest(setup, tmp_path, print_rate=0)
     assert summary['logZ'] == offset-2.
     assert summary['logZ_centered'] == -2.
     assert summary['log_likelihood_offset'] == offset
@@ -136,16 +138,17 @@ def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, mo
     data = DataContainer([tmp_path])
     np.testing.assert_array_equal(data.log_likelihoods[0], [offset-.5])
     (tmp_path/'data-resume.dat').touch()
-    with pytest.raises(ValueError, match='centring setting'):
-        run_multinest(setup, tmp_path, resume=True, center_likelihood=False)
-    resumed = run_multinest(setup, tmp_path, resume=True, center_likelihood=True, print_rate=0)
+    resumed = run_multinest(setup, tmp_path, resume=True, print_rate=0)
     assert resumed['log_likelihood_offset'] == offset
     def resumed_likelihood(theta):
         assert not np.all(theta == 0), 'A resumed run must not recompute its reference offset'
         return offset-.5*np.sum(theta**2)
     setup.likelihood_class.log_likelihood = resumed_likelihood
-    default_resume = run_multinest(setup, tmp_path, center_likelihood=True, print_rate=0)
+    default_resume = run_multinest(setup, tmp_path, print_rate=0)
     assert default_resume['log_likelihood_offset'] == offset
+    (tmp_path/'likelihood_offset.json').unlink()
+    with pytest.raises(FileNotFoundError, match='likelihood_offset.json'):
+        run_multinest(setup, tmp_path, resume=True, print_rate=0)
 
 
 def test_centred_sampler_rejects_nonfinite_reference(tmp_path, monkeypatch):
@@ -154,4 +157,4 @@ def test_centred_sampler_rejects_nonfinite_reference(tmp_path, monkeypatch):
     setup = SimpleNamespace(model='eor', prior_class=Prior(np.array([[-2.,2.]])),
         likelihood_class=SimpleNamespace(intrinsic_noise_fitting=False, log_likelihood=lambda theta:np.nan))
     with pytest.raises(ValueError, match='offset must be finite'):
-        run_multinest(setup, tmp_path, center_likelihood=True)
+        run_multinest(setup, tmp_path)

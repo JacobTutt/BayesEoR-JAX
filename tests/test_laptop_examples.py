@@ -136,7 +136,7 @@ def test_example_orchestrates_pipeline_and_preserves_saved_results(name, tmp_pat
                         extra_bayeseor_args=overrides)
     assert [name for name, _ in steps] == ['setup','sample','analysis']
     assert steps[0][1].nside == 128 and steps[0][1].footprint_nside == 64
-    assert steps[1][1]['center_likelihood'] is True
+    assert 'center_likelihood' not in steps[1][1]
     assert steps[2][1]['output_dir'] == Path(f"examples/{name}/plots").resolve()
     assert steps[2][1]["expected_ps"] == pytest.approx(88429.76350405652)
     assert steps[2][1].get("uplim_inds") == ([True] + [False]*5 if name == "eor_fgs" else None)

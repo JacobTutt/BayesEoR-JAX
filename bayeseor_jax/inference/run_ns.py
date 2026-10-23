@@ -40,7 +40,6 @@ def run_multinest(
     sampling_efficiency: float | None = None,
     max_iter: int | None = None,
     print_rate: int = 100,
-    center_likelihood: bool = False,
 ) -> dict[str, Any]:
     """
     Run MultiNest, or evaluate a parameter-free model analytically.
@@ -61,12 +60,12 @@ def run_multinest(
     leaves the remaining MultiNest options unset so the underlying
     ``pymultinest.solve`` defaults apply.
 
-    Set ``center_likelihood=True`` to subtract the log likelihood at the
-    prior midpoint before passing values to MultiNest. This avoids loss of
+    The log likelihood at the prior midpoint is automatically subtracted
+    before passing values to MultiNest. This avoids loss of
     precision in its evidence-error estimate for bright foregrounds. The
     offset is restored in the returned ``logZ`` and saved in summary.json;
-    native MultiNest files retain centred values. Resuming requires the same
-    centring setting and uses the recorded offset unchanged.
+    native MultiNest files retain centred values. Resuming requires the saved
+    likelihood_offset.json and uses its recorded offset unchanged.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -136,24 +135,18 @@ def run_multinest(
     is_resuming = bool(existing_resume_files) and resume is not False
     offset_path = out_dir / "likelihood_offset.json"
     if is_resuming:
-        offset_record = json.loads(offset_path.read_text()) if offset_path.exists() else {
-            "center_likelihood": False, "log_likelihood_offset": 0.0,
-        }
-        if bool(offset_record["center_likelihood"]) != bool(center_likelihood):
+        if not offset_path.exists():
             _cleanup_multinest_path(path_manager)
-            raise ValueError("Resume must use the original likelihood-centring setting")
+            raise FileNotFoundError("Cannot resume without likelihood_offset.json; restore the original offset record or use a fresh output directory")
+        offset_record = json.loads(offset_path.read_text())
         log_likelihood_offset = float(offset_record["log_likelihood_offset"])
     else:
-        log_likelihood_offset = (
-            float(np.asarray(likelihood_class.log_likelihood(theta_ref)))
-            if center_likelihood else 0.0
-        )
+        log_likelihood_offset = float(np.asarray(likelihood_class.log_likelihood(theta_ref)))
     if not np.isfinite(log_likelihood_offset):
         _cleanup_multinest_path(path_manager)
         raise ValueError("Likelihood-centring offset must be finite")
     if not is_resuming:
         offset_path.write_text(json.dumps({
-            "center_likelihood": bool(center_likelihood),
             "log_likelihood_offset": log_likelihood_offset,
         }, indent=2) + "\n")
     avg_eval_seconds = None
@@ -228,7 +221,6 @@ def run_multinest(
         "n_dim": n_dim,
         "n_live_points": n_live_points,
         "log_likelihood_offset": log_likelihood_offset,
-        "center_likelihood": bool(center_likelihood),
         "evidence_normalisation": "fixed data/noise constants omitted",
         "outputfiles_basename": outputfiles_basename,
         "logical_outputfiles_basename": path_manager.logical_outputfiles_basename,

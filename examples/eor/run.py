@@ -78,7 +78,6 @@ def run_example(
         random_key=args.random_key,
         n_live_scale_factor=args.n_live_scale_factor,
         resume=args.resume,
-        center_likelihood=True,
     )
 
     print("Run summary:")
