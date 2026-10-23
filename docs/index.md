@@ -1,8 +1,8 @@
 ---
-title: BayesEoR-JAX
+title: BayesEoR
 ---
 
-<h1 class="bayeseor-wordmark" id="bayeseor-jax" aria-label="BayesEoR-JAX">
+<h1 class="bayeseor-wordmark" id="bayeseor-jax" aria-label="BayesEoR">
   <img class="brand-light" src="assets/branding/wordmark-light.svg" alt="" width="695" height="120">
   <img class="brand-dark" src="assets/branding/wordmark-dark.svg" alt="" width="695" height="120">
 </h1>
