@@ -41,37 +41,9 @@ samples. Longer baselines resolve finer structure, while baselines with the
 same separation and orientation are redundant under an identical antenna
 response.
 
-## The sky-to-visibility measurement
-
-For a calibrated, unphased observation and a scalar primary-beam response,
-the predicted visibility is
-
-$$
-m_{ij}(\nu,t)
-=\int_{\Omega_{\rm vis}(t)}
-P(\hat{\boldsymbol s},\nu)\,
-I(\hat{\boldsymbol s},\nu,t)\,
-\exp\!\left[-2\pi i\boldsymbol u_{ij}(\nu)
-\cdot\hat{\boldsymbol s}\right]\,\mathrm d\Omega.
-$$
-
-Here $I=I_{21}+I_{\rm FG}$ is the sky brightness, $P$ is the primary-beam power
-response, and $\hat{\boldsymbol s}=(l,m,n)$ is a direction in the instrument's
-topocentric frame. The full three-dimensional phase retains the wide-field
-geometry, including emission near the horizon. Earth rotation changes the
-directions of celestial sources in this frame during an observation.
-
-Stacking the measurements across baselines, frequencies and times gives
-
-$$
-\boldsymbol d=\boldsymbol m_{21}+\boldsymbol m_{\rm FG}+\boldsymbol n,
-$$
-
-where $\boldsymbol n$ denotes thermal noise. The [Model](model.md) section
-defines the two sky contributions, and [Inference](joint-inference.md)
-describes how their uncertainties enter power-spectrum recovery.
-
-Before constructing these models, specify the [instrument and observation](instrument.md):
+To describe an observation, specify the [instrument and observation](instrument.md):
 baseline geometry, observing frequencies and times, telescope location and
 primary beam. Then follow [input preparation](data.md) to supply the measured
-or simulated visibilities in the required units and ordering.
+or simulated visibilities in the required units and ordering. The
+[Model introduction](model.md#the-interferometric-measurement-equation)
+sets out how sky brightness is mapped into these measurements.

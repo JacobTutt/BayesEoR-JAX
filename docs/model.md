@@ -3,6 +3,31 @@
 [![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow.png#only-light)](assets/diagrams/joint-model-workflow.png)
 [![Combined forward model: the EoR and foreground components enter their respective Fourier and image spaces, then propagate through the shared beam and fringe response into modelled data.](assets/diagrams/joint-model-workflow-dark.png#only-dark)](assets/diagrams/joint-model-workflow-dark.png)
 
+## The interferometric measurement equation
+
+The forward model connects the sky brightness to the
+[measured visibilities](visibilities.md). For a calibrated, unphased observation
+and a scalar primary-beam response, the predicted visibility is
+
+$$
+m_{ij}(\nu,t)
+=\int_{\Omega_{\rm vis}(t)}
+P(\hat{\boldsymbol s},\nu)\,
+I(\hat{\boldsymbol s},\nu,t)\,
+\exp\!\left[-2\pi i\boldsymbol u_{ij}(\nu)
+\cdot\hat{\boldsymbol s}\right]\,\mathrm d\Omega.
+$$
+
+Here $I=I_{21}+I_{\rm FG}$ is the sky brightness, $P$ is the primary-beam power
+response, and $\hat{\boldsymbol s}=(l,m,n)$ is a direction in the instrument's
+topocentric frame. The full three-dimensional phase retains the wide-field
+geometry, including emission near the horizon. Earth rotation changes the
+directions of celestial sources in this frame during an observation.
+The fringe sign depends on the baseline orientation convention; the numerical
+operator convention is specified [below](#shared-sky-to-visibility-response).
+
+## Cosmological and foreground contributions
+
 The cosmological and foreground models begin in different coefficient spaces,
 but share the same beam-weighted sky-to-visibility mapping:
 
