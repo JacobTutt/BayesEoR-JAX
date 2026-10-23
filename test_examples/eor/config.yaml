@@ -2,8 +2,8 @@
 model: eor
 data_path: test_examples/eor/visibilities.npy
 inst_model: test_examples/instrument
-array_save_directory: outputs/laptop_eor/matrices
-output_dir: outputs/laptop_eor
+array_save_directory: outputs/laptop_eor_nside128/matrices
+output_dir: outputs/laptop_eor_nside128
 
 # All 30 signed baseline groups; central 15 integrations and channels.
 n_freq: 15
@@ -18,7 +18,9 @@ diam: 14.2
 
 # Infer transverse Fourier sampling; share one image grid for both components.
 fov_eor: 10.0
-nside: 64
+nside: 128
+# Preserve the simulation's time-union boundary while refining both model grids.
+footprint_nside: 64
 sigma: 0.006464
 noise_seed: 742123
 random_key: 42

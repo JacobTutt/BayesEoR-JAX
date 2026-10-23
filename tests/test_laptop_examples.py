@@ -27,7 +27,7 @@ def test_shipped_laptop_data_match_config(name):
     np.testing.assert_array_equal(vis[..., 15:], vis[..., :15].conj())
     np.testing.assert_array_equal(uvw[:, 15:], -uvw[:, :15])
     np.testing.assert_array_equal(redundancy, np.ones((15, 30)))
-    assert config.nside == 64
+    assert config.nside == 128
     np.testing.assert_array_equal(uvw[0, :15], BASELINES)
     assert np.max(np.linalg.norm(uvw, axis=-1)) < 40
     assert required_healpix_nside(np.max(np.linalg.norm(uvw, axis=-1)), FREQUENCIES.max()) == 64
@@ -36,7 +36,7 @@ def test_shipped_laptop_data_match_config(name):
     np.testing.assert_allclose(metadata["jd"], TIMES, rtol=0, atol=1e-9)
     assert config.fov_eor == metadata["field_diameter_deg"] == 10
     assert len(config.priors) == 6
-    assert metadata["mask_nside"] == config.nside
+    assert metadata["mask_nside"] == config.footprint_nside == 64
 
 
 @pytest.mark.parametrize("fine_nside", [128, 256])
@@ -60,6 +60,15 @@ def test_fine_sky_inherits_exactly_the_selected_coarse_pixels(fine_nside):
                                    d_t=21.511369943618774)
     assert len(coarse_indices) == geometry.n_pix_fg
     np.testing.assert_allclose(coarse_lmn.transpose(0, 2, 1), geometry.lmn_fg, atol=1e-12)
+    refined = build_image_geometry(fov_eor=10, fov_fg=10, nside=fine_nside,
+                                  footprint_nside=64, telescope_latlonalt=HERA_LOCATION,
+                                  jd_center=TIMES[len(TIMES)//2], n_t=len(TIMES),
+                                  d_t=21.511369943618774)
+    _, selected_lmn = select_directions(fine_sky, mask)
+    assert refined.n_pix_fg == len(selected)
+    np.testing.assert_allclose(refined.lmn_fg, selected_lmn.transpose(0, 2, 1), atol=1e-12)
+    assert np.all(refined.eor_fg_shared_axis)
+    assert refined.pixel_area_sr == pytest.approx(4*np.pi/(12*fine_nside**2))
 
     # Point sources use the same membership rule, with no separate circular cut.
     points = fine_sky[[selected[0], np.flatnonzero(~mask[parent])[0]]]
@@ -90,3 +99,45 @@ def test_injected_spectrum_uses_simulation_resolution():
     assert power == pytest.approx(8.84e4, rel=.005)
     metadata["signal_nside"] *= 2
     assert injected_power_spectrum(metadata) == pytest.approx(power/4)
+
+
+def test_example_orchestrates_pipeline_and_preserves_saved_results(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import bayeseor_jax
+    from test_examples.eor_fgs import prepare_kl as preparation
+    from test_examples import run_analysis_example as example
+
+    steps = []
+    data = np.array([1+2j, 1-2j])
+    noise = np.array([.1+.2j, .1-.2j])
+    def prepare(config):
+        steps.append(('kl', config))
+    def setup(config):
+        steps.append(('setup', config))
+        return SimpleNamespace(vis_dict={'vis_noisy':data+noise, 'noise':noise})
+    def sample(**kwargs):
+        steps.append(('sample', kwargs))
+        kwargs['out_dir'].mkdir()
+        (kwargs['out_dir']/'summary.json').write_text('{"sampler":"multinest"}')
+        return {'sampler':'multinest'}
+    monkeypatch.setattr(preparation, 'prepare_kl', prepare)
+    monkeypatch.setattr(bayeseor_jax, 'run_setup', setup)
+    monkeypatch.setattr(bayeseor_jax, 'run_nestedsampling', sample)
+    monkeypatch.setattr(example, 'run_output_analysis', lambda **kwargs:steps.append(('analysis', kwargs)))
+    overrides = ['--output-dir', str(tmp_path), '--array-save-directory', str(tmp_path/'matrices'),
+                 '--foreground-kl-path', str(tmp_path/'kl/T_fg_reduced.npy')]
+    example.run_example('test_examples/eor_fgs/config.yaml', do_sampling=True,
+                        prepare_foreground=True, extra_bayeseor_args=overrides)
+    assert [name for name, _ in steps] == ['kl','setup','sample','analysis']
+    assert steps[0][1] is steps[1][1]
+    assert steps[0][1].nside == 128 and steps[0][1].footprint_nside == 64
+    assert steps[2][1]['center_likelihood'] is True
+    np.testing.assert_array_equal(np.load(tmp_path/'data/visibilities_noisy.npy'), data+noise)
+    np.testing.assert_array_equal(np.load(tmp_path/'data/noise.npy'), noise)
+    with pytest.raises(FileExistsError, match='Sampler output already exists'):
+        example.run_example('test_examples/eor_fgs/config.yaml', do_sampling=True,
+                            extra_bayeseor_args=overrides)
+    with pytest.raises(ValueError, match='configuration changed'):
+        example.run_example('test_examples/eor_fgs/config.yaml',
+                            extra_bayeseor_args=overrides+['--nside','64'])
+    assert len(steps) == 4

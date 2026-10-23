@@ -167,8 +167,10 @@ def run_multinest(
         np.asarray(prior_class.lower, dtype=np.float64)
         + np.asarray(prior_class.upper, dtype=np.float64)
     )
+    # PyMultiNest resumes by default when the caller leaves resume unset.
+    is_resuming = bool(existing_resume_files) and resume is not False
     offset_path = out_dir / "likelihood_offset.json"
-    if resume:
+    if is_resuming:
         offset_record = json.loads(offset_path.read_text()) if offset_path.exists() else {
             "center_likelihood": False, "log_likelihood_offset": 0.0,
         }
@@ -184,7 +186,7 @@ def run_multinest(
     if not np.isfinite(log_likelihood_offset):
         _cleanup_multinest_path(path_manager)
         raise ValueError("Likelihood-centring offset must be finite")
-    if not resume:
+    if not is_resuming:
         offset_path.write_text(json.dumps({
             "center_likelihood": bool(center_likelihood),
             "log_likelihood_offset": log_likelihood_offset,

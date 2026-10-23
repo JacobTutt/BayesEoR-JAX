@@ -2,10 +2,10 @@
 model: eor+fg
 data_path: test_examples/eor_fgs/visibilities.npy
 inst_model: test_examples/instrument
-array_save_directory: outputs/laptop_eor_fgs/matrices
-output_dir: outputs/laptop_eor_fgs
-# Run prepare_kl.py first; its latent coefficients have unit prior variance.
-foreground_kl_path: outputs/laptop_eor_fgs/kl/T_fg_reduced.npy
+array_save_directory: outputs/laptop_eor_fgs_nside128/matrices
+output_dir: outputs/laptop_eor_fgs_nside128
+# Use --prepare-kl to construct this basis; latent coefficients have unit variance.
+foreground_kl_path: outputs/laptop_eor_fgs_nside128/kl/T_fg_reduced.npy
 fov_fg: 10.0
 beta_fg: [2.63, 2.82]
 
@@ -22,7 +22,9 @@ diam: 14.2
 
 # Infer transverse Fourier sampling; share one image grid for both components.
 fov_eor: 10.0
-nside: 64
+nside: 128
+# Preserve the simulation's time-union boundary while refining both model grids.
+footprint_nside: 64
 sigma: 0.006464
 noise_seed: 742123
 random_key: 42

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,8 @@ def _json_ready(value):
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
+    if isinstance(value, Path):
+        return str(value)
     return value
 
 
@@ -97,12 +100,17 @@ def run_example(
     extra_bayeseor_args: list[str] | None = None,
     nested_sampling_dirname: str = "nested_sampling",
     analysis_label: str = "BayesEoR-JAX",
+    prepare_foreground: bool = False,
+    expected_ps: float | None = None,
 ):
     """
     Run setup (and optionally nested sampling) from a YAML config.
 
     Additional BayesEoR parser arguments can be supplied through
     `extra_bayeseor_args`, for example output and matrix-cache directories.
+    Set prepare_foreground to construct the KL basis from this same configuration
+    before setup. Setup loads noiseless data and adds the configured seeded noise.
+    Every run saves the actual noisy input and noise separately for reproducibility.
     """
     from bayeseor_jax import run_setup, run_nestedsampling
 
@@ -114,23 +122,45 @@ def run_example(
         args_list.extend(extra_bayeseor_args)
     args = parser.parse_args(args_list)
 
+    out_dir = Path(args.output_dir)
+    ns_out_dir = out_dir / nested_sampling_dirname
+    if args.run and ns_out_dir.exists() and any(ns_out_dir.iterdir()) and not args.resume:
+        raise FileExistsError(f"Sampler output already exists: {ns_out_dir}; use --resume or a fresh output directory")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Refuse stale matrix/KL caches when a user changes the example settings.
+    manifest = _json_ready(asdict(args))
+    for key in ("run", "resume", "quiet"):
+        manifest.pop(key, None)
+    manifest_path = out_dir / "run_config.json"
+    if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
+        raise ValueError("Example configuration changed; choose fresh output, matrix and KL paths")
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    if prepare_foreground and not args.resume:
+        if __package__:
+            from .eor_fgs.prepare_kl import prepare_kl
+        else:
+            from eor_fgs.prepare_kl import prepare_kl
+        prepare_kl(args)
+
     setup_result = run_setup(args)
+    data_dir = out_dir / "data"
+    data_dir.mkdir(exist_ok=True)
+    np.save(data_dir / "visibilities_noisy.npy", np.asarray(setup_result.vis_dict["vis_noisy"]))
+    np.save(data_dir / "noise.npy", np.asarray(setup_result.vis_dict["noise"]))
 
     if not args.run:
         print("Setup complete. Sampling disabled.")
         return setup_result
 
-    out_dir = Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     # run_setup already saved the resolved geometry; retain its inferred grid sizes.
 
-    ns_out_dir = out_dir / nested_sampling_dirname
     summary = run_nestedsampling(
         setup_result=setup_result,
         out_dir=ns_out_dir,
         random_key=args.random_key,
         n_live_scale_factor=args.n_live_scale_factor,
         resume=args.resume,
+        center_likelihood=True,
     )
 
     print("Run summary:")
@@ -145,6 +175,7 @@ def run_example(
         output_dir=out_dir,
         label=analysis_label,
         metadata_dir=out_dir,
+        expected_ps=expected_ps,
     )
     return setup_result, summary, analysis_summary
 
@@ -169,6 +200,8 @@ def main() -> None:
         action="store_true",
         help="Enable nested sampling (default is setup-only).",
     )
+    parser.add_argument("--prepare-kl", action="store_true", help="Build the configured foreground KL basis before setup.")
+    parser.add_argument("--expected-ps", type=float, help="Optional injected flat P(k), in mK^2 Mpc^3, for reference curves.")
     parser.add_argument(
         "--nested-sampling-dirname",
         default="nested_sampling",
@@ -186,6 +219,8 @@ def main() -> None:
         extra_bayeseor_args=extra_bayeseor_args,
         nested_sampling_dirname=args.nested_sampling_dirname,
         analysis_label=args.analysis_label,
+        prepare_foreground=args.prepare_kl,
+        expected_ps=args.expected_ps,
     )
 
 

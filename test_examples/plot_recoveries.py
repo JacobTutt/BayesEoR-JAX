@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter
 import numpy as np
 
-from bayeseor_jax import DataContainer
+from bayeseor_jax import BayesEoRParser, DataContainer
 from bayeseor_jax.analyze import plot_power_spectra_and_posteriors
 from bayeseor_jax.model.cosmology.transforms import Cosmology
 
@@ -57,7 +57,9 @@ def export_recoveries(output):
     """
     metadata = json.loads(Path("test_examples/instrument/simulation.json").read_text())
     power = injected_power_spectrum(metadata)
-    roots = [Path("outputs/laptop_eor"), Path("outputs/laptop_eor_fgs")]
+    configs = [BayesEoRParser().parse_args(["--config", f"test_examples/{name}/config.yaml"])
+               for name in ("eor", "eor_fgs")]
+    roots = [Path(config.output_dir) for config in configs]
     labels = ["21-cm only", "21-cm + foregrounds"]
     summaries = [json.loads((root/"nested_sampling/summary.json").read_text()) for root in roots]
     output.mkdir(parents=True, exist_ok=True)
@@ -97,7 +99,7 @@ def export_recoveries(output):
     (output/"README.txt").write_text(
         f"Injected dimensional power: {power:.8g} mK^2 Mpc^3.\n"
         "Figures use the completed 15-time, 15-channel, 30-signed-baseline runs.\n"
-        "Both model fields are 10 degrees, with Nside=64 inference grids.\n"
+        f"Shared model-grid Nside values: {[config.nside for config in configs]}.\n"
         f"Simulation footprint: {metadata.get('mask_definition', 'Independent angular selection at each resolution')}.\n"
         "Plot generation did not modify samples or weights, or rerun inference.\n"
         f"Reported evidence uncertainties: {[summary.get('logZerr') for summary in summaries]}.\n"

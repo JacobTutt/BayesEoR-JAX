@@ -30,12 +30,12 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 cd "${REPO_DIR}"
 
-python test_examples/eor_fgs/prepare_kl.py
-
 python test_examples/run_analysis_example.py \
   --config test_examples/eor_fgs/config.yaml \
   --sample \
+  --prepare-kl \
   --nested-sampling-dirname ns \
   --analysis-label "EoR + foregrounds" \
   --array-save-directory "${RUN_DIR}/m" \
-  --output-dir "${RUN_DIR}/o"
+  --output-dir "${RUN_DIR}/o" \
+  --foreground-kl-path "${RUN_DIR}/kl/T_fg_reduced.npy"

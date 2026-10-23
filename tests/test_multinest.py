@@ -140,6 +140,12 @@ def test_centred_sampler_restores_evidence_and_records_chain_offset(tmp_path, mo
         run_multinest(setup, tmp_path, resume=True, center_likelihood=False)
     resumed = run_multinest(setup, tmp_path, resume=True, center_likelihood=True, print_rate=0)
     assert resumed['log_likelihood_offset'] == offset
+    def resumed_likelihood(theta):
+        assert not np.all(theta == 0), 'A resumed run must not recompute its reference offset'
+        return offset-.5*np.sum(theta**2)
+    setup.likelihood_class.log_likelihood = resumed_likelihood
+    default_resume = run_multinest(setup, tmp_path, center_likelihood=True, print_rate=0)
+    assert default_resume['log_likelihood_offset'] == offset
 
 
 def test_centred_sampler_rejects_nonfinite_reference(tmp_path, monkeypatch):
