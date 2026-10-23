@@ -1,50 +1,32 @@
-# data_path can point to either a pyuvdata-compatible file (recommended) or
-# a preprocessed numpy-compatible file generated via `bayeseor.setup.run_setup`
-data_path: test_examples/eor_fgs/eor_and_fgs.uvh5
-
-# EoR model params
-# Number of pixels along the u-axis of the EoR model uv-plane
-n_u_eor: 15
-# Omitted n_u_eor and n_v_eor are inferred independently from the observation.
-# n_v_eor: 15
-# Circular FoV (degrees) for the EoR model image domain
-fov_eor: 12.9080728652
-# Shared image-grid resolution; omit to infer it from the selected baselines/frequencies.
-nside: 128
-
-# Frequency-axis params (required by the new parser)
-n_freq: 38
-f0_mhz: 158.304048743
-df_mhz: 0.23761898685801028
-
-# Foreground model params
-# Circular field of view of the spherical image-domain model.
-# fov_fg: 180.0
-# Power-law brightness-temperature spectral indices.
+# Run from the repository root. All input rows are already selected.
+model: eor+fg
+data_path: test_examples/eor_fgs/visibilities.npy
+inst_model: test_examples/instrument
+array_save_directory: outputs/laptop_eor_fgs/matrices
+output_dir: outputs/laptop_eor_fgs
+# Run prepare_kl.py first; its latent coefficients have unit prior variance.
+foreground_kl_path: outputs/laptop_eor_fgs/kl/T_fg_reduced.npy
+fov_fg: 10.0
 beta_fg: [2.63, 2.82]
 
-# Noise model params
-# The input data are noise free, so we need to simulate and add noise to the
-# data vector.  sigma sets the standard deviation of the mean-zero Gaussian
-# distribution from which the noise is drawn.  The amplitude has been chosen
-# such that, in the visibility domain, the signal-to-noise ratio of the
-# EoR-only visibility component to the noise component is 0.5.
-sigma: 0.00615864342588761
-
-# Instrument model params
-# Telescope latitude [degrees], longitude [degrees], and altitude [meters]
+# All 30 signed baseline groups; central 15 integrations and channels.
+n_freq: 15
+f0_mhz: 158.3984375
+df_mhz: 0.09765625
+n_t: 15
+d_t: 21.511369943618774
+jd_center: 2459999.097166265
 telescope_latlonalt: [-30.72152777777791, 21.428305555555557, 1073.0000000093132]
-# Beam type str as one of: uniform, gaussian, airy, gausscosine, or taperairy
-beam_type: gaussian
-# Full width at half maximum of the Gaussian beam
-fwhm_deg: 9.306821090681533
+beam_type: airy
+diam: 14.2
 
-# Prior params
-# Prior [min, max] for each k bin in logarithmic units.  These priors have
-# been chosen to be the true dimensionless power spectrum of the EoR-only
-# visibilities plus or minus two orders of magnitude.
-priors: [[-2.0, 2.0], [-1.2, 2.8], [-0.7, 3.3], [0.7, 2.7], [1.1, 3.1],
-         [1.5, 3.5], [2.0, 4.0], [2.4, 4.4], [2.7, 4.7]]
-# Optional: mask of bins using linear-uniform priors (1=True, 0=False).
-# If omitted, all bins use log-space sampler coordinates.
-# uniform_priors: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+# Infer transverse Fourier sampling; share one image grid for both components.
+fov_eor: 10.0
+nside: 64
+sigma: 0.006464
+noise_seed: 742123
+random_key: 42
+
+# Broad log10(Delta^2 / mK^2) priors; small demonstration sampling budget.
+priors: [[-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6], [-1, 6]]
+n_live_scale_factor: 10

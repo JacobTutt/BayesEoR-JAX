@@ -20,6 +20,7 @@ env/
 /build/
 /dist/
 /site/
+/outputs/
 .eggs/
 
 # editor cruft

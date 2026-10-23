@@ -30,6 +30,8 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 cd "${REPO_DIR}"
 
+python test_examples/eor_fgs/prepare_kl.py
+
 python test_examples/run_analysis_example.py \
   --config test_examples/eor_fgs/config.yaml \
   --sample \

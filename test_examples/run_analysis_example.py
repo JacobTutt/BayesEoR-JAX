@@ -12,8 +12,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from astropy.utils import iers
 
-from bayeseor_jax import BayesEoRParser, DataContainer, write_log_files
+# The historical example observation needs no online Earth-orientation refresh.
+iers.conf.auto_download = False
+
+from bayeseor_jax import BayesEoRParser, DataContainer
 from bayeseor_jax.analyze import (
     plot_power_spectra, plot_posteriors, plot_power_spectra_and_posteriors,
 )
@@ -113,7 +117,7 @@ def run_example(
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_log_files(args, out_dir=out_dir)
+    # run_setup already saved the resolved geometry; retain its inferred grid sizes.
 
     ns_out_dir = out_dir / nested_sampling_dirname
     summary = run_nestedsampling(
