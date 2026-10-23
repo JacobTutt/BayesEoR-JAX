@@ -66,3 +66,24 @@ def test_both_fields_include_pixels_from_every_integration():
         np.testing.assert_array_equal(pixels, np.unique(np.concatenate(snapshots)))
         assert len(pixels) > len(snapshots[1])
     np.testing.assert_array_equal(np.asarray(foreground)[np.asarray(shared)], cosmological)
+
+
+@pytest.mark.parametrize("nside,footprint", [(8,16),(8,3),(3,2),(8,0),(8,2.5)])
+def test_invalid_footprint_resolution(nside, footprint):
+    with pytest.raises(ValueError, match="resolution|footprint_nside"):
+        _select_image_pixels([(0.,-30.)], fov_eor=60, fov_fg=120,
+                             nside=nside, footprint_nside=footprint)
+
+
+def test_refined_footprints_preserve_distinct_component_support():
+    import jax_healpy as hp
+
+    centers = [(0.,-30.), (10.,-30.)]
+    coarse = _select_image_pixels(centers, fov_eor=60, fov_fg=120, nside=4)
+    fine = _select_image_pixels(centers, fov_eor=60, fov_fg=120, nside=8, footprint_nside=4)
+    for old, new in zip(coarse[:2], fine[:2]):
+        theta, phi = hp.pix2ang(8, new)
+        parents = np.asarray(hp.ang2pix(4,theta,phi))
+        np.testing.assert_array_equal(np.unique(parents), old)
+        np.testing.assert_array_equal(np.unique(parents, return_counts=True)[1], 4)
+    np.testing.assert_array_equal(np.asarray(fine[1])[np.asarray(fine[2])], fine[0])

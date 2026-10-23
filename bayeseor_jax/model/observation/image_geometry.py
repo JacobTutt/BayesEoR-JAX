@@ -292,6 +292,7 @@ def _select_image_pixels(
     fov_eor: float,
     fov_fg: float,
     nside: int,
+    footprint_nside: int | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Select sky pixels entering either model field during the observation.
 
@@ -307,6 +308,9 @@ def _select_image_pixels(
         uses fov_eor.
     nside : int
         HEALPix resolution of the equal-area celestial pixel grid.
+    footprint_nside : int or None, optional
+        Select the time-union boundary on this coarser HEALPix grid and include
+        all its children at nside. None selects directly on the model grid.
 
     Returns
     -------
@@ -326,11 +330,20 @@ def _select_image_pixels(
     response construction assumes the foreground selection contains the
     cosmological selection.
     """
+    selection_nside = nside if footprint_nside is None else footprint_nside
+    if footprint_nside is not None:
+        for value in (selection_nside, nside):
+            if (not isinstance(value, (int, np.integer)) or value < 1
+                    or value & (value - 1) or value >= 2**30):
+                raise ValueError("Footprint refinement requires power-of-two HEALPix resolutions")
+        if selection_nside > nside:
+            raise ValueError("footprint_nside must not exceed the model nside")
+
     # Convert full field diameters into selection radii for each component.
     pix_indices_eor_np = _query_disc_union(
         field_centers,
         float(np.deg2rad(fov_eor / 2)),
-        nside=nside,
+        nside=selection_nside,
     )
     # Reuse an identical selection instead of querying the same field twice.
     if fov_fg == fov_eor:
@@ -339,8 +352,17 @@ def _select_image_pixels(
         pix_indices_fg_np = _query_disc_union(
             field_centers,
             float(np.deg2rad(fov_fg / 2)),
-            nside=nside,
+            nside=selection_nside,
         )
+    if selection_nside != nside:
+        # NESTED pixel children preserve the full parent footprint, including edges.
+        children = (nside // selection_nside)**2
+        def refine(pixels):
+            parents = jhp.ring2nest(selection_nside, jnp.asarray(pixels))
+            nested = (parents[:, None]*children + jnp.arange(children)).ravel()
+            return np.sort(np.asarray(jhp.nest2ring(nside, nested)))
+        pix_indices_eor_np = refine(pix_indices_eor_np)
+        pix_indices_fg_np = refine(pix_indices_fg_np)
     # The membership mask selects cosmological columns from the wider sky response.
     pix_indices_eor = jnp.asarray(pix_indices_eor_np, dtype=jnp.int64)
     pix_indices_fg = jnp.asarray(pix_indices_fg_np, dtype=jnp.int64)
@@ -483,6 +505,7 @@ def build_image_geometry(
     fov_eor: float,
     fov_fg: float | None = None,
     nside: int = 128,
+    footprint_nside: int | None = None,
     telescope_latlonalt: tuple[float, float, float] = HERA_LOCATION,
     jd_center: float = 2461040.5,
     n_t: int = 1,
@@ -498,6 +521,13 @@ def build_image_geometry(
         must be contained in the foreground field for the shared response.
     nside : int
         HEALPix resolution; all selected pixels have area ``4*pi/(12*nside**2)``.
+    footprint_nside : int or None, optional
+        Resolution used only to select each field's time-union boundary.
+        Include every child of the selected pixels at the shared model nside.
+        Both resolutions must be powers of two, with footprint_nside <= nside.
+        None uses the model grid directly. This keeps sky coverage fixed when
+        refining a simulation or model, without introducing separate component
+        resolutions.
     telescope_latlonalt : tuple of float
         Geodetic latitude and longitude in degrees, followed by altitude in metres.
     jd_center : float
@@ -541,6 +571,7 @@ def build_image_geometry(
             fov_eor=fov_eor,
             fov_fg=fov_fg,
             nside=nside,
+            footprint_nside=footprint_nside,
         )
     )
     # Keep one celestial pixel set and evaluate its moving instrumental coordinates.

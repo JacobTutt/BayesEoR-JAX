@@ -126,6 +126,7 @@ class BayesEoRParser(ArgumentParser):
         self.add_argument("--d-t", type=float, help="Integration time in seconds.")
         self.add_argument("--jd-center", type=float, default=defaults.jd_center, help="Central Julian date for centered time-window selection (raw mode) or centered time-axis anchor (.npy mode).")
         self.add_argument("--nside", type=int, default=defaults.nside, help="Shared HEALPix resolution. Defaults to the baseline-driven Nyquist estimate; smaller explicit values produce a warning.")
+        self.add_argument("--footprint-nside", type=int, default=defaults.footprint_nside, help="Optional coarser grid on which the time-union sky boundary is selected; all its child pixels are modelled at nside.")
         self.add_argument("--fov-eor", type=float, default=defaults.fov_eor, help="Circular EoR FoV in degrees; unused for FG-only inference.")
         self.add_argument("--fov-fg", type=float, help="Circular FG FoV in degrees. Defaults to fov_eor.")
         self.add_argument("--telescope-latlonalt", type=list[float], required=True, help="Telescope location [lat_deg, lon_deg, alt_m].")
@@ -249,6 +250,10 @@ class RunConfig(ModelConfig):
         (latitude/longitude in degrees, altitude in metres). If nside is None,
         setup estimates it from the longest selected baseline and highest
         selected frequency, using the same resolution for both components.
+    footprint_nside : int or None, optional
+        Select the time-union field boundaries on a coarser grid, then model
+        all selected pixels' children at nside. None selects on the model
+        grid. This controls coverage only, not either component's resolution.
     priors, uniform_priors : optional
         Log10 power bounds and the per-bin linear-uniform prior mask.
     foreground_prior_std_mk, foreground_kl_path : optional
@@ -282,6 +287,7 @@ class RunConfig(ModelConfig):
     d_t: float | None = None
     jd_center: float | None = None
     nside: int | None = None
+    footprint_nside: int | None = None
     fov_eor: float = 10.0
     fov_fg: float | None = None
     telescope_latlonalt: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0)

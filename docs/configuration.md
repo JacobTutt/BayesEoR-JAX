@@ -79,6 +79,13 @@ while direct Python configuration retains the setup default `./`.
 
 ## Choosing a HEALPix resolution
 
+`nside` is shared by the foreground and cosmological image grids. For fixed
+coverage across resolution changes, optionally set `footprint_nside` to a
+coarser power-of-two resolution: the time-union field is selected on that grid,
+then every child pixel is modelled at `nside`. For example, `nside: 128` with
+`footprint_nside: 64` refines both models without changing the coarse-pixel sky
+boundary. With `footprint_nside: null` (the default), selection uses `nside`.
+
 When `nside` is omitted, setup uses the longest selected three-dimensional
 baseline and highest selected observing frequency to estimate a shared
 foreground and cosmological image resolution. An explicit `nside` is retained,
