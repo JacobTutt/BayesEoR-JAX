@@ -587,8 +587,10 @@ def build_image_geometry(
         lmn_fg[time_ind_center],
         pixel_area_sr,
     )
+    # Index the time first: mixing an integer, a slice and an index array in one
+    # subscript moves the pixel axis to the front, giving (n_pix, 3).
     fov_l_angle_eor, fov_m_angle_eor = _angular_lm_extent(
-        lmn_fg[time_ind_center, :, eor_fg_shared_axis],
+        lmn_fg[time_ind_center][:, eor_fg_shared_axis],
         pixel_area_sr,
     )
 

@@ -294,9 +294,11 @@ class Beam_Model:
                 freq_array=np.asarray(freqs),
                 reuse_spline=True
             )
-            # UVBeam.interp returns (Naxes_vec, Nspws, Nfeeds or Npols, Nfreqs, Npixels)
-            # We select the first pol/freq axis, recieving values (n_freq, n_pix)
-            out[:, it, :] = beam_vals[0, 0, 0, :, :].real
+            # UVBeam.interp returns (Naxes_vec, Npols, Nfreqs, Npixels), with an
+            # extra Nspws axis before Npols in pyuvdata < 3. One polarisation is
+            # selected on load, so every leading axis has length one.
+            beam_vals = np.asarray(beam_vals)
+            out[:, it, :] = beam_vals.reshape(-1, n_freq, n_pix)[0].real
 
         return jnp.asarray(out)
 
