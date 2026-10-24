@@ -353,7 +353,7 @@ class MarginalisedLikelihood:
         and Jacobian corrections.
         """
         theta = jnp.asarray(theta, dtype=jnp.float64)
-        with self.mesh:
+        with jax.set_mesh(self.mesh):
             return self._log_likelihood_impl(
                 self.t_ninv_t,
                 self.dbar,

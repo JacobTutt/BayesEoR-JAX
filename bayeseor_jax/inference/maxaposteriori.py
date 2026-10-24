@@ -323,7 +323,7 @@ class MaximumAPosteriori:
             theta = self._theta_from_dmps(dmps_arr)
         theta = jnp.asarray(theta, dtype=jnp.float64)
 
-        with self.mesh:
+        with jax.set_mesh(self.mesh):
             map_coeffs, quadratic, phi_i, log_sigma_det, alpha2 = self._map_impl(
                 self.t_ninv_t,
                 self.dbar,

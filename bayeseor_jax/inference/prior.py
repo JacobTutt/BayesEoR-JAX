@@ -155,7 +155,7 @@ def parse_uprior_inds(upriors_str: str, nkbins: int) -> jnp.ndarray:
         uprior_inds = uprior_inds.at[slice(*bounds)].set(True)
     elif "," in upriors_str:
         up_inds = list(map(int, upriors_str.split(",")))
-        uprior_inds = uprior_inds.at[up_inds].set(True)
+        uprior_inds = uprior_inds.at[jnp.asarray(up_inds)].set(True)
     else:
         uprior_inds = uprior_inds.at[int(upriors_str)].set(True)
 
