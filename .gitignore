@@ -31,6 +31,3 @@ env/
 # Others
 *.xlsx
 /Records/
-
-# local migration tests (do not commit)
-T_matrix_old_vs_streamlined.md
