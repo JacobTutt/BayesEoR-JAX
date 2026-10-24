@@ -31,7 +31,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from astropy import units
-from astropy.time import Time
+from astropy.time import Time, TimeDelta
 from astropy.units import Quantity
 from pyuvdata import UVData
 from pyuvdata import __version__ as pyuvdata_version
@@ -251,15 +251,16 @@ def get_vis_data(
         freqs_hz = (float(f0_mhz) + float(df_mhz) * np.arange(int(n_freq), dtype=float)) * 1e6
         if jd_min is not None:
             # Old-pipeline compatible mode: construct times from lower bound.
-            jds = Time(float(jd_min), format="jd") + np.arange(int(n_t), dtype=float) * (
-                float(d_t) / 86400.0
+            jds = Time(float(jd_min), format="jd") + TimeDelta(
+                np.arange(int(n_t), dtype=float) * float(d_t), format="sec"
             )
             jds = jds.jd
         elif jd_center is not None:
             # Centered-window mode around jd_center.
-            jds = Time(float(jd_center), format="jd") + np.arange(
-                -(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2
-            ) * (float(d_t) / 86400.0)
+            offsets = np.arange(-(int(n_t) // 2), int(n_t) // 2 + int(n_t) % 2, dtype=float)
+            jds = Time(float(jd_center), format="jd") + TimeDelta(
+                offsets * float(d_t), format="sec"
+            )
             jds = jds.jd
         else:
             raise ValueError(
@@ -861,23 +862,26 @@ def uvd_to_vector(
     trim_nspws_ax = len(uvd.freq_array.shape) > 1
 
     if calc_noise:
+        if uvd.Ntimes < 2:
+            raise ValueError("Time-difference noise estimation requires at least two integrations.")
         LOGGER.info("Calculating noise estimate from visibilities")
         uvd_noise = uvd.copy()
         for antpair in antpairs:
             # Old BayesEoR estimator: even-odd time differencing per baseline/frequency.
             vis = uvd_noise.get_data(antpair + (pol,), force_copy=True)
+            # Pair each even integration with the following odd one. With an
+            # odd number of integrations, the last even integration has no
+            # partner and is differenced with the preceding odd one instead.
             even_times = vis[::2]
+            n_odd = vis[1::2].shape[0]
             odd_times = np.zeros_like(even_times)
-            odd_times[:-1] = vis[1::2]
-            if uvd.Ntimes % 2 == 1:
+            odd_times[:n_odd] = vis[1::2]
+            if n_odd < even_times.shape[0]:
                 odd_times[-1] = vis[-2]
             eo_diff = even_times - odd_times
             noise = np.zeros_like(vis)
             noise[::2] = eo_diff
-            if uvd.Ntimes % 2 == 1:
-                noise[1::2] = eo_diff[:-1]
-            else:
-                noise[1::2] = eo_diff
+            noise[1::2] = eo_diff[:n_odd]
             blt_inds = uvd_noise.antpair2ind(*antpair)
             if trim_nspws_ax:
                 uvd_noise.data_array[blt_inds, 0, :, 0] = noise

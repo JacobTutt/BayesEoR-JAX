@@ -35,7 +35,7 @@ def generate_gaussian_noise(
     same ``sigma`` and ``random_seed``:
 
     - real part seeded with ``random_seed``
-    - imaginary part seeded with ``random_seed * 123``
+    - imaginary part seeded with ``random_seed * 123`` (123 for a seed of 0)
 
     Parameters
     ----------
@@ -85,12 +85,14 @@ def generate_gaussian_noise(
         # Real and imaginary parts use separate NumPy seeds rather than a 
         # split JAX key.
         std = float(sigma) / np.sqrt(2.0)
-        if random_seed:
+        if random_seed is not None:
             np.random.seed(int(random_seed))
         real_noise = np.random.normal(0.0, std, n_data)
 
-        if random_seed:
-            np.random.seed(int(random_seed) * 123)
+        if random_seed is not None:
+            # seed * 123 matches the original pipeline; seed 0 would reuse the
+            # real-part stream, so it uses 123 instead.
+            np.random.seed(int(random_seed) * 123 or 123)
         imag_noise = np.random.normal(0.0, std, n_data)
         complex_noise = (real_noise + 1j * imag_noise).astype(np.complex128)
         complex_noise_hermitian = complex_noise * (float(sigma) / complex_noise.std())
