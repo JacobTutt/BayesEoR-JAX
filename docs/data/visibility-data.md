@@ -40,7 +40,10 @@ handled in the same way.
     `pi_norm`
     :   The normalisation in $\mathrm{pI} = N(\mathrm{XX} + \mathrm{YY})$.
 
-        - **Default:** 1, not one half.
+        - **Default:** 1. This assumes pyuvsim's convention, where XX and YY
+          each hold half of Stokes I, so XX + YY = I.
+        - **Other conventions:** data where an unpolarised source gives
+          XX = I need `pi_norm: 0.5`.
 
     `pol`
     :   The polarisation to keep when `form_pi: false`.
@@ -128,7 +131,8 @@ applies is used:
     Gaussian noise realisation is added.
 
     - **`sigma`:** the complex noise RMS per visibility before redundancy
-      averaging, in mK sr. Each baseline's noise is scaled by $1/\sqrt{R}$, and
+      averaging, in mK sr. With `form_pi: true` it refers to the formed pI
+      vector, not to XX or YY. Each baseline's noise is scaled by $1/\sqrt{R}$, and
       the reversed copies receive the conjugate noise.
     - **`noise_seed`:** the random seed. Defaults to `742123`.
     - **Note:** `sigma: 0` adds no noise.
