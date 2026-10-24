@@ -1566,7 +1566,10 @@ optional <code>casacore</code> dependency. The data should be:</p>
 <dd>
 <p>The normalisation in <span class="arithmatex">\(\mathrm{pI} = N(\mathrm{XX} + \mathrm{YY})\)</span>.</p>
 <ul>
-<li><strong>Default:</strong> 1, not one half.</li>
+<li><strong>Default:</strong> 1. This assumes pyuvsim's convention, where XX and YY
+  each hold half of Stokes I, so XX + YY = I.</li>
+<li><strong>Other conventions:</strong> data where an unpolarised source gives
+  XX = I need <code>pi_norm: 0.5</code>.</li>
 </ul>
 </dd>
 <dt><code>pol</code></dt>
@@ -1658,7 +1661,8 @@ odd integrations.</p>
 Gaussian noise realisation is added.</p>
 <ul>
 <li><strong><code>sigma</code>:</strong> the complex noise RMS per visibility before redundancy
-  averaging, in mK sr. Each baseline's noise is scaled by <span class="arithmatex">\(1/\sqrt{R}\)</span>, and
+  averaging, in mK sr. With <code>form_pi: true</code> it refers to the formed pI
+  vector, not to XX or YY. Each baseline's noise is scaled by <span class="arithmatex">\(1/\sqrt{R}\)</span>, and
   the reversed copies receive the conjugate noise.</li>
 <li><strong><code>noise_seed</code>:</strong> the random seed. Defaults to <code>742123</code>.</li>
 <li><strong>Note:</strong> <code>sigma: 0</code> adds no noise.</li>
