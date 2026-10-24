@@ -38,3 +38,18 @@ include = ["bayeseor_jax*"]
 
 [tool.setuptools.package-data]
 "bayeseor_jax.analyze" = ["*.mplstyle"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+markers = [
+  "slow: takes more than a few seconds",
+  "multinest: requires PyMultiNest and the native MultiNest library",
+  "gpu: requires two or more GPUs",
+]
+filterwarnings = [
+  # Deprecations inside third-party dependencies, not in BayesEoR-JAX.
+  "ignore::DeprecationWarning:tensorflow_probability.*",
+  "ignore:The default value for `return_basis_vector`:DeprecationWarning",
+  "ignore:The include_conjugates parameter is not set:DeprecationWarning",
+]
