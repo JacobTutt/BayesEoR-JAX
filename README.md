@@ -21,20 +21,27 @@ GPU linear algebra through [JAXMg](https://flatironinstitute.github.io/jaxmg/lat
 
 ## Documentation
 
-The full documentation is at
-**[jacobtutt.github.io/BayesEoR-JAX](https://jacobtutt.github.io/BayesEoR-JAX/)**:
+Documentation is kept within this private repository and is not publicly hosted.
+To view it locally, run from the repository root:
 
-- **[Home](https://jacobtutt.github.io/BayesEoR-JAX/dev/):** how BayesEoR works, installation, getting started
+```bash
+python -m pip install -e ".[docs]"
+python -m mkdocs serve --dev-addr 127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:8000`, or browse the source pages below:
+
+- **[Home](docs/index.md):** how BayesEoR works, installation, getting started
   and citations.
-- **[Data](https://jacobtutt.github.io/BayesEoR-JAX/dev/data/):** interferometric visibilities, and the instrument
+- **[Data](docs/data/index.md):** interferometric visibilities, and the instrument
   and observation that describe them.
-- **[Model](https://jacobtutt.github.io/BayesEoR-JAX/dev/model/):** the EoR and foreground forward models, and the
+- **[Model](docs/model/index.md):** the EoR and foreground forward models, and the
   KL reduced basis.
-- **[Inference](https://jacobtutt.github.io/BayesEoR-JAX/dev/inference/):** the power-spectrum prior, analytical
+- **[Inference](docs/inference/index.md):** the power-spectrum prior, analytical
   marginalisation, nested sampling and posterior analysis.
-- **[Examples](https://jacobtutt.github.io/BayesEoR-JAX/dev/examples/):** two worked analyses, 21-cm only and
+- **[Examples](docs/examples/index.md):** two worked analyses, 21-cm only and
   21-cm with foregrounds.
-- **[API](https://jacobtutt.github.io/BayesEoR-JAX/dev/api/):** the Python reference, generated from the source.
+- **[API](docs/api/index.md):** the Python reference, generated from the source.
 
 ## Installation
 
@@ -66,7 +73,7 @@ conda activate bayeseor-hpc
 Both environments use Python 3.12 or newer and JAX 0.11.1 or newer. On GPU clusters,
 the dense linear algebra is distributed across devices with JAXMg, which is built on
 NVIDIA's cuSOLVERMp, so the GPU environment is restricted to NVIDIA systems. See the
-[installation guide](https://jacobtutt.github.io/BayesEoR-JAX/dev/installation/) for details.
+[installation guide](docs/installation.md) for details.
 
 ## Getting started
 
@@ -86,10 +93,10 @@ Without `--sample`, each example stops after setup, which is a quick check that
 the installation works. Each writes its power-spectrum and posterior figure to its
 `plots/` folder, for example `examples/eor/plots/power_spectrum_and_posteriors.png`,
 and its full outputs under `outputs/`. See the
-[examples](https://jacobtutt.github.io/BayesEoR-JAX/dev/examples/) for a walkthrough of each.
+[examples](docs/examples/index.md) for a walkthrough of each.
 
 ## Citing BayesEoR
 
 If you use BayesEoR-JAX, please cite the papers relevant to your analysis,
-together with the software paper. See [Citing BayesEoR](https://jacobtutt.github.io/BayesEoR-JAX/dev/citing/) for each
+together with the software paper. See [Citing BayesEoR](docs/citing.md) for each
 reference and its BibTeX.
