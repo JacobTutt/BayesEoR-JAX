@@ -7,6 +7,7 @@ name = "bayeseor-jax"
 version = "0.1.0"
 description = "Bayesian 21-cm power-spectrum estimation from interferometric visibilities, in JAX."
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.12"
 dependencies = [
   "numpy>=2.0,<2.4",
