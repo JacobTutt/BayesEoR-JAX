@@ -9,6 +9,8 @@ space, and represents that covariance in an orthogonal basis ordered by how far
 each mode rises above the noise. Modes the data cannot distinguish from noise are
 then discarded.
 
+[![Original physical foreground mapping and reduced latent mapping preserving the noise-relevant prior-predictive visibility covariance.](../assets/diagrams/latent-compression.png)](../assets/diagrams/latent-compression.png)
+
 For a component $\boldsymbol m = \mathbf T\boldsymbol x$ with prior
 $\boldsymbol x \sim \mathcal N(\boldsymbol 0, \mathbf\Sigma)$, the compression
 proceeds as
