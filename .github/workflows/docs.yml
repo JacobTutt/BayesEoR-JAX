@@ -17,6 +17,11 @@ on:
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the dev documentation to GitHub Pages
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -31,3 +36,43 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -e ".[docs]"
       - run: python -m mkdocs build --strict
+
+  publish:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: documentation-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[docs]"
+      - uses: actions/configure-pages@v5
+      - name: Publish versioned documentation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mike deploy --push --allow-empty dev
+          mike set-default --push dev
+      - name: Prepare the versioned site
+        run: |
+          mkdir -p "$RUNNER_TEMP/pages"
+          git archive gh-pages | tar -x -C "$RUNNER_TEMP/pages"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/pages
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

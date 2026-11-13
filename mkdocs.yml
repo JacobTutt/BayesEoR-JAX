@@ -1,5 +1,6 @@
 site_name: BayesEoR
 site_description: Physically motivated Bayesian inference of the cosmological 21-cm power spectrum.
+site_url: https://jacobtutt.github.io/BayesEoR-JAX/
 repo_url: https://github.com/JacobTutt/BayesEoR-JAX
 repo_name: JacobTutt/BayesEoR-JAX
 edit_uri: edit/main/docs/
